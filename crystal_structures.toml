@@ -1,0 +1,84 @@
+# Crystal structure database for cxr_feranchuk_spence.py
+#
+# Each table is one crystal:
+#   system        : "cubic" | "hexagonal" | "tetragonal" | "orthorhombic" | "general"
+#   a, b, c       : lattice constants [Angstrom] (which are required depends on system)
+#   alpha/beta/gamma : cell angles in DEGREES (system = "general" only)
+#   basis         : atoms in the conventional cell as { element, pos } with
+#                   pos = fractional coordinates [x/a, y/b, z/c]
+#
+# The cell volume is computed from the lattice by the loader; it is not stored here.
+
+[diamond]
+system = "cubic"
+a = 3.5668
+basis = [
+    { element = "C", pos = [0.00, 0.00, 0.00] },
+    { element = "C", pos = [0.25, 0.25, 0.25] },
+    { element = "C", pos = [0.00, 0.50, 0.50] },
+    { element = "C", pos = [0.25, 0.75, 0.75] },
+    { element = "C", pos = [0.50, 0.00, 0.50] },
+    { element = "C", pos = [0.75, 0.25, 0.75] },
+    { element = "C", pos = [0.50, 0.50, 0.00] },
+    { element = "C", pos = [0.75, 0.75, 0.25] },
+]
+
+[silicon]
+system = "cubic"
+a = 5.4309
+basis = [
+    { element = "Si", pos = [0.00, 0.00, 0.00] },
+    { element = "Si", pos = [0.25, 0.25, 0.25] },
+    { element = "Si", pos = [0.00, 0.50, 0.50] },
+    { element = "Si", pos = [0.25, 0.75, 0.75] },
+    { element = "Si", pos = [0.50, 0.00, 0.50] },
+    { element = "Si", pos = [0.75, 0.25, 0.75] },
+    { element = "Si", pos = [0.50, 0.50, 0.00] },
+    { element = "Si", pos = [0.75, 0.75, 0.25] },
+]
+
+# Rock salt: 4 formula units per conventional cell.
+[lif]
+system = "cubic"
+a = 4.0276
+basis = [
+    { element = "Li", pos = [0.0, 0.0, 0.0] },
+    { element = "Li", pos = [0.0, 0.5, 0.5] },
+    { element = "Li", pos = [0.5, 0.0, 0.5] },
+    { element = "Li", pos = [0.5, 0.5, 0.0] },
+    { element = "F",  pos = [0.5, 0.5, 0.5] },
+    { element = "F",  pos = [0.5, 0.0, 0.0] },
+    { element = "F",  pos = [0.0, 0.5, 0.0] },
+    { element = "F",  pos = [0.0, 0.0, 0.5] },
+]
+
+# AB-stacked (Bernal) graphite, 4 atoms per cell.
+[graphite]
+system = "hexagonal"
+a = 2.461
+c = 6.711
+basis = [
+    { element = "C", pos = [0.000000, 0.000000, 0.0] },
+    { element = "C", pos = [0.3333333333333333, 0.6666666666666667, 0.0] },
+    { element = "C", pos = [0.000000, 0.000000, 0.5] },
+    { element = "C", pos = [0.6666666666666667, 0.3333333333333333, 0.5] },
+]
+
+# 2H-MoSe2 (P6_3/mmc): Mo on Wyckoff 2c (1/3,2/3,1/4) -- symmetry-fixed; Se on
+# 4f with the single free parameter z = 0.621 (standard setting, paired with
+# the Mo at z = 3/4), i.e. Se offset delta = |0.75 - 0.621| = 0.129 from its
+# Mo plane. Consistent with the refined Mo-Se bond length 2.53 A
+# (Materials Project mp-1634): sqrt((a/sqrt(3))^2 + (0.129 c)^2) = 2.53 A.
+# (The previous basis used delta = 0.121 from a misread of the 4f convention.)
+[mose2]
+system = "hexagonal"
+a = 3.289
+c = 12.927
+basis = [
+    { element = "Mo", pos = [0.3333333333333333, 0.6666666666666667, 0.25] },
+    { element = "Se", pos = [0.6666666666666667, 0.3333333333333333, 0.379] },
+    { element = "Se", pos = [0.6666666666666667, 0.3333333333333333, 0.121] },
+    { element = "Mo", pos = [0.6666666666666667, 0.3333333333333333, 0.75] },
+    { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.879] },
+    { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.621] },
+]
