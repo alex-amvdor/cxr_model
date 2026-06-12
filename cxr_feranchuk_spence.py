@@ -421,14 +421,21 @@ def amplitudes_PXR_CBS_both(crystal, hkl, photon_E_eV, beta,
         bracket_pxr = (v0_vec @ kg_vec) * (g_vec @ e) - omega**2 * (v0_vec @ e)
         A_PXR = chi / detuning * bracket_pxr
 
-        # --- A_CBS, Eq. (14): -(eU_g/mV)/(g.v) [g.e + (v.e)(k.g)/(v.g)] ---
+        # --- A_CBS with relativistic corrections (Zhai SI Eq. 6): ---
+        #   A_CBS = -(e U_g)/(gamma m V (g.v)) [{g;e} + (v.e){k;g}/(v.g)]
+        # braced product {a;b} = a.b - (a.v)(b.v) (v in units of c): the
+        # electron's longitudinal response to the lattice force is gamma^2-
+        # suppressed. Reduces exactly to Feranchuk Eq. (14) as beta -> 0.
         if abs(g_dot_v0) < 1e-12:
             # g perpendicular to v: formal 1/(g.v) divergence, but the
             # resonance energy -> 0 there, so the line is unobservable anyway
             A_CBS = 0.0 + 0.0j
         else:
-            bracket_cbs = (g_vec @ e) + (v0_vec @ e) * (k_vec @ g_vec) / g_dot_v0
-            A_CBS = -eUg_over_m / g_dot_v0 * bracket_cbs
+            gamma = 1.0 / np.sqrt(1.0 - v0**2)
+            braced_ge = (g_vec @ e) - g_dot_v0 * (v0_vec @ e)
+            braced_kg = (k_vec @ g_vec) - (k_vec @ v0_vec) * g_dot_v0
+            bracket_cbs = braced_ge + (v0_vec @ e) * braced_kg / g_dot_v0
+            A_CBS = -eUg_over_m / (gamma * g_dot_v0) * bracket_cbs
         amps[pol] = (A_PXR, A_CBS)
 
     return amps, omega, g
@@ -518,6 +525,9 @@ def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
     g_dot_v0 = g_vec @ v0_vec
     safe_g_dot_v0 = np.where(np.abs(g_dot_v0) < 1e-12, 1.0, g_dot_v0)
 
+    gamma = 1.0 / np.sqrt(1.0 - beta**2)
+    k_dot_v0 = k_vec @ v0_vec                  # (n,) since v0_vec is constant
+
     amps = {}
     for pol, e in (("sigma", e_sigma), ("pi", e_pi)):
         v0_dot_e = e @ v0_vec
@@ -526,10 +536,13 @@ def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
             * g_dot_e - omega**2 * v0_dot_e
         A_PXR = chi / detuning * bracket_pxr
 
-        # Eq. (14): [g.e + (v0.e)(k.g)/(v0.g)]
-        bracket_cbs = g_dot_e + v0_dot_e * np.einsum("ij,ij->i", k_vec, g_vec) / safe_g_dot_v0
+        # relativistic A_CBS (Zhai SI Eq. 6): braced {a;b} = a.b - (a.v)(b.v),
+        # 1/gamma prefactor; reduces to Feranchuk Eq. (14) at beta -> 0
+        braced_ge = g_dot_e - g_dot_v0 * v0_dot_e
+        braced_kg = np.einsum("ij,ij->i", k_vec, g_vec) - k_dot_v0 * g_dot_v0
+        bracket_cbs = braced_ge + v0_dot_e * braced_kg / safe_g_dot_v0
         A_CBS = np.where(np.abs(g_dot_v0) < 1e-12, 0.0 + 0.0j,
-                         -eUg_over_m / safe_g_dot_v0 * bracket_cbs)
+                         -eUg_over_m / (gamma * safe_g_dot_v0) * bracket_cbs)
         amps[pol] = (A_PXR, A_CBS)
 
     return amps, omega, g
@@ -669,6 +682,9 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
     kg_dot_v0 = np.einsum("ij,ij->i", kg_vec, np.broadcast_to(v0_vec, (n_lines, 3)))
     k_dot_g = np.einsum("ij,ij->i", k_vec, g_vec)
 
+    gamma = 1.0 / np.sqrt(1.0 - beta**2)
+    k_dot_v0 = np.einsum("ij,ij->i", k_vec, np.broadcast_to(v0_vec, (n_lines, 3)))
+
     A2 = np.zeros(n_lines)
     A2_pxr = np.zeros(n_lines)
     A2_cbs = np.zeros(n_lines)
@@ -676,7 +692,12 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
         v0_dot_e = e @ v0_vec
         g_dot_e = np.einsum("ij,ij->i", g_vec, e)
         A_PXR = chi / detuning * (kg_dot_v0 * g_dot_e - omega**2 * v0_dot_e)
-        A_CBS = -eUg_over_m / g_dot_v0 * (g_dot_e + v0_dot_e * k_dot_g / g_dot_v0)
+        # relativistic A_CBS (Zhai SI Eq. 6): {a;b} = a.b - (a.v)(b.v),
+        # 1/gamma prefactor; reduces to Feranchuk Eq. (14) at beta -> 0
+        braced_ge = g_dot_e - g_dot_v0 * v0_dot_e
+        braced_kg = k_dot_g - k_dot_v0 * g_dot_v0
+        A_CBS = (-eUg_over_m / (gamma * g_dot_v0)
+                 * (braced_ge + v0_dot_e * braced_kg / g_dot_v0))
         A2 += np.abs(A_PXR + A_CBS) ** 2
         A2_pxr += np.abs(A_PXR) ** 2
         A2_cbs += np.abs(A_CBS) ** 2
@@ -745,6 +766,64 @@ def flux_per_second(crystal, hkl, photon_E_eV, theta_B_normal, beta,
         crystal, hkl, photon_E_eV, theta_B_normal, beta,
         L_z_ang, L_abs_ang, dOmega_sr, polarization, B_ang2, use_henke,
         geometry, theta_obs)
+
+
+def dominant_reflections(crystal, n_families=4, E_ref_eV=1000.0, B_ang2=0.0,
+                         use_henke=False, g_max_invang=8.0):
+    """
+    Automatically select the strongest reflection FAMILIES of a crystal,
+    Zhai-style (their Table 5 keeps the four planes of largest |chi_g| per
+    crystal; everything weaker contributes < ~30%).
+
+    Enumerates all reciprocal vectors with |g| <= g_max_invang, ranks by
+        metric = |S(g)| e^{-W} / g^2
+    which is proportional to |chi_g| evaluated at each reflection's OWN line
+    energy (omega_res scales with g, and chi ~ S/omega^2). Symmetry-
+    equivalent members are grouped by identical (|g|, metric) -- no explicit
+    space-group code needed -- and ALL members of the top n_families are
+    returned as a sorted list of (h, k, l) tuples (including Friedel mates).
+
+    NOTE: this ranks by the crystal STRUCTURE only. Texture constraints are
+    yours to impose -- e.g. HOPG must be restricted to (00l) by hand, since
+    its in-plane reflections are incoherent across fiber-textured grains.
+    """
+    info = CRYSTALS[crystal]
+    B = _reciprocal_basis(info["lattice"])
+    a_vecs = _direct_lattice_vectors(info["lattice"])
+
+    # exact per-axis index bounds: |h_i| <= g_max |a_i| / 2 pi
+    nmax = [int(np.floor(g_max_invang * np.linalg.norm(a) / (2.0 * np.pi)))
+            for a in a_vecs]
+    grids = np.meshgrid(*(np.arange(-n, n + 1) for n in nmax), indexing="ij")
+    hkl = np.column_stack([G.ravel() for G in grids]).astype(float)
+    g_vec = hkl @ B
+    g_mag = np.linalg.norm(g_vec, axis=1)
+    keep = (g_mag > 1e-9) & (g_mag <= g_max_invang)
+    hkl, g_mag = hkl[keep], g_mag[keep]
+
+    # |S(g)| with the per-element form-factor policy, vectorized over hkl
+    dwf = debye_waller(g_mag, B_ang2)
+    F_el = {}
+    for el in {el for el, _ in info["basis"]}:
+        F_el[el] = _atom_F(el, g_mag, E_ref_eV, use_henke)
+    S = np.zeros(g_mag.shape, dtype=complex)
+    for el, R_frac in info["basis"]:
+        S += F_el[el] * np.exp(2j * np.pi * (hkl @ R_frac)) * dwf
+    metric = np.abs(S) / g_mag**2
+
+    # group symmetry mates: identical (|g|, metric) to rounding
+    fams = {}
+    for i in range(hkl.shape[0]):
+        key = (round(float(g_mag[i]), 6), round(float(metric[i]), 9))
+        fams.setdefault(key, []).append(tuple(int(x) for x in hkl[i]))
+    ranked = sorted(fams.items(), key=lambda kv: -kv[0][1])
+
+    out = []
+    for (_, m), members in ranked[:n_families]:
+        if m < 1e-9 * ranked[0][0][1]:
+            break                      # forbidden/negligible families
+        out.extend(sorted(members))
+    return out
 
 
 def bremsstrahlung_background(photon_E_eV, Z, number_density_per_ang3,

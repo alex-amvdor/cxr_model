@@ -419,7 +419,7 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
                 B_ang2=0.8, use_henke=True,
                 absorber_element="C", chunk=40000, n_hat=None,
                 composition=None, beam_uvw=None, azimuth_rad=0.0,
-                sinc_cutoff=None):
+                sinc_cutoff=None, components=False):
     """
     Per-electron CXR spectrum d2N/dE dOmega [photons / eV / sr / electron]
     on E_grid_eV, summed incoherently over the trajectory segments and the
@@ -482,6 +482,8 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         n_hat = n_hat / np.linalg.norm(n_hat)
     E_grid = np.asarray(E_grid_eV, dtype=float)
     spec = np.zeros(E_grid.size)
+    spec_pxr = np.zeros(E_grid.size)
+    spec_cbs = np.zeros(E_grid.size)
 
     beta_all = beta_from_keV(segments["E_keV"])       # speed/c per segment
     v_all = beta_all[:, None] * segments["v_hat"]     # velocity vectors (c=1)
@@ -532,15 +534,26 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         detuning = kg2 - om**2            # PXR denominator (~g^2, never small)
         k_dot_g = k_vec @ g_vec
 
-        # -- 5. Eq. (13)/(14) amplitudes with the segment's actual velocity ------
+        # -- 5. Eq. (13) + relativistic Eq. (14) amplitudes, per segment ----------
+        # CBS braced product {a;b} = a.b - (a.v)(b.v) and 1/gamma prefactor
+        # (Zhai SI Eq. 6); v here is the SEGMENT velocity, so k.v = omega(1-dnm)
+        gamma = 1.0 / np.sqrt(1.0 - beta**2)
+        k_dot_v = om * (1.0 - dnm)
         A2 = np.zeros(idx.size)
+        A2_pxr = np.zeros(idx.size)
+        A2_cbs = np.zeros(idx.size)
         for e in (e_s, e_p):              # sum |A|^2 over both polarizations
             g_dot_e = g_vec @ e           # scalar (e fixed per reflection)
             v_dot_e = v @ e
             v_dot_kg = np.einsum("ij,ij->i", v, kg_vec)
             A_PXR = chi / detuning * (v_dot_kg * g_dot_e - om**2 * v_dot_e)
-            A_CBS = -eUg_over_m / vdg * (g_dot_e + v_dot_e * k_dot_g / vdg)
+            braced_ge = g_dot_e - vdg * v_dot_e
+            braced_kg = k_dot_g - k_dot_v * vdg
+            A_CBS = (-eUg_over_m / (gamma * vdg)
+                     * (braced_ge + v_dot_e * braced_kg / vdg))
             A2 += np.abs(A_PXR + A_CBS) ** 2
+            A2_pxr += np.abs(A_PXR) ** 2
+            A2_cbs += np.abs(A_CBS) ** 2
 
         # -- 6. Beer-Lambert escape factor from the segment midpoint -------------
         # straight path along n_hat to whichever slab face the photon exits
@@ -556,8 +569,14 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         #                  * sinc^2[(1 - v.n)(omega - omega_res) t_L / 2] * T_abs
         # weight = everything except the sinc^2; a_width converts (E - E_res)
         # to the sinc argument: P t_L = a_width * (E - E_res).
-        weight = (ALPHA_FS * om / (4.0 * np.pi**2 * HBARC_EV_ANG)
-                  * A2 * t_L**2 * T_abs)
+        pref = (ALPHA_FS * om / (4.0 * np.pi**2 * HBARC_EV_ANG)
+                * t_L**2 * T_abs)
+        weight = pref * A2
+        # (weights, target-spectrum) pairs accumulated below; the coherent
+        # total is NOT pxr + cbs -- the difference is the interference term
+        targets = [(weight, spec)]
+        if components:
+            targets += [(pref * A2_pxr, spec_pxr), (pref * A2_cbs, spec_cbs)]
         a_width = dnm * t_L / (2.0 * HBARC_EV_ANG)
         good = np.isfinite(weight) & (weight > 0)     # NaN couplings -> drop
 
@@ -571,7 +590,9 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
                     continue
                 x = (a_width[sl][m, None] * (E_grid[None, :] - E_r[sl][m, None])
                      / np.pi)
-                spec += weight[sl][m] @ np.sinc(x) ** 2
+                S = np.sinc(x) ** 2
+                for w, tgt in targets:
+                    tgt += w[sl][m] @ S
         else:
             # windowed: resonance-sorted blocks hit only the grid slice where
             # their truncated lineshapes live
@@ -592,8 +613,14 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
                     continue
                 x = (a_width[sel][:, None]
                      * (E_grid[None, i0:i1] - E_r[sel][:, None]) / np.pi)
-                spec[i0:i1] += weight[sel] @ np.sinc(x) ** 2
+                S = np.sinc(x) ** 2
+                for w, tgt in targets:
+                    tgt[i0:i1] += w[sel] @ S
 
+    if components:
+        # total, |A_PXR|^2-only, |A_CBS|^2-only: total - pxr - cbs is the
+        # coherent interference contribution (positive here -- delta_g > 0)
+        return spec / Ne, spec_pxr / Ne, spec_cbs / Ne
     return spec / Ne                                   # per electron
 
 
@@ -639,9 +666,11 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
     return np.where(ok, dsig, 0.0)
 
 
-def mc_brem_spectrum(segments, E_grid_eV, element="C", n_atoms_per_ang3=None,
-                     theta_obs_rad=np.deg2rad(119.0), n_hat=None, chunk=20000,
-                     composition=None):
+def mc_brem_spectrum(
+    segments, E_grid_eV, element="C", n_atoms_per_ang3=None,
+    theta_obs_rad=np.deg2rad(119.0), n_hat=None, chunk=20000,
+    composition=None
+):
     """
     Incoherent bremsstrahlung background d2N/dE dOmega
     [photons / eV / sr / electron] from the same Monte Carlo segments as
@@ -702,10 +731,10 @@ def run_case(case):
     processes on Windows (notebook-defined functions cannot).
 
     case: a plain dict --
-      required: crystal, composition, hkl_list, B_ang2, E0_keV, thickness_ang,
+        required: crystal, composition, hkl_list, B_ang2, E0_keV, thickness_ang,
                 E_grid = (start_eV, stop_eV, step_eV), theta_obs_rad, Ne,
                 Ne_brem, seed
-      optional: tilt_deg (0), tilt_azim_deg (0), beam_uvw (None),
+        optional: tilt_deg (0), tilt_azim_deg (0), beam_uvw (None),
                 azimuth_rad (0), E_cut_lines_keV (5), E_cut_brem_keV (1),
                 sinc_cutoff (None = exact lineshapes; windowing buys nothing
                 for bulk targets, where scattering Doppler-spreads the lines
@@ -714,12 +743,14 @@ def run_case(case):
                 coarse grid and interpolated onto E_grid)
 
     Returns dict(E_grid, spec, brem [both photons/eV/sr/electron], eta,
-                 n_segments) plus the case's crystal/E0 for bookkeeping.
+                n_segments) plus the case's crystal/E0 for bookkeeping.
     """
     E_grid = np.arange(*case["E_grid"])
-    beam, n_hat = tilted_geometry(case["theta_obs_rad"],
-                                  np.deg2rad(case.get("tilt_deg", 0.0)),
-                                  np.deg2rad(case.get("tilt_azim_deg", 0.0)))
+    beam, n_hat = tilted_geometry(
+        case["theta_obs_rad"],
+        np.deg2rad(case.get("tilt_deg", 0.0)),
+        np.deg2rad(case.get("tilt_azim_deg", 0.0))
+    )
 
     segs = simulate_trajectories(
         case["E0_keV"], case["Ne"], case["thickness_ang"],
@@ -749,20 +780,135 @@ def run_case(case):
                 crystal=case["crystal"], E0_keV=case["E0_keV"])
 
 
-def run_cases(cases, max_workers=None):
+def _worker_init():
     """
-    Run a list of case dicts through run_case, in parallel processes
-    (max_workers=None lets the pool pick; max_workers=0 runs serially in
-    this process, useful for debugging). Results come back in input order.
+    Runs once in each worker process: drop to BELOW_NORMAL priority so the
+    desktop stays responsive. Workers still use idle CPU at full speed; the
+    OS just schedules interactive applications first.
     """
+    try:
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # typed signatures matter: the untyped pseudo-handle (-1) gets
+        # truncated on 64-bit and the call silently fails
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.SetPriorityClass.argtypes = (ctypes.c_void_p, ctypes.c_uint32)
+        k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000)  # BELOW_NORMAL
+    except Exception:
+        try:
+            os.nice(10)                       # POSIX fallback
+        except Exception:
+            pass
+
+
+def run_cases(cases, max_workers=None, progress=True):
+    """
+    Run a list of case dicts through run_case in parallel worker processes.
+    Results come back in input order.
+
+    max_workers: None -> ~3/4 of the logical CPUs (capped at len(cases)),
+        leaving headroom for the desktop; an integer pins the worker count;
+        0 runs serially in this process (debugging).
+    progress: show a tqdm progress bar over COMPLETED cases (per-case
+        granularity -- individual cases can still take minutes).
+
+    Two protections against "machine crawls during a scan":
+      * workers run at BELOW_NORMAL process priority (_worker_init);
+      * workers get single-threaded BLAS (OMP/OPENBLAS/MKL_NUM_THREADS=1,
+        inherited via the environment) -- N workers x M BLAS threads is the
+        classic oversubscription freeze. The parent's already-loaded numpy
+        is unaffected.
+    """
+    def _maybe_bar(iterable):
+        if not progress:
+            return iterable
+        try:
+            from tqdm.auto import tqdm
+            return tqdm(iterable, total=len(cases), desc="cases")
+        except ImportError:
+            return iterable
+
     if max_workers == 0:
-        return [run_case(c) for c in cases]
-    from concurrent.futures import ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        return list(ex.map(run_case, cases))
+        return list(_maybe_bar(map(run_case, cases)))
+
+    ncpu = os.process_cpu_count() or os.cpu_count() or 8
+    if max_workers is None:
+        max_workers = max(1, min(len(cases), ncpu * 3 // 4))
+
+    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[var] = "1"
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    results = [None] * len(cases)
+    with ProcessPoolExecutor(max_workers=max_workers,
+                             initializer=_worker_init) as ex:
+        futures = {ex.submit(run_case, c): i for i, c in enumerate(cases)}
+        for fut in _maybe_bar(as_completed(futures)):
+            results[futures[fut]] = fut.result()
+    return results
+
+
+def load_external_brem(path, E_grid_eV):
+    """
+    Interpolate an EXTERNAL bremsstrahlung background onto the spectral grid
+    -- e.g. a NIST DTSA-II simulation, which is what Zhai et al. use both
+    for their simulated backgrounds (refs 96-100) and, with a PIXE-style
+    numerical fit, for their experimental subtraction (SI S3).
+
+    File format: two columns (energy [eV], intensity), whitespace- or
+    comma-separated; '#' comment lines and non-numeric headers are skipped.
+    The intensity must already be in DETECTED units matching your plots
+    (e.g. Phs/eV/s/nA: from a DTSA-II counts export, divide counts/channel
+    by channel width [eV] x live time [s] x beam current [nA]). It is
+    treated as an as-detected spectrum: window efficiency and detector
+    resolution are NOT re-applied. Energies outside the file's range
+    interpolate to zero.
+    """
+    rows = []
+    with open(path) as f:
+        for line in f:
+            parts = line.strip().replace(",", " ").split()
+            if len(parts) < 2 or parts[0].startswith(("#", "//")):
+                continue
+            try:
+                rows.append((float(parts[0]), float(parts[1])))
+            except ValueError:
+                continue                      # header / text line
+    if not rows:
+        raise ValueError(f"no numeric (E, intensity) rows found in {path}")
+    arr = np.array(sorted(rows))
+    return np.interp(np.asarray(E_grid_eV, dtype=float), arr[:, 0], arr[:, 1],
+                     left=0.0, right=0.0)
 
 
 # ---- detector model (SI S3/S4) -----------------------------------------------
+def detector_efficiency(E_eV, polymer_nm=300.0, al_nm=40.0, grid_open=0.78):
+    """
+    Soft X-ray collection efficiency of a polymer-window SDD (the dominant
+    loss below ~2 keV; the Si diode itself is ~fully absorbing there):
+
+        QE(E) = grid_open * T_polymer(E) * T_Al(E)
+
+    computed from Henke f2 attenuation for a polyimide film (C22 H10 N2 O5,
+    rho = 1.42 g/cm^3) of thickness polymer_nm, an aluminum light-blocking
+    coat of al_nm, and the etched-Si support grid (open-area fraction
+    grid_open; the grid bars are opaque at these energies). Defaults model a
+    Moxtek AP3.3-class window -- the actual Oxford UltimMax window is
+    proprietary, so treat the parameters as tunable. Carries the C, N, O
+    edge structure (e.g. the deep notch just above the O-K edge at 532 eV).
+    """
+    E = np.asarray(E_eV, dtype=float)
+    # polyimide C22 H10 N2 O5: formula units per Ang^3 at rho = 1.42 g/cm^3
+    n_f = 1.42 / 382.31 * 0.602214076
+    mu_poly = sum(count * _mu_total_inv_ang([(el, n_f)], E)
+                  for el, count in (("C", 22), ("H", 10), ("N", 2), ("O", 5)))
+    n_al = 2.70 / 26.982 * 0.602214076
+    mu_al = _mu_total_inv_ang([("Al", n_al)], E)
+    return grid_open * np.exp(-mu_poly * polymer_nm * 10.0
+                              - mu_al * al_nm * 10.0)
+
+
 def eds_fwhm_eV(E_eV):
     """Oxford UltimMax 170 resolution fit, SI Eq. (16)."""
     return np.sqrt(2.52 * E_eV + 988.0)
@@ -775,11 +921,17 @@ def aperture_fwhm_eV(E_eV, beta, theta_obs_rad, dtheta_obs_rad):
 
 
 def convolve_detector(E_grid_eV, spec, fwhm_eV):
-    """Convolve spectrum with a unit-area Gaussian of given FWHM [eV]."""
+    """
+    Convolve a spectrum with a unit-area Gaussian of the given FWHM [eV].
+    Output always matches the input length for ANY fwhm (np.convolve with
+    mode="same" returned an OVERSIZED array whenever the kernel outgrew the
+    spectrum -- large FWHM on a short grid; truncating the kernel instead
+    distorts the lineshape). Edges are zero-padded: counts blurred past the
+    grid ends are lost, consistent with a detector band edge. Requires a
+    uniform energy grid.
+    """
+    from scipy.ndimage import gaussian_filter1d
     dE = E_grid_eV[1] - E_grid_eV[0]
-    sigma = fwhm_eV / (2.0 * np.sqrt(2.0 * np.log(2.0)))
-    half = int(np.ceil(4.0 * sigma / dE))
-    x = np.arange(-half, half + 1) * dE
-    kern = np.exp(-0.5 * (x / sigma) ** 2)
-    kern /= kern.sum()
-    return np.convolve(spec, kern, mode="same")
+    sigma_bins = fwhm_eV / (2.0 * np.sqrt(2.0 * np.log(2.0))) / dE
+    return gaussian_filter1d(np.asarray(spec, dtype=float), sigma_bins,
+                             mode="constant", cval=0.0)

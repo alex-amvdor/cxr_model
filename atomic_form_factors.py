@@ -27,6 +27,9 @@ SCATTERING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 Z_TABLE = {
     "C": 6, "Li": 3, "F": 9, "Si": 14, "Ge": 32,
     "Mo": 42, "Se": 34,
+    # detector-window / light elements (Henke data only -- no Cromer-Mann
+    # coefficients; used for absorption, not structure factors)
+    "H": 1, "N": 7, "O": 8, "Al": 13,
 }
 
 # Cromer-Mann coefficients (a1,b1,a2,b2,a3,b3,a4,b4,c)
