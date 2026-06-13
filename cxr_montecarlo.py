@@ -801,7 +801,7 @@ def _worker_init():
             pass
 
 
-def run_cases(cases, max_workers=None, progress=True):
+def run_cases(cases, max_workers=None, progress=True, callback=None):
     """
     Run a list of case dicts through run_case in parallel worker processes.
     Results come back in input order.
@@ -811,6 +811,11 @@ def run_cases(cases, max_workers=None, progress=True):
         0 runs serially in this process (debugging).
     progress: show a tqdm progress bar over COMPLETED cases (per-case
         granularity -- individual cases can still take minutes).
+    callback: optional callable(i, case, out) invoked in THIS process as each
+        case finishes (completion order under parallelism, input order when
+        serial). Lets a caller stream results in -- accumulate, checkpoint,
+        or plot -- without waiting for the whole batch. Exceptions in the
+        callback propagate and abort the run.
 
     Two protections against "machine crawls during a scan":
       * workers run at BELOW_NORMAL process priority (_worker_init);
@@ -826,10 +831,23 @@ def run_cases(cases, max_workers=None, progress=True):
             from tqdm.auto import tqdm
             return tqdm(iterable, total=len(cases), desc="cases")
         except ImportError:
-            return iterable
+            # tqdm.auto picks the widget bar inside Jupyter, and that bar
+            # raises ImportError AT CONSTRUCTION if ipywidgets is missing --
+            # fall back to the plain-text console bar before giving up.
+            try:
+                from tqdm import tqdm
+                return tqdm(iterable, total=len(cases), desc="cases")
+            except ImportError:
+                return iterable
 
     if max_workers == 0:
-        return list(_maybe_bar(map(run_case, cases)))
+        results = [None] * len(cases)
+        for i in _maybe_bar(range(len(cases))):
+            out = run_case(cases[i])
+            results[i] = out
+            if callback is not None:
+                callback(i, cases[i], out)
+        return results
 
     ncpu = os.process_cpu_count() or os.cpu_count() or 8
     if max_workers is None:
@@ -845,7 +863,11 @@ def run_cases(cases, max_workers=None, progress=True):
                              initializer=_worker_init) as ex:
         futures = {ex.submit(run_case, c): i for i, c in enumerate(cases)}
         for fut in _maybe_bar(as_completed(futures)):
-            results[futures[fut]] = fut.result()
+            i = futures[fut]
+            out = fut.result()
+            results[i] = out
+            if callback is not None:
+                callback(i, cases[i], out)
     return results
 
 

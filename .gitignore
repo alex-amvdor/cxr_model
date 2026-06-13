@@ -6,6 +6,7 @@ __pycache__/
 # C extensions
 *.so
 
+*.png
 .claude/
 
 # Distribution / packaging
@@ -224,3 +225,7 @@ __marimo__/
 # Generated analysis artifacts
 zhai_fig1c_analog.png
 *.png
+
+# Monte Carlo run checkpoints (the chunked-run cell pickles results here)
+*.pkl
+zhai_run_checkpoint.pkl
