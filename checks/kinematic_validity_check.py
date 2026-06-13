@@ -37,6 +37,11 @@ Run: python kinematic_validity_check.py
 
 import numpy as np
 
+# the core modules now live in ../src; put it on the path regardless of CWD
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
 from cxr_feranchuk_spence import (
     CRYSTALS, Z_TABLE, HBARC_EV_ANG, M_E_EV,
     chi_g, U_g, absorption_length_ang, reciprocal_g_vector,

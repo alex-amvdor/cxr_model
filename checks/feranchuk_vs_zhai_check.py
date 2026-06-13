@@ -27,6 +27,11 @@ Run:  python feranchuk_vs_zhai_check.py
 import numpy as np
 from tabulate import tabulate
 
+# the core modules now live in ../src; put it on the path regardless of CWD
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
 from cxr_feranchuk_spence import (
     CRYSTALS, HBARC_EV_ANG, photons_per_electron, absorption_length_ang,
     reciprocal_g_vector,

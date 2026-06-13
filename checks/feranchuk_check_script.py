@@ -6,6 +6,11 @@ factor between model and paper.
 
 import numpy as np
 
+# the core modules now live in ../src; put it on the path regardless of CWD
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
 from cxr_feranchuk_spence import (
     CRYSTALS, Z_TABLE, amplitudes_PXR_CBS, beta_from_Ee, chi_g, delta_g,
     flux_per_second, absorption_length_ang,

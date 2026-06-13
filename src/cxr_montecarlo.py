@@ -43,14 +43,31 @@ from functools import lru_cache
 
 import numpy as np
 
+try:
+    import cupy as cp
+    _GPU = True
+    xp = cp
+    print("Using GPU")
+except ImportError:
+    _GPU = False
+    xp = np
+    print("No GPU found, or cupy not installed!\nFalling back to CPU execution.")
+
 from cxr_feranchuk_spence import (
     ALPHA_FS, HBARC_EV_ANG, M_E_EV, CRYSTALS,
     chi_g, U_g, absorption_length_ang, reciprocal_g_vector,
     _rotation_between, _direct_lattice_vectors,
 )
 
+
+def _to_cpu(a):
+    """Move array to CPU (numpy). No-op if already numpy."""
+    if _GPU and isinstance(a, cp.ndarray):
+        return a.get()
+    return np.asarray(a)
+
 MOTT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "mott_transport_cross_sections")
+                        "..", "data", "mott_transport_cross_sections")
 A0_SQ_CM2 = 2.8002852e-17     # Bohr radius squared [cm^2] (NIST SRD 64 unit)
 
 # ---- element data for transport ---------------------------------------------
@@ -192,17 +209,27 @@ def _dEds_compound(comp, E_keV):
 
 
 def _mu_total_inv_ang(comp, E_eV):
-    """Total linear attenuation 1/L_abs [1/Angstrom] summed over elements."""
+    """Total linear attenuation 1/L_abs [1/Angstrom] summed over elements.
+
+    absorption_length_ang (from cxr_feranchuk_spence) is CPU-only, so the sum
+    is always computed on the CPU. The result is returned on the SAME device as
+    E_eV: a GPU array if the caller passed one (mc_spectrum, mixing it with
+    on-device factors), a numpy array otherwise (detector_efficiency, whose
+    output is multiplied into the host-side spectra in the notebook). Keying off
+    the input device -- not the global _GPU flag -- keeps the CPU post-processing
+    path numpy even when a GPU is present."""
+    E_cpu = _to_cpu(E_eV)
     mu = 0.0
     for el, n_i in comp:
-        mu = mu + 1.0 / absorption_length_ang(el, E_eV, n_i)
+        mu = mu + 1.0 / absorption_length_ang(el, E_cpu, n_i)
+    if _GPU and isinstance(E_eV, cp.ndarray):
+        return cp.asarray(mu)
     return mu
 
 
 def _rotate_directions(d, cos_t, phi):
     """Rotate unit vectors d (N,3) by polar angle theta, azimuth phi."""
     sin_t = np.sqrt(np.maximum(1.0 - cos_t**2, 0.0))
-    # orthonormal basis (u, w) perpendicular to d
     ref = np.zeros_like(d)
     use_x = np.abs(d[:, 0]) < 0.9
     ref[use_x, 0] = 1.0
@@ -312,7 +339,6 @@ def simulate_trajectories(E0_keV, Ne, thickness_ang, element="C",
             if elastic_model == "mott":
                 sig_i = _sigma_browning_cm2(Z_i, Ea)   # Browning fit to Mott
             elif elastic_model == "sr":
-                # Joy's analytic screened-Rutherford total (relativistic)
                 a = _alpha_sr_joy(Z_i, Ea)
                 sig_i = (5.21e-21 * Z_i**2 / Ea**2 * 4.0 * np.pi / (a * (1.0 + a))
                          * ((Ea + 511.0) / (Ea + 1024.0))**2)
@@ -480,13 +506,17 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
     else:
         n_hat = np.asarray(n_hat, dtype=float)
         n_hat = n_hat / np.linalg.norm(n_hat)
-    E_grid = np.asarray(E_grid_eV, dtype=float)
-    spec = np.zeros(E_grid.size)
-    spec_pxr = np.zeros(E_grid.size)
-    spec_cbs = np.zeros(E_grid.size)
+    E_grid = xp.asarray(E_grid_eV, dtype=float)
+    spec = xp.zeros(E_grid.size)
+    spec_pxr = xp.zeros(E_grid.size)
+    spec_cbs = xp.zeros(E_grid.size)
 
-    beta_all = beta_from_keV(segments["E_keV"])       # speed/c per segment
-    v_all = beta_all[:, None] * segments["v_hat"]     # velocity vectors (c=1)
+    seg_E = xp.asarray(segments["E_keV"])
+    seg_v = xp.asarray(segments["v_hat"])
+    seg_L = xp.asarray(segments["L_ang"])
+    seg_r = xp.asarray(segments["r_mid"])
+    beta_all = beta_from_keV(seg_E)                   # speed/c per segment
+    v_all = beta_all[:, None] * seg_v                 # velocity vectors (c=1)
 
     for hkl in hkl_list:
         # reciprocal vector in the sample frame: construction frame by
@@ -497,131 +527,127 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         # sigma/pi polarization unit vectors: constants per reflection, since
         # both the detector direction n_hat and g are fixed (only v varies)
         e_s, e_p = _polarization_pair(n_hat, g_vec)
+        g_vec_d = xp.asarray(g_vec)
+        n_hat_d = xp.asarray(n_hat)
 
         # -- 1. per-segment resonance energy (Eq. 10) ---------------------------
         #   omega_res = v.g / (1 - v.n)   [1/Ang]   (>0 required to radiate)
-        v_dot_g = v_all @ g_vec
-        denom = 1.0 - v_all @ n_hat       # the Doppler-like denominator
+        v_dot_g = v_all @ g_vec_d
+        denom = 1.0 - v_all @ n_hat_d     # the Doppler-like denominator
         omega_res = v_dot_g / denom
         E_res = HBARC_EV_ANG * omega_res  # -> eV
 
         # -- 2. drop segments whose line misses the spectral window -------------
         # (pad by 20% so sinc tails that reach into the window still count)
         pad = 0.2 * (E_grid[-1] - E_grid[0])
-        keep = (E_res > max(E_grid[0] - pad, 10.0)) & (E_res < E_grid[-1] + pad)
+        keep = (E_res > float(E_grid[0] - pad)) & (E_res > 10.0) & (E_res < E_grid[-1] + pad)
         if not keep.any():
             continue
-        idx = np.flatnonzero(keep)
+        idx = xp.flatnonzero(keep)
 
         E_r = E_res[idx]                  # line energy per kept segment [eV]
         om = omega_res[idx]               # same in 1/Ang
         v = v_all[idx]                    # velocity vectors
         beta = beta_all[idx]
-        t_L = segments["L_ang"][idx] / beta   # interaction time [Ang] (c=1)
+        t_L = seg_L[idx] / beta           # interaction time [Ang] (c=1)
         dnm = denom[idx]
         vdg = v_dot_g[idx]
 
         # -- 3. couplings evaluated AT each segment's resonance energy ----------
         # (amplitudes vary slowly across the narrow line; freezing them at
         # E_res is accurate to the linewidth/E_res level)
-        chi = chi_g(crystal, hkl, E_r, B_ang2, use_henke)            # Eq. (3)
-        eUg_over_m = U_g(crystal, hkl, E_r, B_ang2, use_henke) / M_E_EV  # Eq. (4)
+        E_r_cpu = _to_cpu(E_r)
+        chi = xp.asarray(chi_g(crystal, hkl, E_r_cpu, B_ang2, use_henke))
+        eUg_over_m = xp.asarray(U_g(crystal, hkl, E_r_cpu, B_ang2, use_henke)) / M_E_EV
 
         # -- 4. photon kinematics per segment ------------------------------------
-        k_vec = om[:, None] * n_hat       # photon wavevector omega * n_hat
-        kg_vec = k_vec + g_vec            # diffracted wavevector k + g
-        kg2 = np.einsum("ij,ij->i", kg_vec, kg_vec)
+        k_vec = om[:, None] * n_hat_d     # photon wavevector omega * n_hat
+        kg_vec = k_vec + g_vec_d          # diffracted wavevector k + g
+        kg2 = xp.einsum("ij,ij->i", kg_vec, kg_vec)
         detuning = kg2 - om**2            # PXR denominator (~g^2, never small)
-        k_dot_g = k_vec @ g_vec
+        k_dot_g = k_vec @ g_vec_d
 
         # -- 5. Eq. (13) + relativistic Eq. (14) amplitudes, per segment ----------
         # CBS braced product {a;b} = a.b - (a.v)(b.v) and 1/gamma prefactor
         # (Zhai SI Eq. 6); v here is the SEGMENT velocity, so k.v = omega(1-dnm)
-        gamma = 1.0 / np.sqrt(1.0 - beta**2)
+        gamma = 1.0 / xp.sqrt(1.0 - beta**2)
         k_dot_v = om * (1.0 - dnm)
-        A2 = np.zeros(idx.size)
-        A2_pxr = np.zeros(idx.size)
-        A2_cbs = np.zeros(idx.size)
+        A2 = xp.zeros(idx.size)
+        A2_pxr = xp.zeros(idx.size)
+        A2_cbs = xp.zeros(idx.size)
         for e in (e_s, e_p):              # sum |A|^2 over both polarizations
-            g_dot_e = g_vec @ e           # scalar (e fixed per reflection)
-            v_dot_e = v @ e
-            v_dot_kg = np.einsum("ij,ij->i", v, kg_vec)
+            e_d = xp.asarray(e)
+            g_dot_e = g_vec_d @ e_d       # scalar (e fixed per reflection)
+            v_dot_e = v @ e_d
+            v_dot_kg = xp.einsum("ij,ij->i", v, kg_vec)
             A_PXR = chi / detuning * (v_dot_kg * g_dot_e - om**2 * v_dot_e)
             braced_ge = g_dot_e - vdg * v_dot_e
             braced_kg = k_dot_g - k_dot_v * vdg
             A_CBS = (-eUg_over_m / (gamma * vdg)
                      * (braced_ge + v_dot_e * braced_kg / vdg))
-            A2 += np.abs(A_PXR + A_CBS) ** 2
-            A2_pxr += np.abs(A_PXR) ** 2
-            A2_cbs += np.abs(A_CBS) ** 2
+            A2 += xp.abs(A_PXR + A_CBS) ** 2
+            A2_pxr += xp.abs(A_PXR) ** 2
+            A2_cbs += xp.abs(A_CBS) ** 2
 
         # -- 6. Beer-Lambert escape factor from the segment midpoint -------------
         # straight path along n_hat to whichever slab face the photon exits
-        z_mid = segments["r_mid"][idx, 2]
+        z_mid = seg_r[idx, 2]
         if n_hat[2] < 0:
             L_esc = z_mid / (-n_hat[2])               # out the entrance face
         else:
             L_esc = (thickness - z_mid) / n_hat[2]    # out the back face
-        T_abs = np.exp(-L_esc * _mu_total_inv_ang(abs_comp, E_r))
+        T_abs = xp.exp(-L_esc * _mu_total_inv_ang(abs_comp, E_r))
 
         # -- 7. accumulate the finite-segment lineshape ---------------------------
         # d2N/dE dOmega = alpha*omega/(4 pi^2 hbar c) |A|^2 t_L^2
         #                  * sinc^2[(1 - v.n)(omega - omega_res) t_L / 2] * T_abs
         # weight = everything except the sinc^2; a_width converts (E - E_res)
         # to the sinc argument: P t_L = a_width * (E - E_res).
-        pref = (ALPHA_FS * om / (4.0 * np.pi**2 * HBARC_EV_ANG)
+        pref = (ALPHA_FS * om / (4.0 * xp.pi**2 * HBARC_EV_ANG)
                 * t_L**2 * T_abs)
         weight = pref * A2
-        # (weights, target-spectrum) pairs accumulated below; the coherent
-        # total is NOT pxr + cbs -- the difference is the interference term
         targets = [(weight, spec)]
         if components:
             targets += [(pref * A2_pxr, spec_pxr), (pref * A2_cbs, spec_cbs)]
         a_width = dnm * t_L / (2.0 * HBARC_EV_ANG)
-        good = np.isfinite(weight) & (weight > 0)     # NaN couplings -> drop
+        good = xp.isfinite(weight) & (weight > 0)
 
-        # np.sinc(x) is sin(pi x)/(pi x), hence the /pi in the arguments below
         if sinc_cutoff is None:
-            # exact: chunked outer product (segments x full energy grid)
             for j0 in range(0, idx.size, chunk):
                 sl = slice(j0, min(j0 + chunk, idx.size))
                 m = good[sl]
                 if not m.any():
                     continue
                 x = (a_width[sl][m, None] * (E_grid[None, :] - E_r[sl][m, None])
-                     / np.pi)
-                S = np.sinc(x) ** 2
+                     / xp.pi)
+                S = xp.sinc(x) ** 2
                 for w, tgt in targets:
                     tgt += w[sl][m] @ S
         else:
-            # windowed: resonance-sorted blocks hit only the grid slice where
-            # their truncated lineshapes live
             dE = E_grid[1] - E_grid[0]
-            order = np.argsort(E_r)
+            order = xp.argsort(E_r)
             blk = 8192
             for j0 in range(0, order.size, blk):
                 sel = order[j0:j0 + blk]
                 sel = sel[good[sel]]
                 if sel.size == 0:
                     continue
-                half = sinc_cutoff / a_width[sel]      # energy half-window
-                lo = float((E_r[sel] - half).min())
-                hi = float((E_r[sel] + half).max())
-                i0 = max(int((lo - E_grid[0]) // dE), 0)
-                i1 = min(int((hi - E_grid[0]) // dE) + 2, E_grid.size)
+                half = sinc_cutoff / a_width[sel]
+                lo = float(_to_cpu((E_r[sel] - half).min()))
+                hi = float(_to_cpu((E_r[sel] + half).max()))
+                i0 = max(int((lo - float(_to_cpu(E_grid[0]))) // float(_to_cpu(dE))), 0)
+                i1 = min(int((hi - float(_to_cpu(E_grid[0]))) // float(_to_cpu(dE))) + 2, E_grid.size)
                 if i1 <= i0:
                     continue
                 x = (a_width[sel][:, None]
-                     * (E_grid[None, i0:i1] - E_r[sel][:, None]) / np.pi)
-                S = np.sinc(x) ** 2
+                     * (E_grid[None, i0:i1] - E_r[sel][:, None]) / xp.pi)
+                S = xp.sinc(x) ** 2
                 for w, tgt in targets:
                     tgt[i0:i1] += w[sel] @ S
 
     if components:
-        # total, |A_PXR|^2-only, |A_CBS|^2-only: total - pxr - cbs is the
-        # coherent interference contribution (positive here -- delta_g > 0)
-        return spec / Ne, spec_pxr / Ne, spec_cbs / Ne
-    return spec / Ne                                   # per electron
+        return _to_cpu(spec / Ne), _to_cpu(spec_pxr / Ne), _to_cpu(spec_cbs / Ne)
+    return _to_cpu(spec / Ne)
 
 
 # ---- bremsstrahlung background -------------------------------------------------
@@ -645,25 +671,25 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
     T <~ 100 keV; swap in Seltzer-Berger tables for better accuracy.
     """
     mc2 = 510.99895                                    # keV
-    T_i = np.asarray(T_keV, dtype=float)[:, None]
-    k = np.asarray(k_eV, dtype=float)[None, :] / 1e3   # keV
+    T_i = xp.asarray(T_keV, dtype=float)[:, None]
+    k = xp.asarray(k_eV, dtype=float)[None, :] / 1e3   # keV
     T_f = T_i - k
     ok = T_f > 1e-6
-    T_f = np.where(ok, T_f, 1e-6)
+    T_f = xp.where(ok, T_f, 1e-6)
 
-    p_i = np.sqrt(T_i * (T_i + 2.0 * mc2)) / mc2
-    p_f = np.sqrt(T_f * (T_f + 2.0 * mc2)) / mc2
+    p_i = xp.sqrt(T_i * (T_i + 2.0 * mc2)) / mc2
+    p_f = xp.sqrt(T_f * (T_f + 2.0 * mc2)) / mc2
     beta_i = p_i / (1.0 + T_i / mc2)
     beta_f = p_f / (1.0 + T_f / mc2)
 
-    born_log = np.log((p_i + p_f) / np.maximum(p_i - p_f, 1e-30))
+    born_log = xp.log((p_i + p_f) / xp.maximum(p_i - p_f, 1e-30))
     elwert = (beta_i / beta_f
-              * (1.0 - np.exp(-2.0 * np.pi * Z * ALPHA_FS / beta_i))
-              / (1.0 - np.exp(-2.0 * np.pi * Z * ALPHA_FS / beta_f)))
+              * (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_i))
+              / (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_f)))
 
     dsig = (16.0 / 3.0 * ALPHA_FS * R_E_CM2 * Z**2
             / (k * 1e3) / p_i**2 * born_log * elwert)   # per eV
-    return np.where(ok, dsig, 0.0)
+    return xp.where(ok, dsig, 0.0)
 
 
 def mc_brem_spectrum(
@@ -701,26 +727,29 @@ def mc_brem_spectrum(
         n_hat = np.asarray(n_hat, dtype=float)
         n_hat = n_hat / np.linalg.norm(n_hat)
 
-    E_grid = np.asarray(E_grid_eV, dtype=float)
+    E_grid = xp.asarray(E_grid_eV, dtype=float)
     mu = _mu_total_inv_ang(comp, E_grid)               # (NE,) [1/Ang]
 
-    z_mid = segments["r_mid"][:, 2]
+    seg_r = xp.asarray(segments["r_mid"])
+    seg_L = xp.asarray(segments["L_ang"])
+    seg_E = xp.asarray(segments["E_keV"])
+    z_mid = seg_r[:, 2]
     if n_hat[2] < 0:
         L_esc = z_mid / (-n_hat[2])
     else:
         L_esc = (thickness - z_mid) / n_hat[2]
 
-    spec = np.zeros(E_grid.size)
-    M = segments["E_keV"].size
+    spec = xp.zeros(E_grid.size)
+    M = seg_E.size
     for j0 in range(0, M, chunk):
         sl = slice(j0, min(j0 + chunk, M))
-        T_abs = np.exp(-L_esc[sl][:, None] * mu[None, :])
-        path_cm = segments["L_ang"][sl] * 1e-8
+        T_abs = xp.exp(-L_esc[sl][:, None] * mu[None, :])
+        path_cm = seg_L[sl] * 1e-8
         for el_i, n_i in comp:
             Z_i = TRANSPORT_ELEMENTS[el_i]["Z"]
-            dsig = _brem_dsigma_dk(Z_i, segments["E_keV"][sl], E_grid)
+            dsig = _brem_dsigma_dk(Z_i, seg_E[sl], E_grid)
             spec += (n_i * 1e24 * path_cm) @ (dsig * T_abs)
-    return spec / (4.0 * np.pi) / Ne
+    return _to_cpu(spec / (4.0 * xp.pi) / Ne)
 
 
 # ---- parallel case runner -------------------------------------------------------
@@ -840,6 +869,21 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
             except ImportError:
                 return iterable
 
+    if max_workers is None:
+        if _GPU:
+            max_workers = 0
+        else:
+            ncpu = os.process_cpu_count() or os.cpu_count() or 8
+            max_workers = max(1, min(len(cases), ncpu * 3 // 4))
+    elif _GPU and max_workers > 1:
+        # N worker processes each open their own CUDA context on the one GPU and
+        # then serialize on it anyway -- no speedup, N x the VRAM, and the
+        # contention crawls the desktop. The spectrum (the heavy part) is already
+        # on the GPU; transport is a small CPU tail. Force a single context.
+        print(f"run_cases: GPU active -- ignoring max_workers={max_workers} and "
+              f"running serially (one CUDA context). Set max_workers=0 to silence.")
+        max_workers = 0
+
     if max_workers == 0:
         results = [None] * len(cases)
         for i in _maybe_bar(range(len(cases))):
@@ -848,10 +892,6 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
             if callback is not None:
                 callback(i, cases[i], out)
         return results
-
-    ncpu = os.process_cpu_count() or os.cpu_count() or 8
-    if max_workers is None:
-        max_workers = max(1, min(len(cases), ncpu * 3 // 4))
 
     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                 "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):

@@ -19,9 +19,10 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-# resolve relative to this file so imports work from any working directory
+# resolve relative to this file (src/) so imports work from any working
+# directory; the data lives in the sibling data/ directory
 SCATTERING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "atomic_scattering_factors")
+                              "..", "data", "atomic_scattering_factors")
 
 # Atomic numbers
 Z_TABLE = {

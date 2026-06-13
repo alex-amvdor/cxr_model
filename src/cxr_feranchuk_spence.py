@@ -137,7 +137,7 @@ def reciprocal_g_vector(hkl, lattice):
 
 
 # ---- crystal database (crystal_structures.toml) ------------------------------
-def load_crystals(path=Path(__file__).with_name("crystal_structures.toml")):
+def load_crystals(path=Path(__file__).parent.parent / "data" / "crystal_structures.toml"):
     """
     Load the crystal database. Each entry becomes
         {"lattice": {...}, "basis": [(element, frac_pos), ...], "V_cell": float}
