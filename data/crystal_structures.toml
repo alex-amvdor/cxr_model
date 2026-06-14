@@ -100,3 +100,68 @@ basis = [
     { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.879] },
     { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.621] },
 ]
+
+# 1T (CdI2-type, P-3m1) metal dichalcogenides: heavy metal on Wyckoff 1a (0,0,0)
+# -- AT THE ORIGIN, so every (00l) stays strong (unlike the 2H TMDs where the
+# metal at z=1/4,3/4 makes them oscillate) -- and chalcogen on 2d (1/3,2/3,z),
+# (2/3,1/3,1-z) with z ~ 0.255. One layer per cell, so c is the interlayer
+# repeat. Bond sqrt((a/sqrt(3))^2 + (z c)^2) ~ 2.5 A.
+[ptse2]
+system = "hexagonal"
+a = 3.728
+c = 5.081
+basis = [
+    { element = "Pt", pos = [0.0, 0.0, 0.0] },
+    { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.255] },
+    { element = "Se", pos = [0.6666666666666667, 0.3333333333333333, 0.745] },
+]
+
+[hfse2]
+system = "hexagonal"
+a = 3.748
+c = 6.159
+basis = [
+    { element = "Hf", pos = [0.0, 0.0, 0.0] },
+    { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.255] },
+    { element = "Se", pos = [0.6666666666666667, 0.3333333333333333, 0.745] },
+]
+
+[zrse2]
+system = "hexagonal"
+a = 3.770
+c = 6.137
+basis = [
+    { element = "Zr", pos = [0.0, 0.0, 0.0] },
+    { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.255] },
+    { element = "Se", pos = [0.6666666666666667, 0.3333333333333333, 0.745] },
+]
+
+# 2H-WS2 / 2H-MoS2 (P6_3/mmc), isostructural with MoSe2/WSe2: metal on 2c
+# (1/3,2/3,1/4), S on 4f with z = 0.621. WS2 a=3.153, c=12.323; MoS2 a=3.160,
+# c=12.294 -- the small in-plane a (tightest of the TMDs) makes WS2 the
+# brightest layered basal line in the catalog. M-S bond ~2.41 A.
+[ws2]
+system = "hexagonal"
+a = 3.153
+c = 12.323
+basis = [
+    { element = "W",  pos = [0.3333333333333333, 0.6666666666666667, 0.25] },
+    { element = "S",  pos = [0.6666666666666667, 0.3333333333333333, 0.379] },
+    { element = "S",  pos = [0.6666666666666667, 0.3333333333333333, 0.121] },
+    { element = "W",  pos = [0.6666666666666667, 0.3333333333333333, 0.75] },
+    { element = "S",  pos = [0.3333333333333333, 0.6666666666666667, 0.879] },
+    { element = "S",  pos = [0.3333333333333333, 0.6666666666666667, 0.621] },
+]
+
+[mos2]
+system = "hexagonal"
+a = 3.160
+c = 12.294
+basis = [
+    { element = "Mo", pos = [0.3333333333333333, 0.6666666666666667, 0.25] },
+    { element = "S",  pos = [0.6666666666666667, 0.3333333333333333, 0.379] },
+    { element = "S",  pos = [0.6666666666666667, 0.3333333333333333, 0.121] },
+    { element = "Mo", pos = [0.6666666666666667, 0.3333333333333333, 0.75] },
+    { element = "S",  pos = [0.3333333333333333, 0.6666666666666667, 0.879] },
+    { element = "S",  pos = [0.3333333333333333, 0.6666666666666667, 0.621] },
+]

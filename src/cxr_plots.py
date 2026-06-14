@@ -5,10 +5,12 @@ cxr_plots.py
 All plotting for the analysis notebook, kept out of the notebook itself.
 
 Intrinsic spectra
-  * :func:`plot_by_energy` -- one figure per beam energy, one panel per polar
-    tilt, one curve per azimuth. With ``collapse_azimuth=True`` each panel shows
-    only the best azimuth (highest spectral peak), so a big azimuth sweep stays
-    one curve per panel.
+  * :func:`plot_by_energy` -- one figure PER POLAR TILT, every beam energy on a
+    single axis (each at its best azimuth when ``collapse_azimuth=True``).
+    Individual figures, so a wide tilt sweep doesn't run off-screen.
+  * :func:`plot_full_spectrum` -- the full measured range: sharp coherent lines
+    (fine line grid) on the broad brem evaluated out to the beam energy (wide
+    brem grid). Needs a sweep run with a separate ``E_grid_brem``.
   * :func:`plot_peak_vs_tilt` -- a single overview: best-azimuth peak flux vs
     polar tilt, one line per energy. The "which tilt wins" figure for big sweeps.
 
@@ -91,36 +93,111 @@ def plot_tilt_panel(ax, group, settings, include_brem=True, collapse_azimuth=Fal
     ax.legend(title=("dashed: brem" if include_brem else None), fontsize=8)
 
 
-def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=False, ncols=4):
-    """One figure per beam energy; panels = polar tilt, curves = azimuth (or the
-    single best azimuth if ``collapse_azimuth``)."""
+def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=True):
+    """One figure PER POLAR TILT, every beam energy overlaid on a single axis
+    (each energy at its best azimuth when ``collapse_azimuth``). Individual
+    figures rather than one wide grid, so nothing runs off-screen.
+
+    include_brem : plot line+brem (solid) with the brem dashed underneath;
+        False = coherent line only. ``collapse_azimuth`` keeps, per energy, the
+        azimuth with the highest spectral peak; False overlays every azimuth
+        (same color per energy, so busy for a wide azimuth scan). Returns one
+        figure per polar tilt."""
     recs = records(results)
     if not recs:
         print("no results yet")
         return []
-    energies = sorted({r["case"]["E0_keV"] for r in recs})
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    energies = sorted({r["case"]["E0_keV"] for r in recs})
     figs = []
-    for E0 in energies:
-        panels = []
-        for t in tilts:
-            grp = [
-                r
-                for r in recs
-                if r["case"]["E0_keV"] == E0 and r["case"]["tilt_deg"] == t
-            ]
-            if grp:
-                panels.append(grp)
-        nrows = (len(panels) + ncols - 1) // ncols
-        fig, axes = plt.subplots(
-            nrows, ncols, figsize=(5 * ncols, 4.5 * nrows), squeeze=False
-        )
-        for ax in axes.ravel()[len(panels):]:
-            ax.axis("off")
-        for ax, grp in zip(axes.ravel(), panels):
-            plot_tilt_panel(ax, grp, settings, include_brem, collapse_azimuth)
-        tag = "best azimuth" if collapse_azimuth else "all azimuths"
-        fig.suptitle(f"{E0:g} keV — {_mode(settings)} ({tag})", fontsize=15)
+    for t in tilts:
+        trecs = [r for r in recs if r["case"]["tilt_deg"] == t]
+        fig, ax = plt.subplots(figsize=(8.5, 5.2))
+        for i, E0 in enumerate(energies):
+            grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
+            if not grp:
+                continue
+            if collapse_azimuth and len(grp) > 1:
+                grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
+            c = COLORS[i % len(COLORS)]
+            for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
+                az = r["case"]["tilt_azim_deg"]
+                line_det, brem_det = _line_brem(r, settings)
+                y = (line_det + brem_det) if include_brem else line_det
+                ax.plot(r["E_grid"] / 1e3, y * r["scale"], color=c, lw=1.3,
+                        label=rf"{E0:g} keV ($\phi={az:0.1f}\degree$)")
+                if include_brem:
+                    ax.plot(r["E_grid"] / 1e3, brem_det * r["scale"],
+                            color=c, ls="--", lw=0.6)
+        case = trecs[0]["case"]
+        tag = "best azimuth/energy" if collapse_azimuth else "all azimuths"
+        ax.set_title(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
+                     rf"$\mu$m, $\theta_\mathrm{{tilt}}={t:0.1f}\degree$ — "
+                     rf"{_mode(settings)} ({tag})", fontsize=12)
+        ax.set_xlabel("Photon energy (keV)")
+        ax.set_ylabel("Intensity (Phs/eV/s/nA)")
+        ax.set_ylim(bottom=0)
+        ax.margins(x=0)
+        ax.grid(alpha=0.3)
+        ax.legend(title=("dashed: brem" if include_brem else None), fontsize=9)
+        fig.tight_layout()
+        figs.append(fig)
+    return figs
+
+
+def plot_full_spectrum(results, settings, collapse_azimuth=True, logy=True):
+    """Full measured-range view: the sharp coherent lines (fine line grid) riding
+    on the broad bremsstrahlung evaluated out to the beam energy (wide brem grid).
+    One figure per polar tilt, every beam energy at its best azimuth. The dashed
+    curve is the wide brem; the solid is line+brem on the (narrow) line grid.
+
+    Needs records run with a separate ``E_grid_brem`` (``brem_wide`` present); on
+    older single-grid records it says so and returns []."""
+    recs = [r for r in records(results) if r.get("brem_wide") is not None]
+    if not recs:
+        print("no wide-brem records -- set E_grid_brem in the Sweep and re-run")
+        return []
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    energies = sorted({r["case"]["E0_keV"] for r in recs})
+    figs = []
+    for t in tilts:
+        trecs = [r for r in recs if r["case"]["tilt_deg"] == t]
+        fig, ax = plt.subplots(figsize=(9.0, 5.2))
+        ymax = 0.0
+        for i, E0 in enumerate(energies):
+            grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
+            if not grp:
+                continue
+            if collapse_azimuth and len(grp) > 1:
+                grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
+            r = grp[0]
+            c = COLORS[i % len(COLORS)]
+            az = r["case"]["tilt_azim_deg"]
+            # wide brem in detected units (QE applied on its own grid), full range
+            Eb = r["E_grid_brem"]
+            qe_b = detector_efficiency(Eb) if settings.apply_detector_qe else 1.0
+            brem_wide_det = r["brem_wide"] * qe_b * r["scale"]
+            # lines + local brem on the fine line grid
+            line_det, brem_det = _line_brem(r, settings)
+            total_line = (line_det + brem_det) * r["scale"]
+            ax.plot(Eb / 1e3, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
+            ax.plot(r["E_grid"] / 1e3, total_line, color=c, lw=1.2,
+                    label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)")
+            ymax = max(ymax, float(np.nanmax(total_line)) if total_line.size else 0.0)
+        case = trecs[0]["case"]
+        if logy and ymax > 0:
+            ax.set_yscale("log")
+            ax.set_ylim(ymax * 1e-7, ymax * 2)
+        else:
+            ax.set_ylim(bottom=0)
+        ax.set_xlabel("Photon energy (keV)")
+        ax.set_ylabel("Intensity (Phs/eV/s/nA)")
+        ax.set_title(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
+                     rf"$\mu$m, $\theta_\mathrm{{tilt}}={t:0.1f}\degree$ — full measured "
+                     rf"range ({_mode(settings)}; dashed = brem)", fontsize=12)
+        ax.margins(x=0)
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=8)
         fig.tight_layout()
         figs.append(fig)
     return figs
@@ -370,6 +447,7 @@ _HEATMAP_QUANTITIES = [
     ("line_eV", "coherent line energy  (eV)", "plasma"),
     ("fwhm_eV", "line FWHM  (eV)", "magma"),
     ("line_frac", "integrated line / total spectral flux", "cividis"),
+    ("line_flux", "integrated coherent line flux  (Phs/s)", "viridis"),
     ("total_flux", "total integrated flux  (Phs/s)", "viridis"),
 ]
 

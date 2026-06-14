@@ -40,6 +40,11 @@ TIMEPIX3_DOMEGA_SR = float(TIMEPIX3_CHIP_WIDTH_M**2 / TIMEPIX3_DISTANCE_M**2)
 MATERIAL_LABELS = {
     "mose2": "MoSe2",
     "wse2": "WSe2",
+    "mos2": "MoS2",
+    "ws2": "WS2",
+    "ptse2": "PtSe2",
+    "hfse2": "HfSe2",
+    "zrse2": "ZrSe2",
     "graphite": "HOPG",
     "diamond": "diamond",
     "silicon": "silicon",
@@ -98,6 +103,31 @@ def crystal_params(material, n_families=4):
             B_ang2=0.6,
             E_grid=np.arange(350.0, 2500.0, 3.0),
         )
+    if material in ("ws2", "mos2"):
+        # 2H disulfides, isostructural with WSe2/MoSe2 (small in-plane a -> bright).
+        # S has no NIST Mott table -> analytic SR screening fallback.
+        metal = {"ws2": "W", "mos2": "Mo"}[material]
+        return dict(
+            crystal=material,
+            composition=[(metal, n_of(material, metal)), ("S", n_of(material, "S"))],
+            hkl_list=dominant_reflections(material, n_families=n_families, B_ang2=0.6),
+            beam_uvw=(0, 0, 2),
+            B_ang2=0.6,
+            E_grid=np.arange(350.0, 2500.0, 3.0),
+        )
+    if material in ("ptse2", "hfse2", "zrse2"):
+        # 1T (CdI2-type): heavy metal at the ORIGIN -> every (00l) stays strong,
+        # so the bright basal series marches up in energy with the tight c. These
+        # metals (Pt/Hf/Zr) have no NIST Mott table -> analytic SR screening.
+        metal = {"ptse2": "Pt", "hfse2": "Hf", "zrse2": "Zr"}[material]
+        return dict(
+            crystal=material,
+            composition=[(metal, n_of(material, metal)), ("Se", n_of(material, "Se"))],
+            hkl_list=dominant_reflections(material, n_families=n_families, B_ang2=0.6),
+            beam_uvw=(0, 0, 1),  # c-axis along the beam (1T: 1 layer/cell)
+            B_ang2=0.6,
+            E_grid=np.arange(350.0, 3500.0, 3.0),
+        )
     if material == "diamond":
         return dict(
             crystal="diamond",
@@ -147,7 +177,17 @@ class Sweep:
     # fixed setup (single values) ------------------------------------------
     theta_obs_deg: float = 90.0
     n_families: int = 4
-    e_grid_eV: Optional[np.ndarray] = None  # None -> per-material default
+    # two independent photon-energy grids (None -> per-material defaults):
+    #   E_grid_line : fine + NARROW; where the coherent lines are evaluated (the
+    #       expensive sinc^2). Lines are kinematically capped at a few keV, so it
+    #       need not extend past ~4 keV.
+    #   E_grid_brem : coarse + WIDE; where the smooth bremsstrahlung is evaluated
+    #       (cheap). Extend to 20-40 keV / the beam energy to model the full
+    #       measured spectrum without inflating the line cost. Default spans the
+    #       line start up to the highest beam energy at a 50 eV step.
+    E_grid_line: Optional[np.ndarray] = None
+    E_grid_brem: Optional[np.ndarray] = None
+    e_grid_eV: Optional[np.ndarray] = None  # deprecated: alias for E_grid_line
     dtheta_obs_deg: Optional[float] = None  # None -> Timepix3 default
     domega_sr: Optional[float] = None  # None -> Timepix3 default
     beam_uvw: Optional[tuple] = None  # None -> per-material default
@@ -164,15 +204,28 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
     beam energy). Returns the ``cases`` list; preview it with
     :func:`geometry_table`."""
     cp = crystal_params(sweep.material, sweep.n_families)
-    E_grid = cp["E_grid"] if sweep.e_grid_eV is None else np.asarray(sweep.e_grid_eV, float)
+    # line grid: fine + narrow (per-material default, E_grid_line, or the
+    # deprecated e_grid_eV alias). brem grid: coarse + wide -- default spans the
+    # line start up to the highest beam energy at 50 eV (brem cuts off at the
+    # beam energy, so that's the full physical range); override via E_grid_brem.
+    line_src = sweep.E_grid_line if sweep.E_grid_line is not None else sweep.e_grid_eV
+    line_grid = cp["E_grid"] if line_src is None else np.asarray(line_src, float)
+    energies = _seq(sweep.energy_keV)
+    if sweep.E_grid_brem is not None:
+        brem_grid = np.asarray(sweep.E_grid_brem, float)
+    else:
+        brem_grid = np.arange(float(line_grid[0]), float(energies.max()) * 1e3 + 50.0, 50.0)
+
     dtheta = TIMEPIX3_DTHETA_OBS_DEG if sweep.dtheta_obs_deg is None else sweep.dtheta_obs_deg
     domega = TIMEPIX3_DOMEGA_SR if sweep.domega_sr is None else sweep.domega_sr
     beam_uvw = cp["beam_uvw"] if sweep.beam_uvw is None else sweep.beam_uvw
     label = MATERIAL_LABELS.get(sweep.material, sweep.material)
 
-    E_start, E_step = float(E_grid[0]), float(E_grid[1] - E_grid[0])
-    E_stop = float(E_grid[-1]) + E_step
-    energies = _seq(sweep.energy_keV)
+    def _triple(g):
+        """(start, stop, step) so np.arange(*triple) reproduces grid g."""
+        step = float(g[1] - g[0])
+        return (float(g[0]), float(g[-1]) + step, step)
+    line_triple, brem_triple = _triple(line_grid), _triple(brem_grid)
 
     cases = []
     for i_c, (thickness, tilt, azim) in enumerate(
@@ -189,7 +242,9 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     B_ang2=cp["B_ang2"],
                     E0_keV=float(E0),
                     thickness_ang=float(thickness),
-                    E_grid=(E_start, E_stop, E_step),
+                    E_grid=line_triple,         # legacy key (== line grid)
+                    E_grid_line=line_triple,
+                    E_grid_brem=brem_triple,
                     theta_obs_rad=np.deg2rad(sweep.theta_obs_deg),
                     tilt_deg=float(tilt),
                     tilt_azim_deg=float(azim),
@@ -211,6 +266,13 @@ def geometry_table(cases):
     for a quick sanity check before running."""
     import pandas as pd
 
+    def _grid(triple):
+        """'0.05-4 keV @ 3 eV' label from a (start, stop, step) grid triple."""
+        if triple is None:
+            return "-"
+        s0, s1, ds = triple
+        return f"{s0 / 1e3:g}-{(s1 - ds) / 1e3:g} keV @ {ds:g} eV"
+
     rows, seen = [], set()
     for c in cases:
         if c["name"] in seen:
@@ -225,6 +287,8 @@ def geometry_table(cases):
                 "polar [deg]": round(c["tilt_deg"], 2),
                 "azim [deg]": round(c["tilt_azim_deg"], 2),
                 "energies [keV]": [k["E0_keV"] for k in same],
+                "line grid": _grid(c.get("E_grid_line", c["E_grid"])),
+                "brem grid": _grid(c.get("E_grid_brem")),
                 "theta_obs [deg]": round(np.degrees(c["theta_obs_rad"]), 1),
                 "dOmega [sr]": c["domega_sr"],
             }

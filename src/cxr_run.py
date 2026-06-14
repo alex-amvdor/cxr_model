@@ -5,9 +5,11 @@ cxr_run.py
 Drive a sweep through ``cxr_montecarlo.run_cases`` with on-disk checkpointing
 and per-group streaming feedback.
 
-:func:`run_sweep` resumes from a checkpoint (skipping cached cases), stores each
-finished case into ``results``, re-pickles the checkpoint at config granularity
-(crash-safe), and invokes ``on_chunk(group_config_names)`` once a whole **group**
+:func:`run_sweep` resumes from a per-material checkpoint
+(``checkpoints/<material>.pkl``, skipping cached cases), stores each finished
+case into ``results``, re-pickles that material's checkpoint at config
+granularity (crash-safe), and invokes ``on_chunk(group_config_names)`` once a
+whole **group**
 has finished. By default a group is everything that shares
 (material, thickness, polar tilt) -- i.e. the full azimuth sweep at one tilt --
 so the streamed plot/table waits until every azimuth is in and can collapse to
@@ -37,7 +39,8 @@ def run_sweep(
     cases,
     results,
     *,
-    checkpoint_path="cxr_run_checkpoint.pkl",
+    checkpoint_dir="checkpoints",
+    checkpoint_path=None,
     resume=True,
     max_workers=None,
     progress=True,
@@ -48,9 +51,15 @@ def run_sweep(
 
     cases : list of case dicts from cxr_sweep.build_cases.
     results : the dict to fill ({name: {E0: record}}).
-    checkpoint_path : pickle of ``results`` rewritten as configs finish; a rerun
-        with resume=True skips everything already in it. Use a path distinct from
-        any other notebook's so runs don't clobber each other.
+    checkpoint_dir : directory for the per-material checkpoints. A sweep is
+        single-material, so each writes ``<checkpoint_dir>/<material>.pkl``
+        holding ONLY that material's configs -- different materials never share a
+        pickle, and ``results`` can hold several materials in one kernel without
+        them clobbering each other on disk. Created if missing; seeded once from
+        the legacy combined ``cxr_run_checkpoint.pkl`` if that's still around.
+    checkpoint_path : explicit override for the pickle path; None (default)
+        derives the per-material path above. A rerun with resume=True skips every
+        config already in the pickle.
     max_workers : forwarded to run_cases (None -> serial on GPU, ~3/4 cores on
         CPU); >1 on a GPU is coerced to serial there.
     progress : forwarded to run_cases (the per-case tqdm bar).
@@ -64,10 +73,44 @@ def run_sweep(
     if group_key is None:
         group_key = _default_group_key
 
+    # per-material checkpoint: a sweep is single-material, so name the pickle for
+    # the crystal and keep them together in their own subdir.
+    material = cases[0]["crystal"] if cases else "mixed"
+    if checkpoint_path is None:
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        checkpoint_path = os.path.join(checkpoint_dir, f"{material}.pkl")
+
+    def _crystal_of(rec_map):
+        return next(iter(rec_map.values()))["case"]["crystal"]
+
+    def _save():
+        """Pickle just THIS material's configs -- ``results`` may also hold other
+        materials run earlier in the same kernel, which belong in their own pkl."""
+        subset = {n: results[n] for n in results if _crystal_of(results[n]) == material}
+        with open(checkpoint_path, "wb") as f:
+            pickle.dump(subset, f)
+
+    # one-time migration: seed a missing per-material pickle from the old single
+    # combined checkpoint (subset to this material), so an in-progress run's cache
+    # survives the switch to per-material files.
+    legacy = "cxr_run_checkpoint.pkl"
+    if resume and not os.path.exists(checkpoint_path) and os.path.exists(legacy):
+        try:
+            with open(legacy, "rb") as f:
+                old = pickle.load(f)
+            sub = {n: v for n, v in old.items() if _crystal_of(v) == material}
+            if sub:
+                with open(checkpoint_path, "wb") as f:
+                    pickle.dump(sub, f)
+                print(f"migrated {len(sub)} {material} configs from {legacy} -> {checkpoint_path}")
+        except Exception as e:  # corrupt/locked legacy pickle -> just skip it
+            print(f"(legacy checkpoint migration skipped: {e})")
+
     if resume and os.path.exists(checkpoint_path):
         with open(checkpoint_path, "rb") as f:
-            results.update(pickle.load(f))
-        print(f"resumed {sum(len(v) for v in results.values())} cases from {checkpoint_path}")
+            loaded = pickle.load(f)
+        results.update(loaded)
+        print(f"resumed {sum(len(v) for v in loaded.values())} {material} cases from {checkpoint_path}")
 
     todo = [
         c for c in cases
@@ -99,8 +142,7 @@ def run_sweep(
         name = case["name"]
         energies_remaining[name] -= 1
         if energies_remaining[name] == 0:  # this config (all energies) is done
-            with open(checkpoint_path, "wb") as f:  # crash-safe at config granularity
-                pickle.dump(results, f)
+            _save()  # crash-safe at config granularity (this material's subset)
             g = group_key(case)
             group_remaining[g] -= 1
             if group_remaining[g] == 0 and on_chunk is not None:

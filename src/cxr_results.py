@@ -64,6 +64,8 @@ def store_result(results, case, out):
         E_grid=E_grid,
         spec=out["spec"],
         brem=out["brem"],
+        E_grid_brem=out.get("E_grid_brem"),  # wide coarse grid (full range)
+        brem_wide=out.get("brem_wide"),      # bremsstrahlung out to the beam energy
         E_pk=E_pk,
         fwhm=fwhm,
         eta=out["eta"],
@@ -167,7 +169,12 @@ def summary_table(recs, settings):
         brem_det = detected_background(r, settings) / r["scale"]
         i_pk = np.argmax(line_det)
         line_cts = np.trapezoid(r["spec"], r["E_grid"]) * r["scale"] * cur
-        brem_cts = np.trapezoid(r["brem"], r["E_grid"]) * r["scale"] * cur
+        # brem over the FULL measured range (the wide grid) when available, so the
+        # total rate reflects the real measurement out to the beam energy
+        if r.get("brem_wide") is not None:
+            brem_cts = np.trapezoid(r["brem_wide"], r["E_grid_brem"]) * r["scale"] * cur
+        else:
+            brem_cts = np.trapezoid(r["brem"], r["E_grid"]) * r["scale"] * cur
         rows.append(
             {
                 "material": MATERIAL_LABELS.get(c["crystal"], c["crystal"]),
@@ -247,8 +254,9 @@ def line_metrics(r, settings, rel_prominence=0.03, n_fwhm=3.0, metric="sharpness
       peak_flux  : max(spec) * scale * current        [Phs/eV/s] (peak height)
       line_eV    : energy of the coherent line        [eV] (peak-found, see line_index)
       fwhm_eV    : spectral FWHM of that line          [eV] (peak_widths at half height)
-      line_frac  : integrated line flux / integrated total (spec+brem) over the grid;
-                   the line is integrated over +-n_fwhm half-widths about its peak
+      line_flux  : integrated coherent line flux       [Phs/s]; the line integrated
+                   over +-n_fwhm half-widths about its peak, * scale * current
+      line_frac  : line_flux / integrated total (spec+brem) flux over the grid
       total_flux : integrated (spec+brem) * scale * current  [Phs/s] (absolute)
 
     All line characterization (line_eV, fwhm_eV, line_frac) is from the LINE
@@ -275,6 +283,7 @@ def line_metrics(r, settings, rel_prominence=0.03, n_fwhm=3.0, metric="sharpness
         "peak_flux": smax * sc * cur,
         "line_eV": float(E[idx]),
         "fwhm_eV": w_samp * dE,
+        "line_flux": line_int * sc * cur,
         "line_frac": (line_int / total_int) if total_int > 0 else float("nan"),
         "total_flux": total_int * sc * cur,
     }
