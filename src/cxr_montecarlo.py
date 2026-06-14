@@ -78,6 +78,7 @@ TRANSPORT_ELEMENTS = {
     "Ge": {"Z": 32, "A": 72.630, "J_keV": 0.350},
     "Se": {"Z": 34, "A": 78.971, "J_keV": 0.348},
     "Mo": {"Z": 42, "A": 95.95,  "J_keV": 0.424},
+    "W":  {"Z": 74, "A": 183.84, "J_keV": 0.727},
 }
 
 
@@ -161,12 +162,24 @@ def _mott_alpha_table(element, Z):
     return np.log10(E_eV), np.log10(alpha)
 
 
+_NO_MOTT_WARNED = set()
+
+
 def _sample_cos_theta(Z, E_keV, rng, elastic_model, element):
-    """Polar scattering angle from the screened-Rutherford inversion, with
-    the screening parameter from the chosen model."""
+    """Polar scattering angle from the screened-Rutherford inversion, with the
+    screening parameter from the chosen model. If elastic_model="mott" but no
+    NIST Mott transport table exists for `element` (e.g. W), fall back to the
+    analytic screened-Rutherford screening for that element (warned once)."""
     if elastic_model == "mott":
-        logE, logA = _mott_alpha_table(element, Z)
-        alpha = 10.0**np.interp(np.log10(E_keV * 1e3), logE, logA)
+        try:
+            logE, logA = _mott_alpha_table(element, Z)
+            alpha = 10.0**np.interp(np.log10(E_keV * 1e3), logE, logA)
+        except FileNotFoundError:
+            if element not in _NO_MOTT_WARNED:
+                print(f"transport: no Mott transport table for {element!r}; using "
+                      f"the analytic screened-Rutherford screening for it instead.")
+                _NO_MOTT_WARNED.add(element)
+            alpha = _alpha_sr_joy(Z, E_keV)
     else:
         alpha = _alpha_sr_joy(Z, E_keV)
     R = rng.random(E_keV.shape)
