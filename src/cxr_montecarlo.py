@@ -77,8 +77,12 @@ TRANSPORT_ELEMENTS = {
     "Si": {"Z": 14, "A": 28.085, "J_keV": 0.173},
     "Ge": {"Z": 32, "A": 72.630, "J_keV": 0.350},
     "Se": {"Z": 34, "A": 78.971, "J_keV": 0.348},
+    "S":  {"Z": 16, "A": 32.06,  "J_keV": 0.180},
     "Mo": {"Z": 42, "A": 95.95,  "J_keV": 0.424},
     "W":  {"Z": 74, "A": 183.84, "J_keV": 0.727},
+    "Zr": {"Z": 40, "A": 91.224, "J_keV": 0.393},
+    "Hf": {"Z": 72, "A": 178.49, "J_keV": 0.705},
+    "Pt": {"Z": 78, "A": 195.08, "J_keV": 0.790},
 }
 
 
@@ -162,23 +166,24 @@ def _mott_alpha_table(element, Z):
     return np.log10(E_eV), np.log10(alpha)
 
 
-_NO_MOTT_WARNED = set()
+_NO_MOTT = set()  # elements with no NIST Mott table -> screened-Rutherford
 
 
 def _sample_cos_theta(Z, E_keV, rng, elastic_model, element):
     """Polar scattering angle from the screened-Rutherford inversion, with the
     screening parameter from the chosen model. If elastic_model="mott" but no
     NIST Mott transport table exists for `element` (e.g. W), fall back to the
-    analytic screened-Rutherford screening for that element (warned once)."""
-    if elastic_model == "mott":
+    analytic screened-Rutherford screening for that element. The miss is cached
+    in _NO_MOTT so we don't re-stat the filesystem every transport step
+    (lru_cache doesn't cache the FileNotFoundError); warned once."""
+    if elastic_model == "mott" and element not in _NO_MOTT:
         try:
             logE, logA = _mott_alpha_table(element, Z)
             alpha = 10.0**np.interp(np.log10(E_keV * 1e3), logE, logA)
         except FileNotFoundError:
-            if element not in _NO_MOTT_WARNED:
-                print(f"transport: no Mott transport table for {element!r}; using "
-                      f"the analytic screened-Rutherford screening for it instead.")
-                _NO_MOTT_WARNED.add(element)
+            print(f"transport: no Mott transport table for {element!r}; using "
+                  f"the analytic screened-Rutherford screening for it instead.")
+            _NO_MOTT.add(element)
             alpha = _alpha_sr_joy(Z, E_keV)
     else:
         alpha = _alpha_sr_joy(Z, E_keV)
@@ -687,7 +692,7 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
     T_i = xp.asarray(T_keV, dtype=float)[:, None]
     k = xp.asarray(k_eV, dtype=float)[None, :] / 1e3   # keV
     T_f = T_i - k
-    ok = T_f > 1e-6
+    ok = (T_f > 1e-6) & (k > 0.0)   # k>0: no photon (and no 1/k blowup) at k=0
     T_f = xp.where(ok, T_f, 1e-6)
 
     p_i = xp.sqrt(T_i * (T_i + 2.0 * mc2)) / mc2
@@ -701,7 +706,7 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
               / (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_f)))
 
     dsig = (16.0 / 3.0 * ALPHA_FS * R_E_CM2 * Z**2
-            / (k * 1e3) / p_i**2 * born_log * elwert)   # per eV
+            / xp.maximum(k * 1e3, 1e-30) / p_i**2 * born_log * elwert)   # per eV
     return xp.where(ok, dsig, 0.0)
 
 
@@ -742,6 +747,11 @@ def mc_brem_spectrum(
 
     E_grid = xp.asarray(E_grid_eV, dtype=float)
     mu = _mu_total_inv_ang(comp, E_grid)               # (NE,) [1/Ang]
+    # The Henke absorption tables span ~20 eV - 30 keV; outside that the wide
+    # brem grid gets NaN (above 30 keV) or inf (at E=0), and a single bad bin
+    # makes brem_wide -- and its integrated count rate -- NaN. Hard X-rays escape
+    # essentially unattenuated, so treat an unavailable mu as zero (transparent).
+    mu = xp.nan_to_num(mu, nan=0.0, posinf=0.0, neginf=0.0)
 
     seg_r = xp.asarray(segments["r_mid"])
     seg_L = xp.asarray(segments["L_ang"])
@@ -774,20 +784,36 @@ def run_case(case):
 
     case: a plain dict --
         required: crystal, composition, hkl_list, B_ang2, E0_keV, thickness_ang,
-                E_grid = (start_eV, stop_eV, step_eV), theta_obs_rad, Ne,
-                Ne_brem, seed
+                theta_obs_rad, Ne, Ne_brem, seed, and EITHER a single
+                E_grid = (start_eV, stop_eV, step_eV) OR the decoupled pair
+                E_grid_line / E_grid_brem (each a (start, stop, step) tuple):
+                the lines are evaluated on the fine NARROW E_grid_line, the
+                smooth bremsstrahlung on the coarse WIDE E_grid_brem (extend the
+                latter to the beam energy for the full measured spectrum, without
+                paying the line cost up there -- the lines top out at a few keV).
         optional: tilt_deg (0), tilt_azim_deg (0), beam_uvw (None),
                 azimuth_rad (0), E_cut_lines_keV (5), E_cut_brem_keV (1),
+                spec_chunk (40000) / brem_chunk (20000): segments per GPU matmul
+                -- lower these to cap peak GPU memory on a busy/shared device,
                 sinc_cutoff (None = exact lineshapes; windowing buys nothing
                 for bulk targets, where scattering Doppler-spreads the lines
                 across the whole grid),
-                brem_step_eV (10; the smooth background is computed on this
-                coarse grid and interpolated onto E_grid)
+                brem_step_eV (10; legacy single-E_grid fallback only)
 
-    Returns dict(E_grid, spec, brem [both photons/eV/sr/electron], eta,
-                n_segments) plus the case's crystal/E0 for bookkeeping.
+    Returns dict(E_grid, spec, brem [on E_grid], E_grid_brem, brem_wide [the
+                full-range background], eta, n_segments) plus crystal/E0.
     """
-    E_grid = np.arange(*case["E_grid"])
+    # two photon-energy grids: the lines (the expensive sinc^2) on a fine NARROW
+    # grid, the smooth bremsstrahlung on a coarse WIDE one (extend it to the beam
+    # energy to capture the full measured spectrum without paying line cost
+    # there). Legacy single-grid cases (E_grid + brem_step_eV) still work.
+    if "E_grid_line" in case:
+        E_grid = np.arange(*case["E_grid_line"])
+        E_brem = np.arange(*case["E_grid_brem"])
+    else:
+        E_grid = np.arange(*case["E_grid"])
+        step_b = case.get("brem_step_eV", 10.0)
+        E_brem = np.arange(E_grid[0], E_grid[-1] + step_b, step_b)
     beam, n_hat = tilted_geometry(
         case["theta_obs_rad"],
         np.deg2rad(case.get("tilt_deg", 0.0)),
@@ -803,20 +829,24 @@ def run_case(case):
         segs, E_grid, crystal=case["crystal"], hkl_list=case["hkl_list"],
         n_hat=n_hat, B_ang2=case["B_ang2"], composition=case["composition"],
         beam_uvw=case.get("beam_uvw"), azimuth_rad=case.get("azimuth_rad", 0.0),
-        sinc_cutoff=case.get("sinc_cutoff"))
+        sinc_cutoff=case.get("sinc_cutoff"), chunk=case.get("spec_chunk") or 40000)
 
     segs_b = simulate_trajectories(
         case["E0_keV"], case["Ne_brem"], case["thickness_ang"],
         composition=case["composition"],
         E_cut_keV=case.get("E_cut_brem_keV", 1.0),
         seed=case["seed"] + 1, beam_dir=beam)
-    step_b = case.get("brem_step_eV", 10.0)
-    E_coarse = np.arange(E_grid[0], E_grid[-1] + step_b, step_b)
-    brem_c = mc_brem_spectrum(segs_b, E_coarse, composition=case["composition"],
-                              n_hat=n_hat)
-    brem = np.interp(E_grid, E_coarse, brem_c)
+    brem_wide = mc_brem_spectrum(segs_b, E_brem, composition=case["composition"],
+                                 n_hat=n_hat, chunk=case.get("brem_chunk") or 20000)
+    brem = np.interp(E_grid, E_brem, brem_wide)   # brem under the lines (line grid)
+
+    # Hand this case's GPU scratch back to the OS so the CuPy memory pool can't
+    # accumulate (and fragment) across a long sweep until it fills the card.
+    if _GPU:
+        cp.get_default_memory_pool().free_all_blocks()
 
     return dict(E_grid=E_grid, spec=spec, brem=brem,
+                E_grid_brem=E_brem, brem_wide=brem_wide,
                 eta=segs["n_backscattered"] / segs["Ne"],
                 n_segments=int(segs["L_ang"].size),
                 crystal=case["crystal"], E0_keV=case["E0_keV"])

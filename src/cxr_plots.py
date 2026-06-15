@@ -5,10 +5,12 @@ cxr_plots.py
 All plotting for the analysis notebook, kept out of the notebook itself.
 
 Intrinsic spectra
-  * :func:`plot_by_energy` -- one figure per beam energy, one panel per polar
-    tilt, one curve per azimuth. With ``collapse_azimuth=True`` each panel shows
-    only the best azimuth (highest spectral peak), so a big azimuth sweep stays
-    one curve per panel.
+  * :func:`plot_by_energy` -- one figure PER POLAR TILT, every beam energy on a
+    single axis (each at its best azimuth when ``collapse_azimuth=True``).
+    Individual figures, so a wide tilt sweep doesn't run off-screen.
+  * :func:`plot_full_spectrum` -- the full measured range: sharp coherent lines
+    (fine line grid) on the broad brem evaluated out to the beam energy (wide
+    brem grid). Needs a sweep run with a separate ``E_grid_brem``.
   * :func:`plot_peak_vs_tilt` -- a single overview: best-azimuth peak flux vs
     polar tilt, one line per energy. The "which tilt wins" figure for big sweeps.
 
@@ -37,21 +39,102 @@ _EFF_CACHE = {}
 
 
 def _mode(settings):
-    return "EDS-convolved" if settings.convolve_with_det else "intrinsic"
+    return "EDS-convolved" if getattr(settings, "convolve_with_det", False) else "intrinsic"
 
 
-def _line_brem(r, settings):
+def _line_brem(r, settings, convolve=None):
     """Detected line and brem densities (per eV, before the unit scale) for one
-    record, honoring the QE / convolution / brem-source flags."""
+    record, honoring the QE / brem-source flags. ``convolve`` overrides
+    settings.convolve_with_det when given (True/False), so a caller can draw the
+    intrinsic (convolve=False) and detector-convolved (convolve=True) spectra
+    side by side."""
+    do_conv = getattr(settings, "convolve_with_det", False) if convolve is None else convolve
     qe = detector_efficiency(r["E_grid"]) if settings.apply_detector_qe else 1.0
     line_in = r["spec"] * qe
     line_det = (
-        convolve_detector(r["E_grid"], line_in, r["fwhm"])
-        if settings.convolve_with_det
-        else line_in
+        convolve_detector(r["E_grid"], line_in, r["fwhm"]) if do_conv else line_in
     )
-    brem_det = detected_background(r, settings) / r["scale"]
+    brem_det = detected_background(r, settings, convolve=do_conv) / r["scale"]
     return line_det, brem_det
+
+
+# ---- interactive viewer ------------------------------------------------------
+def browse(results, settings, kind="by_energy", label="polar tilt", static=None, **kw):
+    """Page through one figure type BY POLAR TILT instead of printing every tilt
+    stacked. ``kind``: "by_energy" | "full" | "chunk" | "timepix".
+
+    A tilt slider + Prev/Next swaps a freshly-drawn figure into an output area --
+    reliable on the **inline** backend (recommended; no ``%matplotlib widget`` /
+    ipympl needed, and it behaves over SSH). ``static=True`` (or no ipywidgets,
+    e.g. nbconvert -> PDF) instead draws every tilt stacked so the export holds
+    them all. Extra kwargs pass to the per-tilt drawer (include_brem, floor_frac,
+    n_mc)."""
+    drawers = {
+        "by_energy": (_draw_by_energy, (15.0, 5.2)),
+        "full": (_draw_full_spectrum, (16.0, 5.2)),
+        "chunk": (_draw_chunk, (14.0, 9.5)),
+        "timepix": (_draw_timepix_detected, (9.0, 5.2)),
+    }
+    if kind not in drawers:
+        raise ValueError(f"kind must be one of {list(drawers)}")
+    draw, figsize = drawers[kind]
+    recs = records(results)
+    if kind == "full":
+        recs = [r for r in recs if r.get("brem_wide") is not None]
+    if not recs:
+        print("no results to browse" +
+              (" (need E_grid_brem for kind='full')" if kind == "full" else ""))
+        return None
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    by_tilt = {t: [r for r in recs if r["case"]["tilt_deg"] == t] for t in tilts}
+
+    if static is None:                       # auto: interactive if widgets exist
+        try:
+            import ipywidgets  # noqa: F401
+            static = False
+        except ImportError:
+            static = True
+    if not static:
+        _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw)
+        return None
+    # static: every tilt stacked (PDF export / no ipywidgets)
+    figs = []
+    for t in tilts:
+        fig = plt.figure(figsize=figsize)
+        draw(fig, by_tilt[t], settings, **kw)
+        figs.append(fig)
+    return figs
+
+
+def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
+    """Polar-tilt slider + Prev/Next that renders a FRESH figure per tilt into an
+    Output widget (clear + redraw). No dependence on live-canvas redraw, so it
+    works reliably on the inline backend and over SSH (ipympl's persistent-figure
+    redraw is what tends to get stuck showing one frame)."""
+    import ipywidgets as widgets
+    from IPython.display import display
+
+    out = widgets.Output()
+    slider = widgets.IntSlider(min=0, max=len(tilts) - 1, value=0, description=label,
+                               continuous_update=False,
+                               layout=widgets.Layout(width="60%"))
+    prev = widgets.Button(description="< Prev", layout=widgets.Layout(width="80px"))
+    nxt = widgets.Button(description="Next >", layout=widgets.Layout(width="80px"))
+
+    def render(i):
+        fig = plt.figure(figsize=figsize)
+        draw(fig, by_tilt[tilts[i]], settings, **kw)
+        with out:
+            out.clear_output(wait=True)
+            display(fig)
+        plt.close(fig)                       # shown; don't leak or double-display
+
+    prev.on_click(lambda b: setattr(slider, "value", max(0, slider.value - 1)))
+    nxt.on_click(lambda b: setattr(slider, "value", min(len(tilts) - 1, slider.value + 1)))
+    slider.observe(lambda ch: render(ch["new"]), names="value")
+    display(widgets.HBox([prev, slider, nxt]))
+    display(out)
+    render(0)
 
 
 # ---- intrinsic spectra -------------------------------------------------------
@@ -91,37 +174,136 @@ def plot_tilt_panel(ax, group, settings, include_brem=True, collapse_azimuth=Fal
     ax.legend(title=("dashed: brem" if include_brem else None), fontsize=8)
 
 
-def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=False, ncols=4):
-    """One figure per beam energy; panels = polar tilt, curves = azimuth (or the
-    single best azimuth if ``collapse_azimuth``)."""
+def _draw_by_energy(fig, trecs, settings, include_brem=True, collapse_azimuth=True):
+    """Render ONE polar tilt onto ``fig`` (cleared first): every beam energy
+    overlaid, LEFT intrinsic / RIGHT detector-convolved."""
+    fig.clear()
+    ax_raw, ax_conv = fig.subplots(1, 2, sharex=True)
+    energies = sorted({r["case"]["E0_keV"] for r in trecs})
+    for i, E0 in enumerate(energies):
+        grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
+        if not grp:
+            continue
+        if collapse_azimuth and len(grp) > 1:
+            grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
+        c = COLORS[i % len(COLORS)]
+        for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
+            az = r["case"]["tilt_azim_deg"]
+            lbl = rf"{E0:g} keV ($\phi={az:0.1f}\degree$)"
+            Ek = r["E_grid"] / 1e3
+            for ax, conv in ((ax_raw, False), (ax_conv, True)):
+                line_det, brem_det = _line_brem(r, settings, convolve=conv)
+                y = (line_det + brem_det) if include_brem else line_det
+                ax.plot(Ek, y * r["scale"], color=c, lw=1.3, label=lbl)
+                if include_brem:
+                    ax.plot(Ek, brem_det * r["scale"], color=c, ls="--", lw=0.6)
+    case = trecs[0]["case"]
+    tag = "best azimuth/energy" if collapse_azimuth else "all azimuths"
+    fig.suptitle(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
+                 rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ ({tag})",
+                 fontsize=13)
+    for ax, sub in ((ax_raw, "intrinsic"), (ax_conv, "detector-convolved")):
+        ax.set_title(sub, fontsize=11)
+        ax.set_xlabel("Photon energy (keV)")
+        ax.set_ylabel("Intensity (Phs/eV/s/nA)")
+        ax.set_ylim(bottom=0)
+        ax.margins(x=0)
+        ax.grid(alpha=0.3)
+        ax.legend(title=("dashed: brem" if include_brem else None), fontsize=9)
+    fig.tight_layout()
+
+
+def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=True):
+    """One figure PER POLAR TILT, every beam energy overlaid (best azimuth when
+    ``collapse_azimuth``); LEFT intrinsic, RIGHT detector-convolved. For
+    click-through use ``browse(results, settings, kind="by_energy")``."""
     recs = records(results)
     if not recs:
         print("no results yet")
         return []
-    energies = sorted({r["case"]["E0_keV"] for r in recs})
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     figs = []
-    for E0 in energies:
-        panels = []
-        for t in tilts:
-            grp = [
-                r
-                for r in recs
-                if r["case"]["E0_keV"] == E0 and r["case"]["tilt_deg"] == t
-            ]
-            if grp:
-                panels.append(grp)
-        nrows = (len(panels) + ncols - 1) // ncols
-        fig, axes = plt.subplots(
-            nrows, ncols, figsize=(5 * ncols, 4.5 * nrows), squeeze=False
-        )
-        for ax in axes.ravel()[len(panels):]:
-            ax.axis("off")
-        for ax, grp in zip(axes.ravel(), panels):
-            plot_tilt_panel(ax, grp, settings, include_brem, collapse_azimuth)
-        tag = "best azimuth" if collapse_azimuth else "all azimuths"
-        fig.suptitle(f"{E0:g} keV — {_mode(settings)} ({tag})", fontsize=15)
-        fig.tight_layout()
+    for t in tilts:
+        fig = plt.figure(figsize=(15.0, 5.2))
+        _draw_by_energy(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
+                        settings, include_brem=include_brem,
+                        collapse_azimuth=collapse_azimuth)
+        figs.append(fig)
+    return figs
+
+
+def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True,
+                        floor_frac=1e-4):
+    """Render ONE polar tilt of the full measured-range view onto ``fig``: sharp
+    lines + wide brem out to the beam energy, log y, LEFT intrinsic/RIGHT detector."""
+    fig.clear()
+    ax_raw, ax_conv = fig.subplots(1, 2, sharex=True)
+    energies = sorted({r["case"]["E0_keV"] for r in trecs})
+    ymax = {"raw": 0.0, "conv": 0.0}
+    xmax = 0.0
+    for i, E0 in enumerate(energies):
+        grp = [r for r in trecs
+               if r["case"]["E0_keV"] == E0 and r.get("brem_wide") is not None]
+        if not grp:
+            continue
+        if collapse_azimuth and len(grp) > 1:
+            grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
+        r = grp[0]
+        c = COLORS[i % len(COLORS)]
+        az = r["case"]["tilt_azim_deg"]
+        lbl = rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)"
+        Eb = r["E_grid_brem"]
+        qe_b = detector_efficiency(Eb) if settings.apply_detector_qe else 1.0
+        brem_wide_det = r["brem_wide"] * qe_b * r["scale"]
+        xmax = max(xmax, float(Eb[-1]) / 1e3)   # full brem grid -> beam energy
+        for ax, conv, key in ((ax_raw, False, "raw"), (ax_conv, True, "conv")):
+            line_det, brem_det = _line_brem(r, settings, convolve=conv)
+            total_line = (line_det + brem_det) * r["scale"]
+            ax.plot(Eb / 1e3, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
+            ax.plot(r["E_grid"] / 1e3, total_line, color=c, lw=1.2, label=lbl)
+            ymax[key] = max(ymax[key],
+                            float(np.nanmax(total_line)) if total_line.size else 0.0)
+    case = trecs[0]["case"]
+    fig.suptitle(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
+                 rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — full "
+                 rf"measured range (dashed = brem)", fontsize=13)
+    for ax, sub, key in ((ax_raw, "intrinsic", "raw"),
+                         (ax_conv, "detector-convolved", "conv")):
+        if logy and ymax[key] > 0:
+            ax.set_yscale("log")
+            ax.set_ylim(ymax[key] * floor_frac, ymax[key] * 2)
+        else:
+            ax.set_ylim(bottom=0)
+        ax.set_title(sub, fontsize=11)
+        ax.set_xlabel("Photon energy (keV)")
+        ax.set_ylabel("Intensity (Phs/eV/s/nA)")
+        if xmax > 0:
+            ax.set_xlim(0.0, xmax)   # span the full brem grid (to the beam energy)
+        else:
+            ax.margins(x=0)
+        ax.grid(alpha=0.3, which="both")
+        ax.legend(fontsize=8)
+    fig.tight_layout()
+
+
+def plot_full_spectrum(results, settings, collapse_azimuth=True, logy=True,
+                       floor_frac=1e-4):
+    """Full measured-range view (sharp lines on the wide brem, log y), ONE figure
+    per polar tilt. The x-axis spans the full brem grid (to the beam energy); the
+    log floor is ``floor_frac`` x the peak (~4 decades). For click-through use
+    ``browse(results, settings, kind="full")``. Needs records run with a separate
+    ``E_grid_brem`` (``brem_wide`` present)."""
+    recs = [r for r in records(results) if r.get("brem_wide") is not None]
+    if not recs:
+        print("no wide-brem records -- set E_grid_brem in the Sweep and re-run")
+        return []
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    figs = []
+    for t in tilts:
+        fig = plt.figure(figsize=(16.0, 5.2))
+        _draw_full_spectrum(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
+                            settings, collapse_azimuth=collapse_azimuth, logy=logy,
+                            floor_frac=floor_frac)
         figs.append(fig)
     return figs
 
@@ -153,58 +335,69 @@ def plot_peak_vs_tilt(results, settings):
     return fig
 
 
-def plot_chunk(results, names, settings):
-    """The best-azimuth spectrum for one streamed group (a single polar tilt):
-    one curve per beam energy, each at its winning azimuth. Drawn next to the
-    chunk's table during the run."""
-    best = sorted(best_azimuth(records(results, names)),
-                  key=lambda r: r["case"]["E0_keV"])
+def _draw_chunk(fig, trecs, settings):
+    """Render ONE polar tilt's best-azimuth 2x2 (total | CXR-only x intrinsic |
+    detector-convolved) onto ``fig`` (cleared first)."""
+    fig.clear()
+    best = sorted(best_azimuth(trecs), key=lambda r: r["case"]["E0_keV"])
     if not best:
-        return None
-    fig, (total_ax, back_sub_ax) = plt.subplots(2, 1, figsize=(7.5, 9.5))
-
+        return
+    (tot_raw, tot_conv), (cxr_raw, cxr_conv) = fig.subplots(2, 2, sharex=True)
     for i, r in enumerate(best):
         c = COLORS[i % len(COLORS)]
-        line_det, brem_det = _line_brem(r, settings)
         az, E0 = r["case"]["tilt_azim_deg"], r["case"]["E0_keV"]
-        total_ax.plot(r["E_grid"] / 1e3, (line_det + brem_det) * r["scale"], color=c, lw=1.2,
-                label=rf"{E0:g} keV ($\phi={az:g}\degree$)")
-        total_ax.plot(r["E_grid"] / 1e3, brem_det * r["scale"], color=c, ls="--", lw=0.6)
-        back_sub_ax.plot(r["E_grid"] / 1e3, line_det * r["scale"], color=c, lw=1.2,
-                label=rf"{E0:g} keV ($\phi={az:g}\degree$)")
+        lbl = rf"{E0:g} keV ($\phi={az:g}\degree$)"
+        E = r["E_grid"] / 1e3
+        line_raw, brem_raw = _line_brem(r, settings, convolve=False)   # intrinsic
+        line_conv, brem_conv = _line_brem(r, settings, convolve=True)  # detector
+        tot_raw.plot(E, (line_raw + brem_raw) * r["scale"], color=c, lw=1.2, label=lbl)
+        tot_raw.plot(E, brem_raw * r["scale"], color=c, ls="--", lw=0.6)
+        tot_conv.plot(E, (line_conv + brem_conv) * r["scale"], color=c, lw=1.2, label=lbl)
+        tot_conv.plot(E, brem_conv * r["scale"], color=c, ls="--", lw=0.6)
+        cxr_raw.plot(E, line_raw * r["scale"], color=c, lw=1.2, label=lbl)
+        cxr_conv.plot(E, line_conv * r["scale"], color=c, lw=1.2, label=lbl)
     case = best[0]["case"]
     fig.suptitle(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
-                 rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:g}\degree$ — best azimuth per energy",
-                 fontsize=14)
-    total_ax.set_title('Total X-ray Spectrum (Coherent + Brem)', fontsize=12)
-    total_ax.set_xlabel("Photon energy (keV)")
-    total_ax.set_ylabel("Intensity (Phs/eV/s/nA)")
-    total_ax.set_ylim(bottom=0)
-    total_ax.margins(x=0)
-    total_ax.grid(alpha=0.3)
-    total_ax.legend(title='Dashed=Brem Bkgnd', fontsize=9)
-
-    back_sub_ax.set_title('Brem-subtracted (CXR Only)', fontsize=12)
-    back_sub_ax.set_xlabel("Photon energy (keV)")
-    back_sub_ax.set_ylabel("Intensity (Phs/eV/s/nA)")
-    back_sub_ax.set_ylim(bottom=0)
-    back_sub_ax.margins(x=0)
-    back_sub_ax.grid(alpha=0.3)
-    back_sub_ax.legend(fontsize=9)
+                 rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:g}\degree$ — best azimuth per "
+                 rf"energy  (left: intrinsic   right: detector-convolved)", fontsize=14)
+    for ax, title, leg in (
+        (tot_raw,  'Total X-ray Spectrum (Coherent + Brem) — intrinsic', 'Dashed=Brem Bkgnd'),
+        (tot_conv, 'Total X-ray Spectrum (Coherent + Brem) — detector', 'Dashed=Brem Bkgnd'),
+        (cxr_raw,  'Brem-subtracted (CXR Only) — intrinsic', None),
+        (cxr_conv, 'Brem-subtracted (CXR Only) — detector', None),
+    ):
+        ax.set_title(title, fontsize=12)
+        ax.set_xlabel("Photon energy (keV)")
+        ax.set_ylabel("Intensity (Phs/eV/s/nA)")
+        ax.set_ylim(bottom=0)
+        ax.margins(x=0)
+        ax.grid(alpha=0.3)
+        ax.legend(title=leg, fontsize=9)
     fig.tight_layout()
-    plt.show()
-    return fig
 
 
-def stream_chunk(results, names, settings, collapse_azimuth=True, show_plot=True):
-    """Per-group feedback during a run: the best-azimuth plot and the
-    photon-counting table for the configs that just finished. ``show_plot`` draws
-    the best-azimuth spectra (one curve per energy). The table collapses the
-    azimuth sweep to the best azimuth per (tilt, energy) when ``collapse_azimuth``
-    (so a whole azimuth scan prints one row per beam energy); pass False to list
-    every azimuth."""
-    if show_plot:
-        plot_chunk(results, names, settings)
+def plot_chunk(results, settings):
+    """The best-azimuth 2x2 spectra (total | CXR-only x intrinsic | detector),
+    ONE figure per polar tilt. For click-through use
+    ``browse(results, settings, kind="chunk")``."""
+    recs = records(results)
+    if not recs:
+        print("no results yet")
+        return []
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    figs = []
+    for t in tilts:
+        fig = plt.figure(figsize=(14.0, 9.5))
+        _draw_chunk(fig, [r for r in recs if r["case"]["tilt_deg"] == t], settings)
+        figs.append(fig)
+    return figs
+
+
+def stream_chunk(results, names, settings, collapse_azimuth=True, **_):
+    """Per-group photon-counting table during a run (live progress). The 2x2
+    best-azimuth plots are no longer drawn inline -- page through them after the
+    run with ``browse(results, settings, kind="chunk")``. Extra kwargs (e.g. the
+    old ``show_plot``) are accepted and ignored."""
     recs = records(results, names)
     if collapse_azimuth:
         recs = best_azimuth(recs)
@@ -263,57 +456,66 @@ def _tpx_detected(r, settings, thickness_um, bias_v, n_mc, seed):
     return incident, resp.apply(incident)
 
 
+def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.0,
+                           collapse_azimuth=True, n_mc=80000, seed=0, floor_frac=1e-4):
+    """Render ONE polar tilt of the Timepix detected/incident view onto ``fig``
+    (cleared first): all energies overlaid, incident dotted / detected solid."""
+    fig.clear()
+    ax = fig.subplots(1, 1)
+    E_thr = _thr_keV()
+    energies = sorted({r["case"]["E0_keV"] for r in trecs})
+    ymax = 0.0
+    for i, E0 in enumerate(energies):
+        grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
+        if not grp:
+            continue
+        if collapse_azimuth and len(grp) > 1:
+            grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
+        c = COLORS[i % len(COLORS)]
+        for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
+            inc, det = _tpx_detected(r, settings, thickness_um, bias_v, n_mc, seed)
+            fin = inc[np.isfinite(inc)]
+            if fin.size:
+                ymax = max(ymax, float(fin.max()))
+            az = r["case"]["tilt_azim_deg"]
+            ax.plot(r["E_grid"] / 1e3, inc, color=c, ls=":", lw=1.0, alpha=0.7)
+            ax.plot(r["E_grid"] / 1e3, det, color=c, ls="-", lw=1.2,
+                    label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)")
+    case = trecs[0]["case"]
+    ax.axvline(E_thr, color="0.4", ls=":", lw=0.8, label=f"threshold {E_thr:.2f} keV")
+    if ymax > 0:
+        ax.set_yscale("log")
+        ax.set_ylim(ymax * floor_frac, ymax * 2)
+    ax.set_title(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
+                 rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — Timepix3 detected "
+                 rf"(solid) vs incident (dotted)", fontsize=12)
+    ax.set_xlabel("Photon energy (keV)")
+    ax.set_ylabel("Phs/eV/s/nA")
+    ax.margins(x=0)
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+
+
 def plot_timepix_detected(results, settings, thickness_um=300.0, bias_v=100.0,
-                          collapse_azimuth=False, n_mc=80000, seed=0, ncols=5):
-    """Incident (dotted) vs Timepix3-detected (solid) spectra, log scale; one
-    figure per energy, panels by polar tilt, curves by azimuth (or best)."""
+                          collapse_azimuth=True, n_mc=80000, seed=0, ncols=5,
+                          floor_frac=1e-4):
+    """Incident (dotted) vs Timepix3-detected (solid) spectra, log scale; ONE
+    figure per polar tilt, all energies overlaid (best azimuth each). For
+    click-through use ``browse(results, settings, kind="timepix")``. (``ncols``
+    is accepted for backward compatibility and ignored.)"""
     recs = records(results)
     if not recs:
         print("no results yet")
         return []
-    E_thr = _thr_keV()
-    energies = sorted({r["case"]["E0_keV"] for r in recs})
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     figs = []
-    for E0 in energies:
-        panels = []
-        for t in tilts:
-            grp = [r for r in recs
-                   if r["case"]["E0_keV"] == E0 and r["case"]["tilt_deg"] == t]
-            if collapse_azimuth and len(grp) > 1:
-                grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
-            if grp:
-                panels.append(sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]))
-        nrows = (len(panels) + ncols - 1) // ncols
-        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4.5 * nrows),
-                                 squeeze=False)
-        for ax in axes.ravel()[len(panels):]:
-            ax.axis("off")
-        for ax, grp in zip(axes.ravel(), panels):
-            ymax = 0.0
-            for i, r in enumerate(grp):
-                inc, det = _tpx_detected(r, settings, thickness_um, bias_v, n_mc, seed)
-                fin = inc[np.isfinite(inc)]
-                if fin.size:
-                    ymax = max(ymax, float(fin.max()))
-                c = COLORS[i % len(COLORS)]
-                ax.plot(r["E_grid"] / 1e3, inc, color=c, ls=":", lw=0.7, alpha=0.45)
-                ax.plot(r["E_grid"] / 1e3, det, color=c, ls="-", lw=1.2,
-                        label=rf"$\phi={r['case']['tilt_azim_deg']:.1f}\degree$")
-            case = grp[0]["case"]
-            ax.axvline(E_thr, color="0.4", ls=":", lw=0.8)
-            if ymax > 0:
-                ax.set_yscale("log")
-                ax.set_ylim(ymax * 1e-6, ymax * 2)
-            ax.set_title(rf"{case['name'].split()[0]}, {case['E0_keV']:g} keV, "
-                         rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:g}\degree$",
-                         fontsize=11)
-            ax.set_xlabel("Photon energy (keV)", fontsize=10)
-            ax.set_ylabel("Phs/eV/s/nA", fontsize=10)
-            ax.margins(x=0); ax.grid(alpha=0.3, which="both")
-            ax.legend(title="solid: detected\ndotted: incident", fontsize=8)
-        fig.suptitle(f"{E0:g} keV — Timepix3 detected vs incident", fontsize=15)
-        fig.tight_layout()
+    for t in tilts:
+        fig = plt.figure(figsize=(9.0, 5.2))
+        _draw_timepix_detected(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
+                               settings, thickness_um=thickness_um, bias_v=bias_v,
+                               collapse_azimuth=collapse_azimuth, n_mc=n_mc, seed=seed,
+                               floor_frac=floor_frac)
         figs.append(fig)
     return figs
 
@@ -370,6 +572,7 @@ _HEATMAP_QUANTITIES = [
     ("line_eV", "coherent line energy  (eV)", "plasma"),
     ("fwhm_eV", "line FWHM  (eV)", "magma"),
     ("line_frac", "integrated line / total spectral flux", "cividis"),
+    ("line_flux", "integrated coherent line flux  (Phs/s)", "viridis"),
     ("total_flux", "total integrated flux  (Phs/s)", "viridis"),
 ]
 
