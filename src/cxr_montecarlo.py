@@ -536,6 +536,28 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
     beta_all = beta_from_keV(seg_E)                   # speed/c per segment
     v_all = beta_all[:, None] * seg_v                 # velocity vectors (c=1)
 
+    # chi_g / U_g are smooth in energy AWAY from absorption edges, so evaluate
+    # them on a tabulation grid and interpolate at the per-segment resonance
+    # energies ON THE GPU (step 3) -- a few ms over ~10^3 grid points instead of
+    # ~0.25 s/case over ~10^5 segments, and E_res stays on the device (no
+    # per-reflection GPU->CPU->GPU round-trip; that structure-factor CPU cost was
+    # what capped GPU utilisation on a fast card). The grid is a 1 eV mesh UNION
+    # the basis elements' native Henke energies, which densely sample the edges --
+    # a plain uniform mesh mis-resolves the edge jumps (tens of % at e.g. the
+    # C K-edge). Window matches the keep mask below.
+    from atomic_form_factors import load_henke
+    _pad = 0.2 * (float(E_grid_eV[-1]) - float(E_grid_eV[0]))
+    _lo, _hi = float(E_grid_eV[0]) - _pad, float(E_grid_eV[-1]) + _pad
+    _grids = [np.arange(_lo, _hi + 1.0, 1.0)]
+    for _el in {el for el, _ in info["basis"]}:
+        try:
+            _Eh = load_henke(_el)[0]
+            _grids.append(_Eh[(_Eh >= _lo) & (_Eh <= _hi)])
+        except Exception:
+            pass
+    E_tab = np.unique(np.concatenate(_grids))
+    E_tab_g = xp.asarray(E_tab)
+
     for hkl in hkl_list:
         # reciprocal vector in the sample frame: construction frame by
         # default ([001] along the slab normal), rotated if beam_uvw given
@@ -571,12 +593,17 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         dnm = denom[idx]
         vdg = v_dot_g[idx]
 
-        # -- 3. couplings evaluated AT each segment's resonance energy ----------
-        # (amplitudes vary slowly across the narrow line; freezing them at
-        # E_res is accurate to the linewidth/E_res level)
-        E_r_cpu = _to_cpu(E_r)
-        chi = xp.asarray(chi_g(crystal, hkl, E_r_cpu, B_ang2, use_henke))
-        eUg_over_m = xp.asarray(U_g(crystal, hkl, E_r_cpu, B_ang2, use_henke)) / M_E_EV
+        # -- 3. couplings AT each segment's resonance energy --------------------
+        # (amplitudes vary slowly across the narrow line; freezing them at E_res
+        # is accurate to the linewidth/E_res level). Tabulated on E_tab (CPU, a
+        # few ms) and interpolated at E_res ON THE GPU; chi_g/U_g are complex, so
+        # interpolate real and imaginary parts separately.
+        chi_tab = np.asarray(chi_g(crystal, hkl, E_tab, B_ang2, use_henke))
+        u_tab = np.asarray(U_g(crystal, hkl, E_tab, B_ang2, use_henke))
+        chi = (xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.real))
+               + 1j * xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.imag)))
+        eUg_over_m = (xp.interp(E_r, E_tab_g, xp.asarray(u_tab.real))
+                      + 1j * xp.interp(E_r, E_tab_g, xp.asarray(u_tab.imag))) / M_E_EV
 
         # -- 4. photon kinematics per segment ------------------------------------
         k_vec = om[:, None] * n_hat_d     # photon wavevector omega * n_hat
@@ -946,7 +973,7 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
             return _serial()
         if max_workers is None:
             ncpu = os.process_cpu_count() or os.cpu_count() or 8
-            nw = max(2, min(n, ncpu // 4, 8))
+            nw = max(2, min(n, ncpu // 2))   # ~physical cores; transport is the tail
         else:
             nw = min(max_workers, n)
         if nw < 2:
