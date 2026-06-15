@@ -191,6 +191,11 @@ class Sweep:
     dtheta_obs_deg: Optional[float] = None  # None -> Timepix3 default
     domega_sr: Optional[float] = None  # None -> Timepix3 default
     beam_uvw: Optional[tuple] = None  # None -> per-material default
+    # GPU memory knobs: segments per matmul in the spectrum / brem kernels (None
+    # -> 40000 / 20000 defaults). Lower them (e.g. 4000) to cap peak GPU memory on
+    # a busy or shared device; the cost is only a little extra loop overhead.
+    spec_chunk: Optional[int] = None
+    brem_chunk: Optional[int] = None
 
 
 def _seq(x):
@@ -253,6 +258,8 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     Ne=n_electrons,
                     Ne_brem=n_electrons_brem,
                     seed=1000 * i_c + 10 * i_e + 1,
+                    spec_chunk=sweep.spec_chunk,   # GPU rows/matmul (None -> run_case default)
+                    brem_chunk=sweep.brem_chunk,
                     # used downstream (detector model / unit scaling); ignored by run_case:
                     dtheta_obs_rad=np.deg2rad(dtheta),
                     domega_sr=domega,
