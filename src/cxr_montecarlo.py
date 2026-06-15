@@ -793,6 +793,8 @@ def run_case(case):
                 paying the line cost up there -- the lines top out at a few keV).
         optional: tilt_deg (0), tilt_azim_deg (0), beam_uvw (None),
                 azimuth_rad (0), E_cut_lines_keV (5), E_cut_brem_keV (1),
+                spec_chunk (40000) / brem_chunk (20000): segments per GPU matmul
+                -- lower these to cap peak GPU memory on a busy/shared device,
                 sinc_cutoff (None = exact lineshapes; windowing buys nothing
                 for bulk targets, where scattering Doppler-spreads the lines
                 across the whole grid),
@@ -827,7 +829,7 @@ def run_case(case):
         segs, E_grid, crystal=case["crystal"], hkl_list=case["hkl_list"],
         n_hat=n_hat, B_ang2=case["B_ang2"], composition=case["composition"],
         beam_uvw=case.get("beam_uvw"), azimuth_rad=case.get("azimuth_rad", 0.0),
-        sinc_cutoff=case.get("sinc_cutoff"))
+        sinc_cutoff=case.get("sinc_cutoff"), chunk=case.get("spec_chunk") or 40000)
 
     segs_b = simulate_trajectories(
         case["E0_keV"], case["Ne_brem"], case["thickness_ang"],
@@ -835,8 +837,13 @@ def run_case(case):
         E_cut_keV=case.get("E_cut_brem_keV", 1.0),
         seed=case["seed"] + 1, beam_dir=beam)
     brem_wide = mc_brem_spectrum(segs_b, E_brem, composition=case["composition"],
-                                 n_hat=n_hat)
+                                 n_hat=n_hat, chunk=case.get("brem_chunk") or 20000)
     brem = np.interp(E_grid, E_brem, brem_wide)   # brem under the lines (line grid)
+
+    # Hand this case's GPU scratch back to the OS so the CuPy memory pool can't
+    # accumulate (and fragment) across a long sweep until it fills the card.
+    if _GPU:
+        cp.get_default_memory_pool().free_all_blocks()
 
     return dict(E_grid=E_grid, spec=spec, brem=brem,
                 E_grid_brem=E_brem, brem_wide=brem_wide,
