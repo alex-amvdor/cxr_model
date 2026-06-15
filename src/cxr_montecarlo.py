@@ -536,6 +536,28 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
     beta_all = beta_from_keV(seg_E)                   # speed/c per segment
     v_all = beta_all[:, None] * seg_v                 # velocity vectors (c=1)
 
+    # chi_g / U_g are smooth in energy AWAY from absorption edges, so evaluate
+    # them on a tabulation grid and interpolate at the per-segment resonance
+    # energies ON THE GPU (step 3) -- a few ms over ~10^3 grid points instead of
+    # ~0.25 s/case over ~10^5 segments, and E_res stays on the device (no
+    # per-reflection GPU->CPU->GPU round-trip; that structure-factor CPU cost was
+    # what capped GPU utilisation on a fast card). The grid is a 1 eV mesh UNION
+    # the basis elements' native Henke energies, which densely sample the edges --
+    # a plain uniform mesh mis-resolves the edge jumps (tens of % at e.g. the
+    # C K-edge). Window matches the keep mask below.
+    from atomic_form_factors import load_henke
+    _pad = 0.2 * (float(E_grid_eV[-1]) - float(E_grid_eV[0]))
+    _lo, _hi = float(E_grid_eV[0]) - _pad, float(E_grid_eV[-1]) + _pad
+    _grids = [np.arange(_lo, _hi + 1.0, 1.0)]
+    for _el in {el for el, _ in info["basis"]}:
+        try:
+            _Eh = load_henke(_el)[0]
+            _grids.append(_Eh[(_Eh >= _lo) & (_Eh <= _hi)])
+        except Exception:
+            pass
+    E_tab = np.unique(np.concatenate(_grids))
+    E_tab_g = xp.asarray(E_tab)
+
     for hkl in hkl_list:
         # reciprocal vector in the sample frame: construction frame by
         # default ([001] along the slab normal), rotated if beam_uvw given
@@ -571,12 +593,17 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         dnm = denom[idx]
         vdg = v_dot_g[idx]
 
-        # -- 3. couplings evaluated AT each segment's resonance energy ----------
-        # (amplitudes vary slowly across the narrow line; freezing them at
-        # E_res is accurate to the linewidth/E_res level)
-        E_r_cpu = _to_cpu(E_r)
-        chi = xp.asarray(chi_g(crystal, hkl, E_r_cpu, B_ang2, use_henke))
-        eUg_over_m = xp.asarray(U_g(crystal, hkl, E_r_cpu, B_ang2, use_henke)) / M_E_EV
+        # -- 3. couplings AT each segment's resonance energy --------------------
+        # (amplitudes vary slowly across the narrow line; freezing them at E_res
+        # is accurate to the linewidth/E_res level). Tabulated on E_tab (CPU, a
+        # few ms) and interpolated at E_res ON THE GPU; chi_g/U_g are complex, so
+        # interpolate real and imaginary parts separately.
+        chi_tab = np.asarray(chi_g(crystal, hkl, E_tab, B_ang2, use_henke))
+        u_tab = np.asarray(U_g(crystal, hkl, E_tab, B_ang2, use_henke))
+        chi = (xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.real))
+               + 1j * xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.imag)))
+        eUg_over_m = (xp.interp(E_r, E_tab_g, xp.asarray(u_tab.real))
+                      + 1j * xp.interp(E_r, E_tab_g, xp.asarray(u_tab.imag))) / M_E_EV
 
         # -- 4. photon kinematics per segment ------------------------------------
         k_vec = om[:, None] * n_hat_d     # photon wavevector omega * n_hat
@@ -803,10 +830,14 @@ def run_case(case):
     Returns dict(E_grid, spec, brem [on E_grid], E_grid_brem, brem_wide [the
                 full-range background], eta, n_segments) plus crystal/E0.
     """
-    # two photon-energy grids: the lines (the expensive sinc^2) on a fine NARROW
-    # grid, the smooth bremsstrahlung on a coarse WIDE one (extend it to the beam
-    # energy to capture the full measured spectrum without paying line cost
-    # there). Legacy single-grid cases (E_grid + brem_step_eV) still work.
+    return _spectrum_case(case, _transport_case(case))
+
+
+def _transport_case(case):
+    """CPU-only phase of run_case: the line + brem trajectory transport (pure
+    numpy, never touches the GPU). Returns the segments + geometry + grids the
+    spectrum phase consumes. run_cases farms this out to a worker pool so the
+    transport of upcoming cases overlaps the GPU work on the current one."""
     if "E_grid_line" in case:
         E_grid = np.arange(*case["E_grid_line"])
         E_brem = np.arange(*case["E_grid_brem"])
@@ -817,34 +848,38 @@ def run_case(case):
     beam, n_hat = tilted_geometry(
         case["theta_obs_rad"],
         np.deg2rad(case.get("tilt_deg", 0.0)),
-        np.deg2rad(case.get("tilt_azim_deg", 0.0))
-    )
-
+        np.deg2rad(case.get("tilt_azim_deg", 0.0)))
     segs = simulate_trajectories(
         case["E0_keV"], case["Ne"], case["thickness_ang"],
         composition=case["composition"],
         E_cut_keV=case.get("E_cut_lines_keV", 5.0),
         seed=case["seed"], beam_dir=beam)
-    spec = mc_spectrum(
-        segs, E_grid, crystal=case["crystal"], hkl_list=case["hkl_list"],
-        n_hat=n_hat, B_ang2=case["B_ang2"], composition=case["composition"],
-        beam_uvw=case.get("beam_uvw"), azimuth_rad=case.get("azimuth_rad", 0.0),
-        sinc_cutoff=case.get("sinc_cutoff"), chunk=case.get("spec_chunk") or 40000)
-
     segs_b = simulate_trajectories(
         case["E0_keV"], case["Ne_brem"], case["thickness_ang"],
         composition=case["composition"],
         E_cut_keV=case.get("E_cut_brem_keV", 1.0),
         seed=case["seed"] + 1, beam_dir=beam)
+    return dict(E_grid=E_grid, E_brem=E_brem, n_hat=n_hat, segs=segs, segs_b=segs_b)
+
+
+def _spectrum_case(case, tp):
+    """GPU phase of run_case: line spectrum + brem from the already-transported
+    segments ``tp`` (from _transport_case). Runs in the main process, so only one
+    CUDA context ever touches the device."""
+    E_grid, E_brem, n_hat = tp["E_grid"], tp["E_brem"], tp["n_hat"]
+    segs, segs_b = tp["segs"], tp["segs_b"]
+    spec = mc_spectrum(
+        segs, E_grid, crystal=case["crystal"], hkl_list=case["hkl_list"],
+        n_hat=n_hat, B_ang2=case["B_ang2"], composition=case["composition"],
+        beam_uvw=case.get("beam_uvw"), azimuth_rad=case.get("azimuth_rad", 0.0),
+        sinc_cutoff=case.get("sinc_cutoff"), chunk=case.get("spec_chunk") or 40000)
     brem_wide = mc_brem_spectrum(segs_b, E_brem, composition=case["composition"],
                                  n_hat=n_hat, chunk=case.get("brem_chunk") or 20000)
     brem = np.interp(E_grid, E_brem, brem_wide)   # brem under the lines (line grid)
-
     # Hand this case's GPU scratch back to the OS so the CuPy memory pool can't
     # accumulate (and fragment) across a long sweep until it fills the card.
     if _GPU:
         cp.get_default_memory_pool().free_all_blocks()
-
     return dict(E_grid=E_grid, spec=spec, brem=brem,
                 E_grid_brem=E_brem, brem_wide=brem_wide,
                 eta=segs["n_backscattered"] / segs["Ne"],
@@ -875,26 +910,28 @@ def _worker_init():
 
 def run_cases(cases, max_workers=None, progress=True, callback=None):
     """
-    Run a list of case dicts through run_case in parallel worker processes.
-    Results come back in input order.
+    Run a list of case dicts through run_case, results in input order.
 
-    max_workers: None -> ~3/4 of the logical CPUs (capped at len(cases)),
-        leaving headroom for the desktop; an integer pins the worker count;
-        0 runs serially in this process (debugging).
-    progress: show a tqdm progress bar over COMPLETED cases (per-case
-        granularity -- individual cases can still take minutes).
-    callback: optional callable(i, case, out) invoked in THIS process as each
-        case finishes (completion order under parallelism, input order when
-        serial). Lets a caller stream results in -- accumulate, checkpoint,
-        or plot -- without waiting for the whole batch. Exceptions in the
-        callback propagate and abort the run.
+    GPU present (the usual path): the CPU transport is PIPELINED across a worker
+    pool while THIS process drives the spectrum/brem serially on the single CUDA
+    context -- the ~40% transport idle overlaps the GPU work, with no device
+    contention (multiple CUDA contexts are what crawled the old max_workers>1).
+    Workers run ONLY transport (pure CPU/numpy), never the GPU. Callbacks fire in
+    input order as each case's GPU phase finishes.
 
-    Two protections against "machine crawls during a scan":
-      * workers run at BELOW_NORMAL process priority (_worker_init);
-      * workers get single-threaded BLAS (OMP/OPENBLAS/MKL_NUM_THREADS=1,
-        inherited via the environment) -- N workers x M BLAS threads is the
-        classic oversubscription freeze. The parent's already-loaded numpy
-        is unaffected.
+    No GPU: cases run through a worker pool (or serially), completion order.
+
+    max_workers: None -> sized automatically (a few transport workers when a GPU
+        is present; ~3/4 of the CPUs otherwise). An integer pins the count; 0
+        runs everything serially in this process (debugging / safe fallback).
+    progress: tqdm bar over completed cases.
+    callback: callable(i, case, out) invoked in THIS process as each case
+        finishes; stream/checkpoint/plot without waiting for the batch.
+        Exceptions propagate and abort the run.
+
+    Crawl protections: workers run BELOW_NORMAL priority (_worker_init) and get
+    single-threaded BLAS (OMP/OPENBLAS/MKL_NUM_THREADS=1, inherited) -- N workers
+    x M BLAS threads is the classic oversubscription freeze.
     """
     def _maybe_bar(iterable):
         if not progress:
@@ -912,36 +949,60 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
             except ImportError:
                 return iterable
 
-    if max_workers is None:
-        if _GPU:
-            max_workers = 0
-        else:
-            ncpu = os.process_cpu_count() or os.cpu_count() or 8
-            max_workers = max(1, min(len(cases), ncpu * 3 // 4))
-    elif _GPU and max_workers > 1:
-        # N worker processes each open their own CUDA context on the one GPU and
-        # then serialize on it anyway -- no speedup, N x the VRAM, and the
-        # contention crawls the desktop. The spectrum (the heavy part) is already
-        # on the GPU; transport is a small CPU tail. Force a single context.
-        print(f"run_cases: GPU active -- ignoring max_workers={max_workers} and "
-              f"running serially (one CUDA context). Set max_workers=0 to silence.")
-        max_workers = 0
+    n = len(cases)
+    results = [None] * n
+    if n == 0:
+        return results
 
-    if max_workers == 0:
-        results = [None] * len(cases)
-        for i in _maybe_bar(range(len(cases))):
+    def _serial():
+        for i in _maybe_bar(range(n)):
             out = run_case(cases[i])
             results[i] = out
             if callback is not None:
                 callback(i, cases[i], out)
         return results
 
-    for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
-                "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-        os.environ[var] = "1"
+    def _single_thread_blas():
+        for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                    "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+            os.environ[var] = "1"
 
+    # ---- GPU: pipeline CPU transport (worker pool) behind the serial GPU ------
+    if _GPU:
+        if max_workers == 0:
+            return _serial()
+        if max_workers is None:
+            ncpu = os.process_cpu_count() or os.cpu_count() or 8
+            nw = max(2, min(n, ncpu // 2))   # ~physical cores; transport is the tail
+        else:
+            nw = min(max_workers, n)
+        if nw < 2:
+            return _serial()
+        _single_thread_blas()
+        from concurrent.futures import ProcessPoolExecutor
+        prefetch = nw + 2                          # keep the transport pool ahead
+        with ProcessPoolExecutor(max_workers=nw, initializer=_worker_init) as ex:
+            inflight = {i: ex.submit(_transport_case, cases[i])
+                        for i in range(min(prefetch, n))}
+            for i in _maybe_bar(range(n)):
+                tp = inflight.pop(i).result()         # transport (already overlapped)
+                j = i + prefetch
+                if j < n:
+                    inflight[j] = ex.submit(_transport_case, cases[j])
+                out = _spectrum_case(cases[i], tp)    # GPU, THIS process only
+                results[i] = out
+                if callback is not None:
+                    callback(i, cases[i], out)
+        return results
+
+    # ---- no GPU: serial in-process, or a full-case worker pool ---------------
+    if max_workers is None:
+        ncpu = os.process_cpu_count() or os.cpu_count() or 8
+        max_workers = max(1, min(n, ncpu * 3 // 4))
+    if max_workers == 0:
+        return _serial()
+    _single_thread_blas()
     from concurrent.futures import ProcessPoolExecutor, as_completed
-    results = [None] * len(cases)
     with ProcessPoolExecutor(max_workers=max_workers,
                              initializer=_worker_init) as ex:
         futures = {ex.submit(run_case, c): i for i, c in enumerate(cases)}
@@ -1010,6 +1071,16 @@ def detector_efficiency(E_eV, polymer_nm=300.0, al_nm=40.0, grid_open=0.78):
                   for el, count in (("C", 22), ("H", 10), ("N", 2), ("O", 5)))
     n_al = 2.70 / 26.982 * 0.602214076
     mu_al = _mu_total_inv_ang([("Al", n_al)], E)
+    # Above the Henke ceiling (~30 keV) the window attenuation is unavailable
+    # (NaN, and inf at E=0); the thin polymer/Al window is transparent to hard
+    # X-rays, so treat an unavailable mu as zero -> QE -> grid_open rather than
+    # NaN (which would clip the detected spectrum on a log plot). NB this
+    # window-transmission model assumes the Si diode is fully absorbing, so it
+    # OVERestimates QE above ~20 keV where the Si itself turns transparent -- use
+    # the Timepix forward model (plot_timepix_detected) for a faithful hard-X-ray
+    # detector response.
+    mu_poly = np.nan_to_num(mu_poly, nan=0.0, posinf=0.0, neginf=0.0)
+    mu_al = np.nan_to_num(mu_al, nan=0.0, posinf=0.0, neginf=0.0)
     return grid_open * np.exp(-mu_poly * polymer_nm * 10.0
                               - mu_al * al_nm * 10.0)
 

@@ -190,13 +190,13 @@ def _draw_by_energy(fig, trecs, settings, include_brem=True, collapse_azimuth=Tr
         for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
             az = r["case"]["tilt_azim_deg"]
             lbl = rf"{E0:g} keV ($\phi={az:0.1f}\degree$)"
-            Ek = r["E_grid"] / 1e3
+            Ee = r["E_grid"]
             for ax, conv in ((ax_raw, False), (ax_conv, True)):
                 line_det, brem_det = _line_brem(r, settings, convolve=conv)
                 y = (line_det + brem_det) if include_brem else line_det
-                ax.plot(Ek, y * r["scale"], color=c, lw=1.3, label=lbl)
+                ax.plot(Ee, y * r["scale"], color=c, lw=1.3, label=lbl)
                 if include_brem:
-                    ax.plot(Ek, brem_det * r["scale"], color=c, ls="--", lw=0.6)
+                    ax.plot(Ee, brem_det * r["scale"], color=c, ls="--", lw=0.6)
     case = trecs[0]["case"]
     tag = "best azimuth/energy" if collapse_azimuth else "all azimuths"
     fig.suptitle(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
@@ -204,7 +204,7 @@ def _draw_by_energy(fig, trecs, settings, include_brem=True, collapse_azimuth=Tr
                  fontsize=13)
     for ax, sub in ((ax_raw, "intrinsic"), (ax_conv, "detector-convolved")):
         ax.set_title(sub, fontsize=11)
-        ax.set_xlabel("Photon energy (keV)")
+        ax.set_xlabel("Photon energy (eV)")
         ax.set_ylabel("Intensity (Phs/eV/s/nA)")
         ax.set_ylim(bottom=0)
         ax.margins(x=0)
@@ -232,8 +232,8 @@ def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=True):
     return figs
 
 
-def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True,
-                        floor_frac=1e-4):
+def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True, logx=True,
+                        floor_frac=1e-2):
     """Render ONE polar tilt of the full measured-range view onto ``fig``: sharp
     lines + wide brem out to the beam energy, log y, LEFT intrinsic/RIGHT detector."""
     fig.clear()
@@ -255,12 +255,13 @@ def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True,
         Eb = r["E_grid_brem"]
         qe_b = detector_efficiency(Eb) if settings.apply_detector_qe else 1.0
         brem_wide_det = r["brem_wide"] * qe_b * r["scale"]
-        xmax = max(xmax, float(Eb[-1]) / 1e3)   # full brem grid -> beam energy
+        xmin = float(Eb[0])
+        xmax = max(xmax, float(Eb[-1]))   # full brem grid -> beam energy
         for ax, conv, key in ((ax_raw, False, "raw"), (ax_conv, True, "conv")):
             line_det, brem_det = _line_brem(r, settings, convolve=conv)
             total_line = (line_det + brem_det) * r["scale"]
-            ax.plot(Eb / 1e3, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
-            ax.plot(r["E_grid"] / 1e3, total_line, color=c, lw=1.2, label=lbl)
+            ax.plot(Eb, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
+            ax.plot(r["E_grid"], total_line, color=c, lw=1.2, label=lbl)
             ymax[key] = max(ymax[key],
                             float(np.nanmax(total_line)) if total_line.size else 0.0)
     case = trecs[0]["case"]
@@ -274,11 +275,13 @@ def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True,
             ax.set_ylim(ymax[key] * floor_frac, ymax[key] * 2)
         else:
             ax.set_ylim(bottom=0)
+        if logx:
+            ax.set_xscale("log")
         ax.set_title(sub, fontsize=11)
-        ax.set_xlabel("Photon energy (keV)")
+        ax.set_xlabel("Photon energy (eV)")
         ax.set_ylabel("Intensity (Phs/eV/s/nA)")
         if xmax > 0:
-            ax.set_xlim(0.0, xmax)   # span the full brem grid (to the beam energy)
+            ax.set_xlim(xmin, xmax)   # span the full brem grid (to the beam energy)
         else:
             ax.margins(x=0)
         ax.grid(alpha=0.3, which="both")
@@ -287,7 +290,7 @@ def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True,
 
 
 def plot_full_spectrum(results, settings, collapse_azimuth=True, logy=True,
-                       floor_frac=1e-4):
+                       floor_frac=1e-2):
     """Full measured-range view (sharp lines on the wide brem, log y), ONE figure
     per polar tilt. The x-axis spans the full brem grid (to the beam energy); the
     log floor is ``floor_frac`` x the peak (~4 decades). For click-through use
@@ -412,37 +415,38 @@ def _thr_keV():
 def plot_timepix_efficiency(thickness_um=300.0, bias_v=100.0, n_mc=80000, seed=0):
     """Detection efficiency (absorption x counting turn-on) and energy
     resolution / charge-loss bias vs photon energy for the Si quad."""
-    E_eff = np.arange(200.0, 8000.0, 100.0)
+    E_eff = np.arange(200.0, 60000.0, 25.0)
     key = (thickness_um, bias_v, n_mc, seed)
     resp = _EFF_CACHE.get(key)
     if resp is None:
         resp = tpx.build_response(
-            E_eff, np.arange(0.0, 9800.0, 25.0), n_mc=n_mc, seed=seed,
+            E_eff, np.arange(0.0, 60000.0, 100.0), n_mc=n_mc, seed=seed,
             thickness_um=thickness_um, bias_v=bias_v,
         )
         _EFF_CACHE[key] = resp
-    E_thr = _thr_keV()
+    E_thr = _thr_keV() * 1e3
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(13, 4.6))
-    axL.plot(E_eff / 1e3, resp["eps_abs"], "k--", lw=1.2,
+    axL.plot(E_eff, resp["eps_abs"], "k--", lw=1.2,
              label=r"$\epsilon_\mathrm{abs}$ (Si absorption)")
-    axL.plot(E_eff / 1e3, resp["P_det"], "b-", lw=1.8,
+    axL.plot(E_eff, resp["P_det"], "b-", lw=1.8,
              label=r"$P_\mathrm{det}$ (abs $\times$ counting)")
-    axL.axvline(E_thr, color="r", ls=":", label=f"threshold = {E_thr:.2f} keV")
-    axL.set(xlabel="Photon energy (keV)", ylabel="efficiency", ylim=(0, 1.05),
+    axL.axvline(E_thr, color="r", ls=":", label=f"threshold = {E_thr:.2f} eV")
+    axL.set(xlabel="Photon energy (eV)", ylabel="efficiency", ylim=(0, 1.05),
             title=f"Detection efficiency ({thickness_um:g} $\\mu$m Si, {bias_v:g} V, "
                   f"$\\sigma_\\mathrm{{diff}}$={resp['sigma_diff_um']:.1f} $\\mu$m)")
+    axL.set_xscale("log"); axL.set_xlim((min(E_eff), max(E_eff)))
     axL.margins(x=0); axL.grid(alpha=0.3); axL.legend()
-    axR.plot(E_eff / 1e3, tpx.energy_fwhm_eV(E_eff), "k-", lw=1.5,
+    axR.plot(E_eff, tpx.energy_fwhm_eV(E_eff), "k-", lw=1.5,
              label="analytic, single-pixel")
-    axR.plot(E_eff / 1e3, resp["fwhm_rec"], "b.", ms=4,
+    axR.plot(E_eff, resp["fwhm_rec"], "b.", ms=4,
              label="MC effective (tail + multi-pixel)")
     axR.set(xlabel="Photon energy (keV)", ylabel="energy FWHM (eV)",
             title="Energy resolution & charge-loss bias")
     axR.margins(x=0); axR.grid(alpha=0.3); axR.legend(loc="upper left")
     axR2 = axR.twinx()
-    axR2.plot(E_eff / 1e3, 100 * (1 - resp["mean_rec"] / E_eff), "g-", lw=1, alpha=0.5)
+    axR2.plot(E_eff, 100 * (1 - resp["mean_rec"] / E_eff), "g-", lw=1, alpha=0.5)
     axR2.set_ylabel("mean charge-loss deficit (%)", color="g")
-    axR2.tick_params(axis="y", colors="g"); axR2.set_ylim(bottom=0)
+    axR2.tick_params(axis="y", colors="g"); # axR2.set_ylim(bottom=0)
     fig.tight_layout()
     return fig
 
@@ -457,7 +461,7 @@ def _tpx_detected(r, settings, thickness_um, bias_v, n_mc, seed):
 
 
 def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.0,
-                           collapse_azimuth=True, n_mc=80000, seed=0, floor_frac=1e-4):
+                           collapse_azimuth=True, n_mc=80000, seed=0, floor_frac=1e-3):
     """Render ONE polar tilt of the Timepix detected/incident view onto ``fig``
     (cleared first): all energies overlaid, incident dotted / detected solid."""
     fig.clear()
@@ -478,8 +482,8 @@ def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.
             if fin.size:
                 ymax = max(ymax, float(fin.max()))
             az = r["case"]["tilt_azim_deg"]
-            ax.plot(r["E_grid"] / 1e3, inc, color=c, ls=":", lw=1.0, alpha=0.7)
-            ax.plot(r["E_grid"] / 1e3, det, color=c, ls="-", lw=1.2,
+            ax.plot(r["E_grid"], inc, color=c, ls=":", lw=1.0, alpha=0.7)
+            ax.plot(r["E_grid"], det, color=c, ls="-", lw=1.2,
                     label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)")
     case = trecs[0]["case"]
     ax.axvline(E_thr, color="0.4", ls=":", lw=0.8, label=f"threshold {E_thr:.2f} keV")
@@ -489,7 +493,7 @@ def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.
     ax.set_title(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
                  rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — Timepix3 detected "
                  rf"(solid) vs incident (dotted)", fontsize=12)
-    ax.set_xlabel("Photon energy (keV)")
+    ax.set_xlabel("Photon energy (eV)")
     ax.set_ylabel("Phs/eV/s/nA")
     ax.margins(x=0)
     ax.grid(alpha=0.3, which="both")
@@ -499,7 +503,7 @@ def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.
 
 def plot_timepix_detected(results, settings, thickness_um=300.0, bias_v=100.0,
                           collapse_azimuth=True, n_mc=80000, seed=0, ncols=5,
-                          floor_frac=1e-4):
+                          floor_frac=1e-3):
     """Incident (dotted) vs Timepix3-detected (solid) spectra, log scale; ONE
     figure per polar tilt, all energies overlaid (best azimuth each). For
     click-through use ``browse(results, settings, kind="timepix")``. (``ncols``
@@ -529,7 +533,7 @@ def plot_timepix_poisson(results, settings, integration_s=600.0, thickness_um=30
         print("no results yet")
         return None
     rng = np.random.default_rng(seed)
-    E_thr = _thr_keV()
+    E_thr = _thr_keV() * 1e3
     energies = sorted({r["case"]["E0_keV"] for r in recs})
     fig, axes = plt.subplots(1, len(energies), figsize=(6 * len(energies), 4.6),
                              squeeze=False)
@@ -540,14 +544,14 @@ def plot_timepix_poisson(results, settings, integration_s=600.0, thickness_um=30
         counts, expected = tpx.poisson_counts(
             r["E_grid"], det * settings.beam_current_na, integration_s, rng
         )
-        ax.step(r["E_grid"] / 1e3, counts, where="mid", color="k", lw=0.7,
+        ax.step(r["E_grid"], counts, where="mid", color="k", lw=0.7,
                 label=f"measured ({integration_s:g} s @ {settings.beam_current_na:g} nA)")
-        ax.plot(r["E_grid"] / 1e3, expected, "r-", lw=1.3, label="expected mean")
+        ax.plot(r["E_grid"], expected, "r-", lw=1.3, label="expected mean")
         ax.axvline(E_thr, color="b", ls=":", lw=0.8, label="threshold")
         ax.set_title(rf"{E0:g} keV, $\theta_\mathrm{{tilt}}={r['case']['tilt_deg']:g}\degree$, "
                      rf"$\phi={r['case']['tilt_azim_deg']:g}\degree$  "
                      rf"({counts.sum():.0f} cts)", fontsize=10)
-        ax.set_xlabel("Photon energy (keV)"); ax.set_ylabel("counts / bin")
+        ax.set_xlabel("Photon energy (eV)"); ax.set_ylabel("counts / bin")
         ax.margins(x=0); ax.grid(alpha=0.3); ax.legend(fontsize=8)
     fig.suptitle(f"Timepix3 Poisson 'measured' spectra "
                  f"({thickness_um:g} $\\mu$m Si, {bias_v:g} V)", fontsize=14)

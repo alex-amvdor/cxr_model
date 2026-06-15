@@ -8,6 +8,7 @@ __pycache__/
 
 *.png
 *.pdf
+*.html
 .claude/
 
 # Distribution / packaging
