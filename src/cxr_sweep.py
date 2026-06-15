@@ -45,7 +45,7 @@ MATERIAL_LABELS = {
     "ptse2": "PtSe2",
     "hfse2": "HfSe2",
     "zrse2": "ZrSe2",
-    "graphite": "HOPG",
+    "hopg": "HOPG",
     "diamond": "diamond",
     "silicon": "silicon",
 }
@@ -146,11 +146,11 @@ def crystal_params(material, n_families=4):
             B_ang2=0.46,
             E_grid=np.arange(100.0, 5000.0, 3.0),
         )
-    if material == "graphite":
+    if material == "hopg":
         # HOPG is fiber-textured: only the (00l) c-axis reflections are coherent.
         return dict(
-            crystal="graphite",
-            composition=[("C", n_of("graphite", "C"))],
+            crystal="hopg",
+            composition=[("C", n_of("hopg", "C"))],
             hkl_list=pm((0, 0, 2), (0, 0, 4)),
             beam_uvw=(0, 0, 1),
             B_ang2=0.8,
