@@ -59,15 +59,16 @@ def _line_brem(r, settings, convolve=None):
 
 
 # ---- interactive viewer ------------------------------------------------------
-def browse(results, settings, kind="by_energy", label="polar tilt", **kw):
+def browse(results, settings, kind="by_energy", label="polar tilt", static=None, **kw):
     """Page through one figure type BY POLAR TILT instead of printing every tilt
     stacked. ``kind``: "by_energy" | "full" | "chunk" | "timepix".
 
-    With an interactive backend (``%matplotlib widget`` / ipympl) this is ONE
-    figure with a tilt slider + Prev/Next buttons to click through. With the
-    inline backend (e.g. nbconvert -> PDF) it falls back to drawing every tilt
-    stacked, so the export still holds all the plots. Extra kwargs pass through to
-    the per-tilt drawer (e.g. include_brem, floor_frac, n_mc)."""
+    A tilt slider + Prev/Next swaps a freshly-drawn figure into an output area --
+    reliable on the **inline** backend (recommended; no ``%matplotlib widget`` /
+    ipympl needed, and it behaves over SSH). ``static=True`` (or no ipywidgets,
+    e.g. nbconvert -> PDF) instead draws every tilt stacked so the export holds
+    them all. Extra kwargs pass to the per-tilt drawer (include_brem, floor_frac,
+    n_mc)."""
     drawers = {
         "by_energy": (_draw_by_energy, (15.0, 5.2)),
         "full": (_draw_full_spectrum, (16.0, 5.2)),
@@ -87,10 +88,16 @@ def browse(results, settings, kind="by_energy", label="polar tilt", **kw):
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     by_tilt = {t: [r for r in recs if r["case"]["tilt_deg"] == t] for t in tilts}
 
-    backend = plt.get_backend().lower()
-    if ("ipympl" in backend) or ("widget" in backend):
-        return _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw)
-    # static fallback (inline / nbconvert): every tilt stacked
+    if static is None:                       # auto: interactive if widgets exist
+        try:
+            import ipywidgets  # noqa: F401
+            static = False
+        except ImportError:
+            static = True
+    if not static:
+        _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw)
+        return None
+    # static: every tilt stacked (PDF export / no ipywidgets)
     figs = []
     for t in tilts:
         fig = plt.figure(figsize=figsize)
@@ -100,34 +107,34 @@ def browse(results, settings, kind="by_energy", label="polar tilt", **kw):
 
 
 def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
-    """One persistent figure + a polar-tilt slider/buttons (needs ipympl)."""
+    """Polar-tilt slider + Prev/Next that renders a FRESH figure per tilt into an
+    Output widget (clear + redraw). No dependence on live-canvas redraw, so it
+    works reliably on the inline backend and over SSH (ipympl's persistent-figure
+    redraw is what tends to get stuck showing one frame)."""
     import ipywidgets as widgets
     from IPython.display import display
 
-    fig = plt.figure(figsize=figsize)
-    try:                                    # tidy ipympl chrome if present
-        fig.canvas.header_visible = False
-        fig.canvas.toolbar_position = "right"
-    except Exception:
-        pass
+    out = widgets.Output()
     slider = widgets.IntSlider(min=0, max=len(tilts) - 1, value=0, description=label,
-                               continuous_update=False, readout=False,
-                               layout=widgets.Layout(width="55%"))
-    prev = widgets.Button(description="◀", layout=widgets.Layout(width="42px"))
-    nxt = widgets.Button(description="▶", layout=widgets.Layout(width="42px"))
-    tag = widgets.Label()
+                               continuous_update=False,
+                               layout=widgets.Layout(width="60%"))
+    prev = widgets.Button(description="< Prev", layout=widgets.Layout(width="80px"))
+    nxt = widgets.Button(description="Next >", layout=widgets.Layout(width="80px"))
 
     def render(i):
+        fig = plt.figure(figsize=figsize)
         draw(fig, by_tilt[tilts[i]], settings, **kw)
-        tag.value = f"  tilt = {tilts[i]:+.1f} deg   ({i + 1}/{len(tilts)})"
-        fig.canvas.draw_idle()
+        with out:
+            out.clear_output(wait=True)
+            display(fig)
+        plt.close(fig)                       # shown; don't leak or double-display
 
     prev.on_click(lambda b: setattr(slider, "value", max(0, slider.value - 1)))
     nxt.on_click(lambda b: setattr(slider, "value", min(len(tilts) - 1, slider.value + 1)))
     slider.observe(lambda ch: render(ch["new"]), names="value")
-    display(widgets.HBox([prev, slider, nxt, tag]))
+    display(widgets.HBox([prev, slider, nxt]))
+    display(out)
     render(0)
-    return fig
 
 
 # ---- intrinsic spectra -------------------------------------------------------
