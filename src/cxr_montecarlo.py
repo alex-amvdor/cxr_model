@@ -692,7 +692,7 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
     T_i = xp.asarray(T_keV, dtype=float)[:, None]
     k = xp.asarray(k_eV, dtype=float)[None, :] / 1e3   # keV
     T_f = T_i - k
-    ok = T_f > 1e-6
+    ok = (T_f > 1e-6) & (k > 0.0)   # k>0: no photon (and no 1/k blowup) at k=0
     T_f = xp.where(ok, T_f, 1e-6)
 
     p_i = xp.sqrt(T_i * (T_i + 2.0 * mc2)) / mc2
@@ -706,7 +706,7 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
               / (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_f)))
 
     dsig = (16.0 / 3.0 * ALPHA_FS * R_E_CM2 * Z**2
-            / (k * 1e3) / p_i**2 * born_log * elwert)   # per eV
+            / xp.maximum(k * 1e3, 1e-30) / p_i**2 * born_log * elwert)   # per eV
     return xp.where(ok, dsig, 0.0)
 
 
@@ -747,6 +747,11 @@ def mc_brem_spectrum(
 
     E_grid = xp.asarray(E_grid_eV, dtype=float)
     mu = _mu_total_inv_ang(comp, E_grid)               # (NE,) [1/Ang]
+    # The Henke absorption tables span ~20 eV - 30 keV; outside that the wide
+    # brem grid gets NaN (above 30 keV) or inf (at E=0), and a single bad bin
+    # makes brem_wide -- and its integrated count rate -- NaN. Hard X-rays escape
+    # essentially unattenuated, so treat an unavailable mu as zero (transparent).
+    mu = xp.nan_to_num(mu, nan=0.0, posinf=0.0, neginf=0.0)
 
     seg_r = xp.asarray(segments["r_mid"])
     seg_L = xp.asarray(segments["L_ang"])

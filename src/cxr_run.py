@@ -170,3 +170,99 @@ def run_sweep(
     t0 = time.perf_counter()
     run_cases(todo, max_workers=max_workers, progress=progress, callback=_cb)
     print(f"{len(todo)} cases in {time.perf_counter() - t0:.0f} s")
+
+
+# ---- brem-only repair --------------------------------------------------------
+def repair_brem_wide(results, only_nonfinite=True, progress=True,
+                     save_every=0, save_cb=None):
+    """Regenerate ``brem_wide`` (and the line-grid ``brem``) for cached records
+    using the CURRENT ``mc_brem_spectrum`` -- WITHOUT re-running the expensive
+    line spectrum.
+
+    Records computed before the brem-absorption fix have NaN ``brem_wide`` above
+    the Henke ceiling (~30 keV) and at E=0, which the log plots drop (the
+    full-range curve clips at 30 keV). This re-runs only the cheap bremsstrahlung
+    transport (``Ne_brem`` electrons, same seed as the original case) per record
+    and rewrites ``r["brem_wide"]`` / ``r["brem"]`` in place; the line ``spec`` is
+    left untouched. Everything needed is already stored in ``r["case"]``.
+
+    only_nonfinite : skip records whose ``brem_wide`` is already all-finite
+        (default), so only the stale ones are touched. Set False to redo all.
+    save_every / save_cb : if both set, call ``save_cb(results)`` every
+        ``save_every`` repaired records (and once at the end) -- used by
+        :func:`repair_checkpoint` to checkpoint progress so a crash/OOM doesn't
+        lose everything; a re-run then resumes (only_nonfinite skips the saved ones).
+    Returns the number of records repaired. Mutates ``results`` in place; re-pickle
+    the checkpoint afterwards (or use :func:`repair_checkpoint`).
+    """
+    import numpy as np
+    from cxr_montecarlo import (
+        simulate_trajectories, mc_brem_spectrum, tilted_geometry,
+    )
+
+    todo = []
+    for name in results:
+        for r in results[name].values():
+            bw = r.get("brem_wide")
+            if only_nonfinite and bw is not None and np.isfinite(np.asarray(bw)).all():
+                continue
+            todo.append(r)
+    if not todo:
+        print("nothing to repair (all brem_wide already finite)")
+        return 0
+    print(f"repairing brem for {len(todo)} record(s)...")
+    t0 = time.perf_counter()
+    for k, r in enumerate(todo, 1):
+        c = r["case"]
+        if "E_grid_brem" in c:                       # (start, stop, step) tuple
+            E_brem = np.arange(*c["E_grid_brem"])
+        elif r.get("E_grid_brem") is not None and np.asarray(r["E_grid_brem"]).size:
+            E_brem = np.asarray(r["E_grid_brem"], float)
+        else:                                        # legacy single-grid record
+            step_b = c.get("brem_step_eV", 10.0)
+            eg = np.asarray(r["E_grid"], float)
+            E_brem = np.arange(eg[0], eg[-1] + step_b, step_b)
+        beam, n_hat = tilted_geometry(
+            c["theta_obs_rad"], np.deg2rad(c.get("tilt_deg", 0.0)),
+            np.deg2rad(c.get("tilt_azim_deg", 0.0)))
+        segs_b = simulate_trajectories(
+            c["E0_keV"], c["Ne_brem"], c["thickness_ang"],
+            composition=c["composition"], E_cut_keV=c.get("E_cut_brem_keV", 1.0),
+            seed=c["seed"] + 1, beam_dir=beam)
+        brem_wide = mc_brem_spectrum(segs_b, E_brem, composition=c["composition"],
+                                     n_hat=n_hat)
+        r["brem_wide"] = brem_wide
+        r["E_grid_brem"] = E_brem
+        r["brem"] = np.interp(np.asarray(r["E_grid"], float), E_brem, brem_wide)
+        if save_cb is not None and save_every and (k % save_every == 0):
+            save_cb(results)
+            if progress:
+                print(f"    ...saved progress ({k}/{len(todo)})")
+        if progress and (k % 50 == 0 or k == len(todo)):
+            print(f"  {k}/{len(todo)}  ({time.perf_counter() - t0:.0f} s)")
+    if save_cb is not None:
+        save_cb(results)   # final save
+    return len(todo)
+
+
+def repair_checkpoint(checkpoint_path, save_every=100, **kw):
+    """Load a per-material checkpoint, repair its ``brem_wide`` (see
+    :func:`repair_brem_wide`), and re-pickle it in place -- saving progress every
+    ``save_every`` records (atomic temp+replace) so a crash/OOM is RESUMABLE: just
+    call again and only_nonfinite picks up where it left off. Returns the repaired
+    ``results`` dict (also usable directly in the notebook)."""
+    if not os.path.exists(checkpoint_path):
+        print(f"no such checkpoint: {checkpoint_path}")
+        return {}
+    with open(checkpoint_path, "rb") as f:
+        results = pickle.load(f)
+
+    def _save(res):
+        tmp = checkpoint_path + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(res, f)
+        os.replace(tmp, checkpoint_path)   # atomic: never leaves a half-written pkl
+
+    n = repair_brem_wide(results, save_every=save_every, save_cb=_save, **kw)
+    print(f"re-saved {checkpoint_path}" if n else "checkpoint unchanged")
+    return results

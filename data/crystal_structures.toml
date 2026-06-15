@@ -52,8 +52,8 @@ basis = [
     { element = "F",  pos = [0.0, 0.0, 0.5] },
 ]
 
-# AB-stacked (Bernal) graphite, 4 atoms per cell.
-[graphite]
+# AB-stacked (Bernal) highly-oriented pyrolytic graphite, 4 atoms per cell.
+[hopg]
 system = "hexagonal"
 a = 2.461
 c = 6.711

@@ -74,9 +74,12 @@ def store_result(results, case, out):
     )
 
 
-def detected_background(r, settings):
+def detected_background(r, settings, convolve=None):
     """Bremsstrahlung background in DETECTED units (Phs/eV/s/nA) on r['E_grid'],
-    honoring the brem source + QE/convolution flags in ``settings``."""
+    honoring the brem source + QE flags in ``settings``. ``convolve`` overrides
+    settings.convolve_with_det when given (True/False) -- lets a caller draw the
+    intrinsic and detector-convolved background side by side."""
+    do_conv = getattr(settings, "convolve_with_det", False) if convolve is None else convolve
     E = r["E_grid"]
     if settings.brem_source == "none":
         return np.zeros_like(E)
@@ -85,7 +88,7 @@ def detected_background(r, settings):
         return load_external_brem(path, E) if path else np.zeros_like(E)
     qe = detector_efficiency(E) if settings.apply_detector_qe else 1.0
     b = r["brem"] * qe
-    if settings.convolve_with_det:
+    if do_conv:
         b = convolve_detector(E, b, r["fwhm"])
     return b * r["scale"]
 
@@ -170,11 +173,13 @@ def summary_table(recs, settings):
         i_pk = np.argmax(line_det)
         line_cts = np.trapezoid(r["spec"], r["E_grid"]) * r["scale"] * cur
         # brem over the FULL measured range (the wide grid) when available, so the
-        # total rate reflects the real measurement out to the beam energy
+        # total rate reflects the real measurement out to the beam energy; fall
+        # back to the line-grid brem if a (stale) wide brem is non-finite
+        brem_cts = np.trapezoid(r["brem"], r["E_grid"]) * r["scale"] * cur
         if r.get("brem_wide") is not None:
-            brem_cts = np.trapezoid(r["brem_wide"], r["E_grid_brem"]) * r["scale"] * cur
-        else:
-            brem_cts = np.trapezoid(r["brem"], r["E_grid"]) * r["scale"] * cur
+            wide = np.trapezoid(r["brem_wide"], r["E_grid_brem"]) * r["scale"] * cur
+            if np.isfinite(wide):
+                brem_cts = wide
         rows.append(
             {
                 "material": MATERIAL_LABELS.get(c["crystal"], c["crystal"]),
