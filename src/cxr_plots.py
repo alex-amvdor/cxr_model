@@ -18,6 +18,12 @@ Timepix3 detector view (forward model in ``timepix_response``)
   * :func:`plot_timepix_efficiency`, :func:`plot_timepix_detected`,
     :func:`plot_timepix_poisson`.
 
+Eagle XO detector view (forward model in ``eaglexo_response``)
+  * :func:`plot_eaglexo_efficiency`, :func:`plot_eaglexo_detected`,
+    :func:`plot_eaglexo_measured` -- the direct-detection CCD (solid angle x QE):
+    soft PXR lines pass at ~90% QE while the hard brem is crushed by the thin
+    sensor. Browse per tilt with ``browse(results, settings, kind="eaglexo")``.
+
 Everything takes ``results`` + a :class:`cxr_results.Settings` explicitly.
 """
 import numpy as np
@@ -25,9 +31,10 @@ import matplotlib.pyplot as plt
 
 from cxr_montecarlo import convolve_detector, detector_efficiency
 from cxr_results import (
-    detected_background, records, best_azimuth, show_summary, line_metrics,
+    detected_background, records, best_azimuth, show_summary, line_metrics, PER_NA,
 )
 import timepix_response as tpx
+import eaglexo_response as eag
 
 COLORS = ["r", "y", "g", "b", "m", "c", "k", "orange", "purple", "brown"]
 
@@ -61,7 +68,7 @@ def _line_brem(r, settings, convolve=None):
 # ---- interactive viewer ------------------------------------------------------
 def browse(results, settings, kind="by_energy", label="polar tilt", static=None, **kw):
     """Page through one figure type BY POLAR TILT instead of printing every tilt
-    stacked. ``kind``: "by_energy" | "full" | "chunk" | "timepix".
+    stacked. ``kind``: "by_energy" | "full" | "chunk" | "timepix" | "eaglexo".
 
     A tilt slider + Prev/Next swaps a freshly-drawn figure into an output area --
     reliable on the **inline** backend (recommended; no ``%matplotlib widget`` /
@@ -74,6 +81,7 @@ def browse(results, settings, kind="by_energy", label="polar tilt", static=None,
         "full": (_draw_full_spectrum, (16.0, 5.2)),
         "chunk": (_draw_chunk, (14.0, 9.5)),
         "timepix": (_draw_timepix_detected, (9.0, 5.2)),
+        "eaglexo": (_draw_eaglexo_detected, (9.0, 5.2)),
     }
     if kind not in drawers:
         raise ValueError(f"kind must be one of {list(drawers)}")
@@ -555,6 +563,186 @@ def plot_timepix_poisson(results, settings, integration_s=600.0, thickness_um=30
         ax.margins(x=0); ax.grid(alpha=0.3); ax.legend(fontsize=8)
     fig.suptitle(f"Timepix3 Poisson 'measured' spectra "
                  f"({thickness_um:g} $\\mu$m Si, {bias_v:g} V)", fontsize=14)
+    fig.tight_layout()
+    return fig
+
+
+# ---- Eagle XO detector view --------------------------------------------------
+SI_K_EDGE_EV = 1839.0   # silicon K absorption edge -> the QE notch the lines cross
+
+
+def _domega_of(r):
+    """The solid angle [sr] actually baked into a record (scale = domega * PER_NA),
+    so plot annotations report the geometry the sweep was run with -- not a value
+    re-guessed here that might disagree with it."""
+    return r["scale"] / PER_NA
+
+
+def plot_eaglexo_efficiency(sensor="4240", distance_m=None, coating="BN"):
+    """The Eagle XO's two knobs vs photon energy. LEFT: quantum efficiency -- the
+    measured datasheet curve (BN solid, BEN dashed) plus the thin-Si absorption
+    cross-check -- on log energy, with the Si-K notch marked and the soft-line /
+    hard-brem regimes shaded. RIGHT: the photon-counting (energy-resolving)
+    resolution, Fano + read-noise limited. The title carries the solid angle
+    (knob 1) for the chosen sensor + working distance."""
+    geo = eag.geometry(sensor, distance_m)
+    E = np.geomspace(100.0, 60000.0, 600)
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(13, 4.6))
+    # -- QE (knob 2) --
+    axL.axvspan(E[0], 3000.0, color="g", alpha=0.05)
+    axL.axvspan(3000.0, E[-1], color="r", alpha=0.05)
+    axL.plot(E, eag.qe(E, "BN"), "b-", lw=1.8, label="QE (BN, no coating)")
+    axL.plot(E, eag.qe(E, "BEN"), "g--", lw=1.4, label="QE (BEN, enhanced)")
+    axL.plot(E, eag.qe_absorption_model(E), "0.5", ls=":", lw=1.2,
+             label=rf"abs. model ({eag.ACTIVE_SI_UM:g} $\mu$m Si)")
+    axL.axvline(SI_K_EDGE_EV, color="0.4", ls="--", lw=0.8)
+    axL.text(SI_K_EDGE_EV * 1.05, 0.05, "Si-K", color="0.3", fontsize=8)
+    axL.set_xscale("log"); axL.set_xlim(E[0], E[-1]); axL.set_ylim(0, 1.0)
+    axL.set(xlabel="Photon energy (eV)", ylabel="quantum efficiency",
+            title="QE: soft lines pass (green), hard brem crushed (red)")
+    axL.grid(alpha=0.3, which="both"); axL.legend(fontsize=8, loc="center left")
+    # -- photon-counting energy resolution --
+    axR.plot(E, eag.energy_fwhm_eV(E), "b-", lw=1.6)
+    axR.set_xscale("log"); axR.set_xlim(E[0], E[-1])
+    axR.set(xlabel="Photon energy (eV)", ylabel="energy FWHM (eV)",
+            title=f"Photon-counting resolution (Fano + {eag.READ_NOISE_E:g} e- read)")
+    axR.grid(alpha=0.3, which="both")
+    fig.suptitle(f"Eagle XO {geo['sensor']} @ {geo['distance_m']:g} m  —  "
+                 rf"$\Omega$ = {geo['domega_sr']:.3e} sr "
+                 rf"($\Delta\theta$ = {geo['dtheta_obs_deg']:.2f}$\degree$, "
+                 f"{geo['active_mm'][0]:g}$\\times${geo['active_mm'][1]:g} mm)",
+                 fontsize=13)
+    fig.tight_layout()
+    return fig
+
+
+def _eag_detected(r, settings, coating="BN", resolve_energy=False):
+    """Incident and Eagle-detected (line + brem) [Phs/eV/s/nA] on r['E_grid'];
+    the per-grid response is cached by eag.get_response."""
+    incident = (r["spec"] + r["brem"]) * r["scale"]
+    resp = eag.get_response(r["E_grid"], coating=coating, resolve_energy=resolve_energy)
+    return incident, resp.apply(incident)
+
+
+def _draw_eaglexo_detected(fig, trecs, settings, coating="BN", resolve_energy=False,
+                           collapse_azimuth=True, floor_frac=1e-3):
+    """Render ONE polar tilt of the Eagle XO detected/incident view onto ``fig``
+    (cleared first): all energies overlaid, incident dotted / detected solid, on
+    log-log axes so the soft lines and the hard-brem roll-off both show. The wide
+    brem (out to the beam energy) is included when present -- that is where the
+    thin-sensor QE roll-off visibly crushes the background. A faint QE curve on a
+    right axis shows why."""
+    fig.clear()
+    ax = fig.subplots(1, 1)
+    energies = sorted({r["case"]["E0_keV"] for r in trecs})
+    ymax = 0.0
+    xlo, xhi = np.inf, 0.0
+    for i, E0 in enumerate(energies):
+        grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
+        if not grp:
+            continue
+        if collapse_azimuth and len(grp) > 1:
+            grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
+        c = COLORS[i % len(COLORS)]
+        for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
+            inc, det = _eag_detected(r, settings, coating, resolve_energy)
+            fin = inc[np.isfinite(inc)]
+            if fin.size:
+                ymax = max(ymax, float(fin.max()))
+            xlo = min(xlo, float(r["E_grid"][0])); xhi = max(xhi, float(r["E_grid"][-1]))
+            az = r["case"]["tilt_azim_deg"]
+            ax.plot(r["E_grid"], inc, color=c, ls=":", lw=1.0, alpha=0.7)
+            ax.plot(r["E_grid"], det, color=c, ls="-", lw=1.2,
+                    label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)")
+            if r.get("brem_wide") is not None:    # full range -> the brem roll-off
+                Eb = np.asarray(r["E_grid_brem"], dtype=float)
+                inc_b = r["brem_wide"] * r["scale"]
+                det_b = inc_b * eag.qe(Eb, coating)
+                xhi = max(xhi, float(Eb[-1]))
+                ax.plot(Eb, inc_b, color=c, ls=":", lw=0.8, alpha=0.5)
+                ax.plot(Eb, det_b, color=c, ls="-", lw=0.8, alpha=0.9)
+    case = trecs[0]["case"]
+    ax.axvline(SI_K_EDGE_EV, color="0.4", ls="--", lw=0.8, label="Si-K edge 1.84 keV")
+    # faint QE curve on a twin axis -- the "viewed through it" envelope
+    axq = ax.twinx()
+    Eqe = np.geomspace(max(xlo, 1.0), xhi if xhi > 0 else 6e4, 400)
+    axq.plot(Eqe, eag.qe(Eqe, coating), color="0.6", ls="-", lw=1.0, alpha=0.6)
+    axq.set_ylim(0, 1.05); axq.set_ylabel("QE", color="0.5")
+    axq.tick_params(axis="y", colors="0.5")
+    if ymax > 0:
+        ax.set_yscale("log"); ax.set_ylim(ymax * floor_frac, ymax * 2)
+    ax.set_xscale("log")
+    if xhi > 0:
+        ax.set_xlim(xlo, xhi)
+    blur = ", energy-resolved" if resolve_energy else ""
+    ax.set_title(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
+                 rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — Eagle XO "
+                 rf"detected (solid) vs incident (dotted), {coating}{blur}", fontsize=11)
+    ax.set_xlabel("Photon energy (eV)")
+    ax.set_ylabel("Phs/eV/s/nA")
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8, loc="lower left")
+    fig.tight_layout()
+
+
+def plot_eaglexo_detected(results, settings, coating="BN", resolve_energy=False,
+                          collapse_azimuth=True, floor_frac=1e-3):
+    """Incident (dotted) vs Eagle-XO-detected (solid) spectra, log-log; ONE figure
+    per polar tilt, all energies overlaid (best azimuth each), with a faint QE
+    envelope. Shows the camera's signature: soft PXR lines survive at ~90% QE
+    while the hard bremsstrahlung is suppressed by the thin back-thinned sensor.
+    Uses the wide brem grid when present (run the sweep with ``E_grid_brem``). The
+    solid angle is whatever the sweep was run with -- point it at the Eagle with
+    ``Sweep(..., **eaglexo_response.sweep_geometry(...))``. For click-through use
+    ``browse(results, settings, kind="eaglexo")``."""
+    recs = records(results)
+    if not recs:
+        print("no results yet")
+        return []
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    figs = []
+    for t in tilts:
+        fig = plt.figure(figsize=(9.0, 5.2))
+        _draw_eaglexo_detected(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
+                               settings, coating=coating, resolve_energy=resolve_energy,
+                               collapse_azimuth=collapse_azimuth, floor_frac=floor_frac)
+        figs.append(fig)
+    return figs
+
+
+def plot_eaglexo_measured(results, settings, integration_s=600.0, coating="BN",
+                          resolve_energy=False, seed=0):
+    """A Poisson 'measured' realization (photon-counting mode) for the highest-rate
+    config at each energy, over ``integration_s`` at the configured beam current.
+    The detected mean is incident x QE; counts are Poisson per bin. The title
+    reports the solid angle baked into the records."""
+    recs = records(results)
+    if not recs:
+        print("no results yet")
+        return None
+    rng = np.random.default_rng(seed)
+    energies = sorted({r["case"]["E0_keV"] for r in recs})
+    fig, axes = plt.subplots(1, len(energies), figsize=(6 * len(energies), 4.6),
+                             squeeze=False)
+    for ax, E0 in zip(axes.ravel(), energies):
+        grp = [r for r in recs if r["case"]["E0_keV"] == E0]
+        r = max(grp, key=lambda r: float(np.max(r["spec"])))
+        _, det = _eag_detected(r, settings, coating, resolve_energy)
+        counts, expected = eag.poisson_counts(
+            r["E_grid"], det * settings.beam_current_na, integration_s, rng=rng
+        )
+        ax.step(r["E_grid"], counts, where="mid", color="k", lw=0.7,
+                label=f"measured ({integration_s:g} s @ {settings.beam_current_na:g} nA)")
+        ax.plot(r["E_grid"], expected, "r-", lw=1.3, label="expected mean")
+        ax.axvline(SI_K_EDGE_EV, color="b", ls=":", lw=0.8, label="Si-K edge")
+        ax.set_title(rf"{E0:g} keV, $\theta_\mathrm{{tilt}}={r['case']['tilt_deg']:g}\degree$, "
+                     rf"$\phi={r['case']['tilt_azim_deg']:g}\degree$  "
+                     rf"({counts.sum():.0f} cts)", fontsize=10)
+        ax.set_xlabel("Photon energy (eV)"); ax.set_ylabel("counts / bin")
+        ax.margins(x=0); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+    dom = _domega_of(recs[0])
+    fig.suptitle(f"Eagle XO Poisson 'measured' spectra  "
+                 rf"($\Omega$ = {dom:.3e} sr, {coating})", fontsize=14)
     fig.tight_layout()
     return fig
 
