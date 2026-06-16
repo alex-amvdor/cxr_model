@@ -53,6 +53,15 @@ except ImportError:
     xp = np
     print("No GPU found, or cupy not installed!\nFalling back to CPU execution.")
 
+# On-GPU spectrum precision. Consumer GPUs run fp64 at 1/32-1/64 of their fp32
+# rate, so the big sinc/brem matmuls dominate -- single precision ~halves their
+# cost and device-memory traffic. The one cancellation-sensitive spot, the
+# (E_grid - E_res) subtraction, stays >3 orders below the line width, so fp32 is
+# safe here; the complex couplings fall to complex64 automatically. Set
+# CXR_FP64=1 to force double precision (reference/validation runs). The CPU
+# fallback, where fp32 buys no speed, always stays double.
+REAL = xp.float32 if (_GPU and os.environ.get("CXR_FP64") != "1") else xp.float64
+
 from cxr_feranchuk_spence import (
     ALPHA_FS, HBARC_EV_ANG, M_E_EV, CRYSTALS,
     chi_g, U_g, absorption_length_ang, reciprocal_g_vector,
@@ -241,7 +250,7 @@ def _mu_total_inv_ang(comp, E_eV):
     for el, n_i in comp:
         mu = mu + 1.0 / absorption_length_ang(el, E_cpu, n_i)
     if _GPU and isinstance(E_eV, cp.ndarray):
-        return cp.asarray(mu)
+        return cp.asarray(mu, dtype=REAL)
     return mu
 
 
@@ -524,15 +533,15 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
     else:
         n_hat = np.asarray(n_hat, dtype=float)
         n_hat = n_hat / np.linalg.norm(n_hat)
-    E_grid = xp.asarray(E_grid_eV, dtype=float)
-    spec = xp.zeros(E_grid.size)
-    spec_pxr = xp.zeros(E_grid.size)
-    spec_cbs = xp.zeros(E_grid.size)
+    E_grid = xp.asarray(E_grid_eV, dtype=REAL)
+    spec = xp.zeros(E_grid.size, dtype=REAL)
+    spec_pxr = xp.zeros(E_grid.size, dtype=REAL)
+    spec_cbs = xp.zeros(E_grid.size, dtype=REAL)
 
-    seg_E = xp.asarray(segments["E_keV"])
-    seg_v = xp.asarray(segments["v_hat"])
-    seg_L = xp.asarray(segments["L_ang"])
-    seg_r = xp.asarray(segments["r_mid"])
+    seg_E = xp.asarray(segments["E_keV"], dtype=REAL)
+    seg_v = xp.asarray(segments["v_hat"], dtype=REAL)
+    seg_L = xp.asarray(segments["L_ang"], dtype=REAL)
+    seg_r = xp.asarray(segments["r_mid"], dtype=REAL)
     beta_all = beta_from_keV(seg_E)                   # speed/c per segment
     v_all = beta_all[:, None] * seg_v                 # velocity vectors (c=1)
 
@@ -556,7 +565,7 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         except Exception:
             pass
     E_tab = np.unique(np.concatenate(_grids))
-    E_tab_g = xp.asarray(E_tab)
+    E_tab_g = xp.asarray(E_tab, dtype=REAL)
 
     for hkl in hkl_list:
         # reciprocal vector in the sample frame: construction frame by
@@ -567,8 +576,8 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         # sigma/pi polarization unit vectors: constants per reflection, since
         # both the detector direction n_hat and g are fixed (only v varies)
         e_s, e_p = _polarization_pair(n_hat, g_vec)
-        g_vec_d = xp.asarray(g_vec)
-        n_hat_d = xp.asarray(n_hat)
+        g_vec_d = xp.asarray(g_vec, dtype=REAL)
+        n_hat_d = xp.asarray(n_hat, dtype=REAL)
 
         # -- 1. per-segment resonance energy (Eq. 10) ---------------------------
         #   omega_res = v.g / (1 - v.n)   [1/Ang]   (>0 required to radiate)
@@ -600,10 +609,10 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         # interpolate real and imaginary parts separately.
         chi_tab = np.asarray(chi_g(crystal, hkl, E_tab, B_ang2, use_henke))
         u_tab = np.asarray(U_g(crystal, hkl, E_tab, B_ang2, use_henke))
-        chi = (xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.real))
-               + 1j * xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.imag)))
-        eUg_over_m = (xp.interp(E_r, E_tab_g, xp.asarray(u_tab.real))
-                      + 1j * xp.interp(E_r, E_tab_g, xp.asarray(u_tab.imag))) / M_E_EV
+        chi = (xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.real, dtype=REAL))
+               + 1j * xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.imag, dtype=REAL)))
+        eUg_over_m = (xp.interp(E_r, E_tab_g, xp.asarray(u_tab.real, dtype=REAL))
+                      + 1j * xp.interp(E_r, E_tab_g, xp.asarray(u_tab.imag, dtype=REAL))) / M_E_EV
 
         # -- 4. photon kinematics per segment ------------------------------------
         k_vec = om[:, None] * n_hat_d     # photon wavevector omega * n_hat
@@ -617,11 +626,11 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         # (Zhai SI Eq. 6); v here is the SEGMENT velocity, so k.v = omega(1-dnm)
         gamma = 1.0 / xp.sqrt(1.0 - beta**2)
         k_dot_v = om * (1.0 - dnm)
-        A2 = xp.zeros(idx.size)
-        A2_pxr = xp.zeros(idx.size)
-        A2_cbs = xp.zeros(idx.size)
+        A2 = xp.zeros(idx.size, dtype=REAL)
+        A2_pxr = xp.zeros(idx.size, dtype=REAL)
+        A2_cbs = xp.zeros(idx.size, dtype=REAL)
         for e in (e_s, e_p):              # sum |A|^2 over both polarizations
-            e_d = xp.asarray(e)
+            e_d = xp.asarray(e, dtype=REAL)
             g_dot_e = g_vec_d @ e_d       # scalar (e fixed per reflection)
             v_dot_e = v @ e_d
             v_dot_kg = xp.einsum("ij,ij->i", v, kg_vec)
@@ -716,8 +725,8 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
     T <~ 100 keV; swap in Seltzer-Berger tables for better accuracy.
     """
     mc2 = 510.99895                                    # keV
-    T_i = xp.asarray(T_keV, dtype=float)[:, None]
-    k = xp.asarray(k_eV, dtype=float)[None, :] / 1e3   # keV
+    T_i = xp.asarray(T_keV, dtype=REAL)[:, None]
+    k = xp.asarray(k_eV, dtype=REAL)[None, :] / 1e3   # keV
     T_f = T_i - k
     ok = (T_f > 1e-6) & (k > 0.0)   # k>0: no photon (and no 1/k blowup) at k=0
     T_f = xp.where(ok, T_f, 1e-6)
@@ -772,7 +781,7 @@ def mc_brem_spectrum(
         n_hat = np.asarray(n_hat, dtype=float)
         n_hat = n_hat / np.linalg.norm(n_hat)
 
-    E_grid = xp.asarray(E_grid_eV, dtype=float)
+    E_grid = xp.asarray(E_grid_eV, dtype=REAL)
     mu = _mu_total_inv_ang(comp, E_grid)               # (NE,) [1/Ang]
     # The Henke absorption tables span ~20 eV - 30 keV; outside that the wide
     # brem grid gets NaN (above 30 keV) or inf (at E=0), and a single bad bin
@@ -780,16 +789,16 @@ def mc_brem_spectrum(
     # essentially unattenuated, so treat an unavailable mu as zero (transparent).
     mu = xp.nan_to_num(mu, nan=0.0, posinf=0.0, neginf=0.0)
 
-    seg_r = xp.asarray(segments["r_mid"])
-    seg_L = xp.asarray(segments["L_ang"])
-    seg_E = xp.asarray(segments["E_keV"])
+    seg_r = xp.asarray(segments["r_mid"], dtype=REAL)
+    seg_L = xp.asarray(segments["L_ang"], dtype=REAL)
+    seg_E = xp.asarray(segments["E_keV"], dtype=REAL)
     z_mid = seg_r[:, 2]
     if n_hat[2] < 0:
         L_esc = z_mid / (-n_hat[2])
     else:
         L_esc = (thickness - z_mid) / n_hat[2]
 
-    spec = xp.zeros(E_grid.size)
+    spec = xp.zeros(E_grid.size, dtype=REAL)
     M = seg_E.size
     for j0 in range(0, M, chunk):
         sl = slice(j0, min(j0 + chunk, M))
