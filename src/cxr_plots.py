@@ -29,7 +29,9 @@ Everything takes ``results`` + a :class:`cxr_results.Settings` explicitly.
 import numpy as np
 import matplotlib.pyplot as plt
 
-from cxr_montecarlo import convolve_detector, detector_efficiency
+from cxr_montecarlo import (
+    convolve_detector, detector_efficiency, simulate_trajectories, tilted_geometry,
+)
 from cxr_results import (
     detected_background, records, best_azimuth, show_summary, line_metrics, PER_NA,
 )
@@ -743,6 +745,125 @@ def plot_eaglexo_measured(results, settings, integration_s=600.0, coating="BN",
     dom = _domega_of(recs[0])
     fig.suptitle(f"Eagle XO Poisson 'measured' spectra  "
                  rf"($\Omega$ = {dom:.3e} sr, {coating})", fontsize=14)
+    fig.tight_layout()
+    return fig
+
+
+# ---- electron trajectory view (penetration) ----------------------------------
+def _case_of(rec_or_case):
+    """Accept either a results record (carries 'case') or a raw case dict."""
+    return rec_or_case["case"] if "case" in rec_or_case else rec_or_case
+
+
+def plot_electron_trajectories(rec_or_case, *, Ne=200, seed=0, color_by="energy",
+                               show_detector=True, colorbar=True, aspect="equal",
+                               ax=None):
+    """Cross-section of the electron cascade in the beam-detector plane, to eyeball
+    PENETRATION. The plane of interest is the x-z plane (z = slab normal = depth;
+    the tilted beam and the detector ``n_hat`` both lie in it for azimuth 0), so we
+    project every transport segment onto (x lateral, z depth) and draw it -- since
+    an electron's consecutive segments share a vertex, the projected segments join
+    up into its track for free.
+
+    The crystal is the shaded rectangle (NOT the lattice -- just the slab outline:
+    surface z=0 at top, back face at the thickness). The red arrow is the incident
+    beam, the green arrow the detector line of sight. Tracks are coloured by the
+    electron's energy along them (``color_by='energy'``) -- the cascade cooling
+    with depth -- or a flat colour (``color_by=None``).
+
+    Trajectories are not kept in ``results`` (too bulky), so this re-runs a small
+    transport for the case (~0.5 s at the default ``Ne``); raise ``Ne`` for a
+    denser cloud. Accepts a results record or a raw case dict. Returns the Axes."""
+    from matplotlib.collections import LineCollection
+    from matplotlib.patches import Rectangle
+    case = _case_of(rec_or_case)
+    beam, n_hat = tilted_geometry(
+        case["theta_obs_rad"],
+        np.deg2rad(case.get("tilt_deg", 0.0)),
+        np.deg2rad(case.get("tilt_azim_deg", 0.0)))
+    segs = simulate_trajectories(
+        case["E0_keV"], Ne, case["thickness_ang"], composition=case["composition"],
+        E_cut_keV=case.get("E_cut_lines_keV", 5.0), seed=seed, beam_dir=beam)
+
+    # reconstruct each segment's endpoints from midpoint +- half-length * direction
+    r_mid, v, L, Ekv = segs["r_mid"], segs["v_hat"], segs["L_ang"], segs["E_keV"]
+    start, end = r_mid - 0.5 * L[:, None] * v, r_mid + 0.5 * L[:, None] * v
+    u, ulab = (1e4, r"$\mu$m") if case["thickness_ang"] >= 1e4 else (10.0, "nm")
+    seg2d = np.stack([np.column_stack([start[:, 0], start[:, 2]]),
+                      np.column_stack([end[:, 0], end[:, 2]])], axis=1) / u
+    thick = case["thickness_ang"] / u
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(6.2, 5.6))
+    xs = seg2d[:, :, 0]
+    xlo, xhi = float(xs.min()), float(xs.max())
+    pad = 0.08 * (xhi - xlo + 1e-9) + 0.02 * thick
+    xlo, xhi = xlo - pad, xhi + pad
+    span = max(thick, xhi - xlo)
+    # zoom the depth axis to the cascade when the slab is far thicker than the
+    # penetration (so a thick/whole-grain slab doesn't render as mostly empty)
+    zmax_data = float(seg2d[:, :, 1].max())
+    z_view = thick if thick <= 3.0 * zmax_data else 1.3 * zmax_data
+
+    ax.add_patch(Rectangle((xlo, 0.0), xhi - xlo, thick, facecolor="0.92",
+                           edgecolor="0.55", lw=1.2, zorder=0))
+    lc = LineCollection(seg2d, linewidths=0.5,
+                        alpha=float(np.clip(60.0 / Ne, 0.12, 0.8)))
+    if color_by == "energy":
+        lc.set_array(Ekv); lc.set_cmap("plasma")
+    else:
+        lc.set_color("steelblue")
+    ax.add_collection(lc)
+
+    aL = 0.18 * span                                   # arrow length
+    ax.annotate("", xy=(0, 0), xytext=(-beam[0] * aL, -beam[2] * aL),
+                arrowprops=dict(arrowstyle="-|>", color="red", lw=2.0))
+    ax.text(-beam[0] * aL, -beam[2] * aL, "beam ", color="red", fontsize=9,
+            ha="right", va="bottom")
+    if show_detector:
+        cx, cz = 0.5 * (xlo + xhi), 0.35 * z_view
+        ax.annotate("", xy=(cx + n_hat[0] * aL, cz + n_hat[2] * aL), xytext=(cx, cz),
+                    arrowprops=dict(arrowstyle="-|>", color="green", lw=1.6))
+        ax.text(cx + n_hat[0] * aL, cz + n_hat[2] * aL, " to detector",
+                color="green", fontsize=9, va="center")
+    if z_view < thick:                                 # note the slab runs deeper
+        ax.text(0.98, 0.02, f"slab continues to {thick:g} {ulab}", transform=ax.transAxes,
+                ha="right", va="bottom", fontsize=8, color="0.4")
+
+    ax.set_xlim(xlo, xhi)
+    ax.set_ylim(z_view * 1.02, -0.20 * span)           # depth increases DOWNWARD
+    ax.set_aspect(aspect)   # "equal" = true penetration shape; "auto" fills the panel
+    ax.set_xlabel(f"lateral  x  ({ulab})"); ax.set_ylabel(f"depth  z  ({ulab})")
+    eta = 100.0 * segs["n_backscattered"] / segs["Ne"]
+    thru = 100.0 * segs["n_transmitted"] / segs["Ne"]
+    ax.set_title(rf"{case['name'].split()[0]}, {case['E0_keV']:g} keV, "
+                 rf"$\theta_\mathrm{{tilt}}$={case.get('tilt_deg', 0.0):g}$\degree$  —  "
+                 rf"{Ne} e$^-$ ({eta:.0f}% back, {thru:.0f}% through)", fontsize=10)
+    if color_by == "energy" and colorbar:
+        cb = ax.figure.colorbar(lc, ax=ax, fraction=0.046, pad=0.02)
+        cb.set_label("electron energy (keV)")
+    return ax
+
+
+def plot_trajectories(results, *, tilt=None, Ne=200, seed=0, color_by="energy"):
+    """Electron-penetration cross-sections for one polar tilt: a row of panels,
+    one per beam energy (best azimuth each). ``tilt`` picks the polar tilt (nearest
+    match; default the first). Higher beam energy -> deeper teardrop; tilt skews
+    the beam arrow. Returns the figure (or None if there are no results)."""
+    recs = best_azimuth(records(results))
+    if not recs:
+        print("no results yet")
+        return None
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    t = tilts[0] if tilt is None else min(tilts, key=lambda x: abs(x - tilt))
+    grp = sorted([r for r in recs if r["case"]["tilt_deg"] == t],
+                 key=lambda r: r["case"]["E0_keV"])
+    fig, axes = plt.subplots(1, len(grp), figsize=(5.6 * len(grp), 5.2),
+                             squeeze=False)
+    for ax, r in zip(axes.ravel(), grp):
+        plot_electron_trajectories(r, Ne=Ne, seed=seed, color_by=color_by, ax=ax)
+    fig.suptitle(rf"Electron penetration, $\theta_\mathrm{{tilt}}$={t:g}$\degree$ "
+                 f"(crystal = shaded slab; beam-detector plane)", fontsize=13)
     fig.tight_layout()
     return fig
 
