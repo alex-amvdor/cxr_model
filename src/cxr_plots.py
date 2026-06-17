@@ -960,50 +960,66 @@ def plot_eaglexo_measured(
     return fig
 
 
-# ---- electron trajectory view (penetration) ----------------------------------
+# ---- electron trajectory + penetration view ----------------------------------
+# Datashader rasterizes the (tens of thousands of) trajectory line-segments into
+# ONE image per panel -- fast, and tiny on disk vs a matplotlib LineCollection of
+# every segment -- while matplotlib keeps the crisp slab / beam / detector overlay
+# and the energy colorbar (so the nbconvert PDF export still works). The segment
+# colour is the electron's kinetic energy along the track (turbo); ds.max keeps it
+# crisp under the line-width antialiasing (ds.mean would blend track edges low).
+C_ANG_PER_FS = 2997.924580  # speed of light [Ang/fs]: age sum(L/beta)[Ang] -> fs
+_TRAJ_CMAP = "turbo"
+
+
 def _case_of(rec_or_case):
     """Accept either a results record (carries 'case') or a raw case dict."""
     return rec_or_case["case"] if "case" in rec_or_case else rec_or_case
 
 
-def plot_electron_trajectories(
-    rec_or_case,
-    *,
-    Ne=200,
-    seed=0,
-    color_by="energy",
-    show_detector=True,
-    colorbar=True,
-    aspect="equal",
-    ax=None,
-):
-    """
-    Cross-section of the electron cascade in a BEAM-ALIGNED frame.
+def _trajectory_cases(cases_or_results):
+    """Flatten a build_cases list OR a results store into a list of case dicts."""
+    if isinstance(cases_or_results, dict):
+        return [r["case"] for r in records(cases_or_results)]
+    return [_case_of(c) for c in cases_or_results]
 
-    Coordinates:
-        x' : along incident beam (horizontal)
-        y' : transverse direction in the beam/slab plane (vertical)
 
-    Slab:
-        tilt_deg > 0  -> slab rotated CCW
-        tilt_deg < 0  -> slab rotated CW
+def _turbo_hex(n=256):
+    """The turbo colormap as a hex list (the form datashader.shade wants)."""
+    from matplotlib import colormaps
+    from matplotlib.colors import to_hex
 
-    Detector:
-        n_hat plotted in the same frame.
-        0 deg = horizontal right
-        +90 deg = vertical up
-        positive angles CCW.
-    """
-    from matplotlib.collections import LineCollection
+    cmap = colormaps[_TRAJ_CMAP]
+    return [to_hex(cmap(i / (n - 1))) for i in range(n)]
 
-    case = _case_of(rec_or_case)
 
+def _beam_detector_basis(beam, n_hat):
+    """Orthonormal 2D basis of the BEAM-DETECTOR plane: e1 = beam (-> +x, into the
+    slab); e2 = the in-plane part of the detector direction (-> +y, "up"). Working
+    in this plane (rather than a fixed x-z slice) keeps the beam horizontal AND the
+    detector arrow pointing the right way for ANY polar/azimuthal tilt."""
+    e1 = np.asarray(beam, float)
+    e1 = e1 / np.linalg.norm(e1)
+    nh = np.asarray(n_hat, float)
+    nh = nh / np.linalg.norm(nh)
+    perp = nh - np.dot(nh, e1) * e1
+    if np.linalg.norm(perp) < 1e-9:  # detector ~parallel to beam: any in-plane up
+        for ref in (np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])):
+            perp = ref - np.dot(ref, e1) * e1
+            if np.linalg.norm(perp) > 1e-9:
+                break
+    return e1, perp / np.linalg.norm(perp)
+
+
+def _trajectory_data(case, Ne, seed):
+    """Simulate one case and project the cascade into the beam-detector plane.
+    Returns 2D segment endpoints (M,2,2) in display units, per-segment energy/age/
+    depth, the slab + detector unit vectors in that plane, and the back/through
+    fractions."""
     beam, n_hat = tilted_geometry(
         case["theta_obs_rad"],
         np.deg2rad(case.get("tilt_deg", 0.0)),
         np.deg2rad(case.get("tilt_azim_deg", 0.0)),
     )
-
     segs = simulate_trajectories(
         case["E0_keV"],
         Ne,
@@ -1013,226 +1029,336 @@ def plot_electron_trajectories(
         seed=seed,
         beam_dir=beam,
     )
-
-    # ------------------------------------------------------------------
-    # Reconstruct segment endpoints
-    # ------------------------------------------------------------------
-    r_mid = segs["r_mid"]
-    v = segs["v_hat"]
-    L = segs["L_ang"]
-    Ekv = segs["E_keV"]
-
-    start = r_mid - 0.5 * L[:, None] * v
-    end = r_mid + 0.5 * L[:, None] * v
-
+    e1, e2 = _beam_detector_basis(beam, n_hat)
+    L, v, r = segs["L_ang"], segs["v_hat"], segs["r_mid"]
+    start = r - 0.5 * L[:, None] * v
     u, ulab = (1e4, r"$\mu$m") if case["thickness_ang"] >= 1e4 else (10.0, "nm")
-    thick = case["thickness_ang"] / u
 
-    # ------------------------------------------------------------------
-    # Build beam-aligned coordinate system
-    #
-    # Xb = along beam
-    # Yb = +90° CCW from beam in x-z plane
-    # ------------------------------------------------------------------
-    beam_xz = np.array([beam[0], beam[2]], dtype=float)
-    beam_xz /= np.linalg.norm(beam_xz)
+    # Continuous per-electron tracks (not a loose segment cloud): order segments by
+    # (electron, age) so each electron's segment START points form a polyline --
+    # consecutive starts share an endpoint, so they trace the real zig-zag path --
+    # then break with NaN between electrons. This is what makes the tracks read as
+    # paths (the old per-segment LineCollection got faint at the cool, slow tail).
+    order = np.lexsort((segs["t_ang"], segs["elec_id"]))
+    sx = (start @ e1)[order] / u
+    sy = (start @ e2)[order] / u
+    sE = segs["E_keV"][order]
+    brk = np.flatnonzero(np.diff(segs["elec_id"][order]) != 0) + 1
+    px = np.insert(sx, brk, np.nan)
+    py = np.insert(sy, brk, np.nan)
+    pE = np.insert(sE, brk, np.nan)
 
-    perp_xz = np.array([-beam_xz[1], beam_xz[0]])
-
-    start2 = np.column_stack(
-        [
-            start[:, [0, 2]] @ beam_xz,
-            -(start[:, [0, 2]] @ perp_xz),
-        ]
+    z = np.array([0.0, 0.0, 1.0])  # slab normal in the sample frame
+    ndet = np.array([n_hat @ e1, n_hat @ e2])
+    ndet = ndet / np.linalg.norm(ndet)
+    nslab = np.array([z @ e1, z @ e2])
+    nn = np.linalg.norm(nslab)
+    nslab = nslab / nn if nn > 1e-9 else np.array([1.0, 0.0])
+    return dict(
+        px=px,
+        py=py,
+        pE=pE,
+        pts=np.column_stack([px, py]),  # for the shared-frame extent
+        E=segs["E_keV"],
+        t_fs=segs["t_ang"] / C_ANG_PER_FS,
+        z_u=r[:, 2] / u,  # penetration depth below the surface, display units
+        L=segs["L_ang"],
+        ndet=ndet,
+        nslab=nslab,
+        u=u,
+        ulab=ulab,
+        thick=case["thickness_ang"] / u,
+        eta=100.0 * segs["n_backscattered"] / segs["Ne"],
+        thru=100.0 * segs["n_transmitted"] / segs["Ne"],
+        Ne=segs["Ne"],
     )
 
-    end2 = np.column_stack(
-        [
-            end[:, [0, 2]] @ beam_xz,
-            -(end[:, [0, 2]] @ perp_xz),
-        ]
-    )
 
-    seg2d = np.stack([start2, end2], axis=1) / u
+def _trajectory_frame(pts_list, pct=99.0, pad=0.12, beam_frac=0.16):
+    """ONE shared (xlo, xhi, ylo, yhi) for a set of panels, from the robust
+    (1st/99th-percentile) extent of all their track vertices, expanded to include
+    the origin and padded. Sharing it across tilts is what makes only the slab
+    rotate frame-to-frame (the old per-panel autoscale was the "scaling is
+    inconsistent" complaint). Symmetric in y (beam axis centred); the left margin
+    always clears the beam arrow + label."""
+    pts = np.concatenate([np.asarray(s).reshape(-1, 2) for s in pts_list], axis=0)
+    pts = pts[np.isfinite(pts).all(axis=1)]
+    xlo = min(0.0, float(np.percentile(pts[:, 0], 100 - pct)))
+    xhi = max(0.0, float(np.percentile(pts[:, 0], pct)))
+    ymax = float(np.percentile(np.abs(pts[:, 1]), pct))
+    sx = max(xhi - xlo, 1e-6)
+    xlo -= pad * sx
+    xhi += pad * sx
+    yhi = max(ymax * (1.0 + pad), 1e-6)
+    aL = beam_frac * (xhi - xlo)
+    xlo = min(xlo, -1.5 * aL)  # room for the beam arrow + label
+    return (float(xlo), float(xhi), float(-yhi), float(yhi))
 
-    # ------------------------------------------------------------------
-    # Plot setup
-    # ------------------------------------------------------------------
-    if ax is None:
-        _, ax = plt.subplots(figsize=(8, 8))
 
-    xs = seg2d[:, :, 0]
-    ys = seg2d[:, :, 1]
+def _draw_trajectory_panel(
+    ax, data, frame, E0, *, E_cut=5.0, px=720, line_width=1.6, cmap=None, label=True,
+    label_fs=8.5,
+):
+    """Render ONE penetration cross-section into ``ax`` over the shared ``frame``:
+    grey slab, datashader-rasterized energy-coloured tracks, red beam + green
+    detector arrows."""
+    import pandas as pd
+    import datashader as ds
+    import datashader.transfer_functions as tf
 
-    xlo = float(xs.min())
-    xhi = float(xs.max())
-    ylo = float(ys.min())
-    yhi = float(ys.max())
+    xlo, xhi, ylo, yhi = frame
+    nslab, ndet, thick = data["nslab"], data["ndet"], data["thick"]
 
-    spanx = xhi - xlo
-    spany = yhi - ylo
-    span = max(spanx, spany, thick)
-
-    pad = 0.08 * span + 0.02 * thick
-
-    xlo -= pad
-    xhi += pad
-    ylo -= pad
-    yhi += pad
-
-    # ------------------------------------------------------------------
-    # Slab polygon in beam frame
-    #
-    # tilt_deg > 0 => CCW rotation
-    # tilt_deg < 0 => CW rotation
-    # ------------------------------------------------------------------
-    tilt = np.deg2rad(case.get("tilt_deg", 0.0))
-
-    n = np.array([np.cos(tilt), np.sin(tilt)])
-    t = np.array([-n[1], n[0]])
-
-    W = max(spanx, spany, thick) * 2.5
-
+    # slab polygon: front face through the origin, extending `thick` into +nslab
+    tang = np.array([-nslab[1], nslab[0]])
+    W = 6.0 * max(xhi - xlo, yhi - ylo)
     slab = np.array(
-        [
-            -W * t,
-            +W * t,
-            +W * t + thick * n,
-            -W * t + thick * n,
-        ]
+        [-W * tang, W * tang, W * tang + thick * nslab, -W * tang + thick * nslab]
+    )
+    ax.fill(slab[:, 0], slab[:, 1], facecolor="0.80", edgecolor="0.55", lw=1.0, zorder=1)
+
+    # continuous NaN-separated per-electron tracks -> datashader raster, colour =
+    # electron energy (ds.max keeps it crisp under the line-width antialiasing)
+    df = pd.DataFrame({"x": data["px"], "y": data["py"], "E": data["pE"]})
+    asp = (yhi - ylo) / (xhi - xlo)
+    cvs = ds.Canvas(
+        plot_width=px, plot_height=max(int(px * asp), 60),
+        x_range=(xlo, xhi), y_range=(ylo, yhi),
+    )
+    agg = cvs.line(df, "x", "y", agg=ds.max("E"), line_width=line_width)
+    img = tf.shade(agg, cmap=cmap or _turbo_hex(), span=(E_cut, E0), how="linear")
+    ax.imshow(
+        np.asarray(img.to_pil()), extent=(xlo, xhi, ylo, yhi),
+        origin="upper", aspect="equal", interpolation="none", zorder=2,
     )
 
-    ax.fill(
-        slab[:, 0],
-        slab[:, 1],
-        facecolor="0.63",
-        edgecolor="0.45",
-        lw=1.2,
-        zorder=0,
-    )
-
-    # ------------------------------------------------------------------
-    # Trajectories
-    # ------------------------------------------------------------------
-    lc = LineCollection(
-        seg2d,
-        linewidths=0.5,
-        alpha=float(np.clip(60.0 / Ne, 0.12, 0.8)),
-    )
-
-    if color_by == "energy":
-        lc.set_array(Ekv)
-        lc.set_cmap("turbo")
-    else:
-        lc.set_color("steelblue")
-
-    ax.add_collection(lc)
-
-    # ------------------------------------------------------------------
-    # Beam arrow (always horizontal)
-    # ------------------------------------------------------------------
-    aL = 0.18 * span
-
+    # beam (red) + detector (green) arrows, anchored at the entry point
+    aL = 0.16 * (xhi - xlo)
     ax.annotate(
-        "",
-        xy=(0.0, 0.0),
-        xytext=(-aL, 0.0),
-        arrowprops=dict(arrowstyle="-|>", color="red", lw=2.0),
+        "", xy=(0.0, 0.0), xytext=(-aL, 0.0),
+        arrowprops=dict(arrowstyle="-|>", color="red", lw=2.0), zorder=4,
     )
-
-    ax.text(
-        -aL,
-        0.0,
-        "beam ",
-        color="red",
-        fontsize=9,
-        ha="right",
-        va="bottom",
+    ax.annotate(
+        "", xy=(ndet[0] * aL, ndet[1] * aL), xytext=(0.0, 0.0),
+        arrowprops=dict(arrowstyle="-|>", color="#119911", lw=2.0), zorder=4,
     )
-
-    # ------------------------------------------------------------------
-    # Detector arrow
-    # ------------------------------------------------------------------
-    if show_detector:
-        n2 = np.array(
-            [
-                np.dot([n_hat[0], n_hat[2]], beam_xz),
-                np.dot([n_hat[0], n_hat[2]], perp_xz),
-            ]
-        )
-
-        n2 /= np.linalg.norm(n2)
-
-        cx = 0.0
-        cy = 0.0
-
-        ax.annotate(
-            "",
-            xy=(cx + n2[0] * aL, cy - n2[1] * aL),
-            xytext=(cx, cy),
-            arrowprops=dict(arrowstyle="-|>", color="green", lw=1.6),
-        )
-
+    if label:
         ax.text(
-            cx + n2[0] * aL,
-            cy - n2[1] * aL,
-            " to detector",
-            color="green",
-            fontsize=9,
-            va="center",
+            -aL * 0.5, 0.03 * (yhi - ylo), "beam", color="red", fontsize=label_fs,
+            ha="center", va="bottom", zorder=5,
         )
-
-    # ------------------------------------------------------------------
-    # Axes
-    # ------------------------------------------------------------------
+        tx = float(np.clip(ndet[0] * aL * 1.1, xlo + 0.06 * (xhi - xlo), xhi - 0.06 * (xhi - xlo)))
+        ty = float(np.clip(ndet[1] * aL * 1.1, ylo + 0.06 * (yhi - ylo), yhi - 0.1 * (yhi - ylo)))
+        ax.text(
+            tx, ty, "detector", color="#0a6a0a", fontsize=label_fs,
+            ha="center", va="bottom", zorder=5,
+        )
     ax.set_xlim(xlo, xhi)
     ax.set_ylim(ylo, yhi)
+    ax.set_aspect("equal")
 
-    ax.set_aspect(aspect)
 
-    ax.set_xlabel(f"distance along beam ({ulab})")
-    ax.set_ylabel(f"transverse distance ({ulab})")
+def _traj_colorbar(ax, E_cut, E0, label="electron energy (keV)"):
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
 
-    eta = 100.0 * segs["n_backscattered"] / segs["Ne"]
-    thru = 100.0 * segs["n_transmitted"] / segs["Ne"]
+    sm = cm.ScalarMappable(norm=Normalize(E_cut, E0), cmap=_TRAJ_CMAP)
+    cb = ax.figure.colorbar(sm, ax=ax, fraction=0.046, pad=0.02)
+    cb.set_label(label)
+    return cb
 
+
+def plot_electron_trajectories(
+    rec_or_case, *, Ne=200, seed=0, frame=None, E_cut=5.0, colorbar=True,
+    line_width=1.6, label=True, ax=None,
+):
+    """One electron-penetration cross-section in the beam-detector plane: the beam
+    enters horizontally at the origin (red), the crystal is the grey slab (which
+    rotates with the tilt), the detector direction is the green arrow, and the
+    cascade is datashader-rasterized, coloured by electron energy.
+
+    ``frame`` (xlo, xhi, ylo, yhi) fixes the axes so repeated calls at the same
+    (material, thickness, energy) share ONE frame and only the slab rotates; None
+    auto-fits this case. ``ax`` draws into an existing axis (used by the grid)."""
+    case = _case_of(rec_or_case)
+    data = _trajectory_data(case, Ne, seed)
+    if frame is None:
+        frame = _trajectory_frame([data["pts"]])
+    if ax is None:
+        xlo, xhi, ylo, yhi = frame
+        asp = (yhi - ylo) / (xhi - xlo)
+        w = 6.2
+        _, ax = plt.subplots(figsize=(w, float(np.clip(w * asp + 1.0, 3.2, 7.5))))
+    _draw_trajectory_panel(
+        ax, data, frame, case["E0_keV"], E_cut=E_cut, line_width=line_width, label=label
+    )
+    ax.set_xlabel(f"distance along beam ({data['ulab']})")
+    ax.set_ylabel(f"transverse distance ({data['ulab']})")
     ax.set_title(
-        rf"{case['name'].split()[0]}, "
-        rf"{case['E0_keV']:g} keV, "
-        rf"$\theta_\mathrm{{tilt}}$={case.get('tilt_deg', 0.0):g}$\degree$"
-        rf"  —  {Ne} e$^-$ "
-        rf"({eta:.0f}% back, {thru:.0f}% through)",
+        rf"{case['name'].split()[0]}, {case['E0_keV']:g} keV, "
+        rf"$\theta$={case.get('tilt_deg', 0.0):g}$\degree$, "
+        rf"$\phi$={case.get('tilt_azim_deg', 0.0):g}$\degree$  —  {data['Ne']} e$^-$ "
+        rf"({data['eta']:.0f}% back, {data['thru']:.0f}% through)",
         fontsize=10,
     )
-
-    if color_by == "energy" and colorbar:
-        cb = ax.figure.colorbar(lc, ax=ax, fraction=0.046, pad=0.02)
-        cb.set_label("electron energy (keV)")
-
+    if colorbar:
+        _traj_colorbar(ax, E_cut, case["E0_keV"])
     return ax
 
 
-def plot_trajectories(results, *, tilt=None, Ne=200, seed=0, color_by="energy"):
-    """Electron-penetration cross-sections for one polar tilt: a row of panels,
-    one per beam energy (best azimuth each). ``tilt`` picks the polar tilt (nearest
-    match; default the first). Higher beam energy -> deeper teardrop; tilt skews
-    the beam arrow. Returns the figure (or None if there are no results)."""
-    recs = best_azimuth(records(results))
-    if not recs:
-        print("no results yet")
+def plot_trajectory_grid(
+    cases_or_results, energy=None, *, Ne=150, seed=0, E_cut=5.0, line_width=1.4,
+    max_panels=20, ncols=None, max_width_in=12.0, max_height_in=8.5,
+):
+    """Electron-penetration cross-sections at ONE beam energy, a panel per
+    (polar, azimuthal) tilt -- the trajectory analogue of plot_heatmaps. Every
+    panel shares ONE frame (computed from the union of all the clouds), so across
+    the grid ONLY the slab rotates; the cascade is datashader-rasterized and
+    energy-coloured with a single shared colorbar.
+
+    ``cases_or_results`` is a build_cases list or a results store; ``energy`` picks
+    the beam energy (default the lowest). If both polar and azimuthal tilt are
+    swept it lays out a polar x azimuth grid (like the heatmaps); otherwise it
+    wraps the swept tilt into ``ncols`` columns. ``Ne`` (electrons/panel) trades
+    detail for speed -- the electron transport, not the drawing, is the cost."""
+    cases = _trajectory_cases(cases_or_results)
+    if not cases:
+        print("no cases/results to plot")
         return None
-    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
-    t = tilts[0] if tilt is None else min(tilts, key=lambda x: abs(x - tilt))
-    grp = sorted(
-        [r for r in recs if r["case"]["tilt_deg"] == t],
-        key=lambda r: r["case"]["E0_keV"],
+    energies = sorted({c["E0_keV"] for c in cases})
+    energy = energies[0] if energy is None else min(energies, key=lambda e: abs(e - energy))
+    grp = [c for c in cases if c["E0_keV"] == energy]
+
+    polars = sorted({c["tilt_deg"] for c in grp})
+    azims = sorted({c["tilt_azim_deg"] for c in grp})
+    grid2d = len(polars) > 1 and len(azims) > 1
+    # one representative case per (polar, azimuth) combo, in a stable order
+    bycombo = {}
+    for c in sorted(grp, key=lambda c: (c["tilt_deg"], c["tilt_azim_deg"])):
+        bycombo.setdefault((c["tilt_deg"], c["tilt_azim_deg"]), c)
+    combos = list(bycombo)
+    if len(combos) > max_panels:  # subsample evenly so the grid stays on-screen
+        keep = np.unique(np.linspace(0, len(combos) - 1, max_panels).round().astype(int))
+        combos = [combos[i] for i in keep]
+        grid2d = False
+    data = {cb: _trajectory_data(bycombo[cb], Ne, seed) for cb in combos}
+    frame = _trajectory_frame([d["pts"] for d in data.values()])
+
+    if grid2d:
+        nrows, ncols = len(polars), len(azims)
+        cell = [[(p, a) for a in azims] for p in polars]
+    else:
+        n = len(combos)
+        ncols = ncols or int(np.ceil(np.sqrt(n)))
+        nrows = int(np.ceil(n / ncols))
+        cell = [
+            [combos[r * ncols + col] if r * ncols + col < n else None for col in range(ncols)]
+            for r in range(nrows)
+        ]
+
+    xlo, xhi, ylo, yhi = frame
+    asp = (yhi - ylo) / (xhi - xlo)
+    pw = min(max_width_in / ncols, 3.2)
+    ph = pw * asp
+    fig_h = nrows * ph + 1.3
+    if fig_h > max_height_in:  # shrink panels so the whole grid fits the screen
+        pw *= (max_height_in - 1.3) / (nrows * ph)
+        ph = pw * asp
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(ncols * pw, nrows * ph + 1.3), squeeze=False,
+        sharex=True, sharey=True,
     )
-    fig, axes = plt.subplots(1, len(grp), figsize=(5.6 * len(grp), 5.2), squeeze=False)
-    for ax, r in zip(axes.ravel(), grp):
-        plot_electron_trajectories(r, Ne=Ne, seed=seed, color_by=color_by, ax=ax)
+    for r in range(nrows):
+        for col in range(ncols):
+            ax = axes[r][col]
+            combo = cell[r][col]
+            if combo is None or combo not in data:
+                ax.axis("off")
+                continue
+            d = data[combo]
+            _draw_trajectory_panel(
+                ax, d, frame, energy, E_cut=E_cut, line_width=line_width, label=False
+            )
+            ax.set_title(
+                rf"$\theta$={combo[0]:g}$\degree$, $\phi$={combo[1]:g}$\degree$",
+                fontsize=8,
+            )
+            ax.tick_params(labelsize=7)
+            if r == nrows - 1:
+                ax.set_xlabel(f"along beam ({d['ulab']})", fontsize=8)
+            if col == 0:
+                ax.set_ylabel(f"transverse ({d['ulab']})", fontsize=8)
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
+
+    mappable = cm.ScalarMappable(norm=Normalize(E_cut, energy), cmap=_TRAJ_CMAP)
+    cb = fig.colorbar(mappable, ax=axes.ravel().tolist(), fraction=0.025, pad=0.01)
+    cb.set_label("electron energy (keV)")
+    case0 = bycombo[combos[0]]
     fig.suptitle(
-        rf"Electron penetration, $\theta_\mathrm{{tilt}}$={t:g}$\degree$ "
-        f"(crystal = shaded slab; beam-detector plane)",
+        rf"{case0['name'].split()[0]}, {case0['thickness_ang'] / 1e4:.1f} $\mu$m, "
+        rf"{energy:g} keV — electron penetration "
+        rf"(red: beam   green: detector   only the slab rotates)",
+        fontsize=12,
+    )
+    return fig
+
+
+def plot_penetration_profile(
+    cases_or_results, *, Ne=500, seed=0, n_bins=40, tilt=None, depth_frac=True,
+):
+    """TODO #1: mean electron ENERGY vs penetration depth -- the slowing-down /
+    penetration profile -- with the mean electron AGE (lifetime, sum L/beta -> fs)
+    vs depth alongside, one curve per beam energy.
+
+    Depth is z below the entrance surface (the slab normal), path-length-weighted
+    so each bin reflects where the electrons actually spend their track length.
+    ``tilt`` selects the polar tilt (nearest; default the one closest to normal
+    incidence). ``depth_frac`` plots depth as a fraction of the slab thickness
+    (so thin and thick slabs overlay); set False for absolute depth."""
+    cases = _trajectory_cases(cases_or_results)
+    if not cases:
+        print("no cases/results to plot")
+        return None
+    tilts = sorted({c["tilt_deg"] for c in cases})
+    want = 0.0 if tilt is None else tilt
+    t = min(tilts, key=lambda x: abs(x - want))
+    energies = sorted({c["E0_keV"] for c in cases})
+
+    fig, (axE, axT) = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    for i, E0 in enumerate(energies):
+        c = next((c for c in cases if c["E0_keV"] == E0 and c["tilt_deg"] == t), None)
+        if c is None:
+            continue
+        d = _trajectory_data(c, Ne, seed)
+        depth = d["z_u"]
+        thick = d["thick"]
+        x = depth / thick if depth_frac else depth
+        xmax = 1.0 if depth_frac else thick
+        edges = np.linspace(0.0, xmax, n_bins + 1)
+        ctr = 0.5 * (edges[:-1] + edges[1:])
+        idx = np.clip(np.digitize(x, edges) - 1, 0, n_bins - 1)
+        w = d["L"]  # path-length weight
+        sw = np.bincount(idx, w, minlength=n_bins)
+        good = sw > 0
+        swd = np.where(good, sw, 1.0)
+        meanE = np.bincount(idx, w * d["E"], minlength=n_bins) / swd
+        meanT = np.bincount(idx, w * d["t_fs"], minlength=n_bins) / swd
+        col = COLORS[i % len(COLORS)]
+        axE.plot(ctr[good], meanE[good], "-", color=col, lw=1.9, label=f"{E0:g} keV")
+        axT.plot(ctr[good], meanT[good], "-", color=col, lw=1.9, label=f"{E0:g} keV")
+    case0 = next(c for c in cases if c["tilt_deg"] == t)
+    ulab = r"$\mu$m" if case0["thickness_ang"] >= 1e4 else "nm"
+    xlab = "depth / thickness" if depth_frac else f"penetration depth ({ulab})"
+    axE.set(xlabel=xlab, ylabel="mean electron energy (keV)", title="Slowing-down profile")
+    axT.set(xlabel=xlab, ylabel="mean electron age (fs)", title="Electron lifetime vs depth")
+    for ax in (axE, axT):
+        ax.set_xlim(0, 1 if depth_frac else None)
+        ax.grid(alpha=0.3)
+        ax.legend(title="beam energy", fontsize=9)
+    fig.suptitle(
+        rf"{case0['name'].split()[0]}, {case0['thickness_ang'] / 1e4:.1f} $\mu$m, "
+        rf"$\theta_\mathrm{{tilt}}$={t:g}$\degree$ — penetration profiles",
         fontsize=13,
     )
     fig.tight_layout()

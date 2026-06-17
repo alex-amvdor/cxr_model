@@ -378,8 +378,13 @@ def simulate_trajectories(
     E = np.full(Ne, float(E0_keV))
     alive = np.ones(Ne, dtype=bool)
     n_back = n_trans = 0
+    # per-electron clock: cumulative flight "time" sum(L/beta) [Ang, c=1], the
+    # same unit as the radiation interaction time t_L. Recorded at each segment's
+    # START so a segment carries (depth, energy, age) -- consumed by the
+    # penetration / electron-lifetime plots (-> fs via c = 2997.92 Ang/fs).
+    clock = np.zeros(Ne)
 
-    seg_mid, seg_dir, seg_len, seg_E = [], [], [], []
+    seg_mid, seg_dir, seg_len, seg_E, seg_t0, seg_id = [], [], [], [], [], []
 
     # Event-driven loop: every iteration is one FREE FLIGHT + one ELASTIC
     # COLLISION for every still-alive electron, executed in lockstep (pure
@@ -443,13 +448,17 @@ def simulate_trajectories(
         seg_dir.append(d.copy())
         seg_len.append(step)
         seg_E.append(Ea.copy())
+        seg_t0.append(clock[idx].copy())  # age at segment START [Ang, c=1]
+        seg_id.append(idx.copy())  # which electron emitted this segment
 
         # -- 4. advance: straight line + continuous slowing-down ----------------
         # Positions move the full flight; energy drains deterministically along
         # it (CSDA: Joy-Luo modified Bethe, additive over elements; no
-        # straggling, no fast secondaries).
+        # straggling, no fast secondaries). The clock advances by L/beta at the
+        # segment's start speed (the <0.5% per-segment energy loss is negligible).
         pos[idx] = p + step[:, None] * d
         E[idx] = Ea + _dEds_compound(comp, Ea) * step
+        clock[idx] += step / beta_from_keV(Ea)
 
         # -- 5. kill exited / exhausted electrons --------------------------------
         died = exit_top | exit_bot | (E[idx] < E_cut_keV)
@@ -488,6 +497,8 @@ def simulate_trajectories(
         "v_hat": np.concatenate(seg_dir),
         "L_ang": np.concatenate(seg_len),
         "E_keV": np.concatenate(seg_E),
+        "t_ang": np.concatenate(seg_t0),  # segment-start age sum(L/beta) [Ang, c=1]
+        "elec_id": np.concatenate(seg_id),  # emitting electron index in [0, Ne)
         "n_backscattered": n_back,
         "n_transmitted": n_trans,
         "n_stopped": int(Ne - n_back - n_trans),
