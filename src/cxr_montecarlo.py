@@ -45,6 +45,7 @@ import numpy as np
 
 try:
     import cupy as cp
+
     _GPU = True
     xp = cp
     print("Using GPU")
@@ -63,9 +64,16 @@ except ImportError:
 REAL = xp.float32 if (_GPU and os.environ.get("CXR_FP64") != "1") else xp.float64
 
 from cxr_feranchuk_spence import (
-    ALPHA_FS, HBARC_EV_ANG, M_E_EV, CRYSTALS,
-    chi_g, U_g, absorption_length_ang, reciprocal_g_vector,
-    _rotation_between, _direct_lattice_vectors,
+    ALPHA_FS,
+    HBARC_EV_ANG,
+    M_E_EV,
+    CRYSTALS,
+    chi_g,
+    U_g,
+    absorption_length_ang,
+    reciprocal_g_vector,
+    _rotation_between,
+    _direct_lattice_vectors,
 )
 
 
@@ -75,20 +83,25 @@ def _to_cpu(a):
         return a.get()
     return np.asarray(a)
 
-MOTT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "..", "data", "mott_transport_cross_sections")
-A0_SQ_CM2 = 2.8002852e-17     # Bohr radius squared [cm^2] (NIST SRD 64 unit)
+
+MOTT_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..",
+    "data",
+    "mott_transport_cross_sections",
+)
+A0_SQ_CM2 = 2.8002852e-17  # Bohr radius squared [cm^2] (NIST SRD 64 unit)
 
 # ---- element data for transport ---------------------------------------------
 # A [g/mol], J = mean ionization potential [keV] (Berger-Seltzer values)
 TRANSPORT_ELEMENTS = {
-    "C":  {"Z": 6,  "A": 12.011, "J_keV": 0.078},
+    "C": {"Z": 6, "A": 12.011, "J_keV": 0.078},
     "Si": {"Z": 14, "A": 28.085, "J_keV": 0.173},
     "Ge": {"Z": 32, "A": 72.630, "J_keV": 0.350},
     "Se": {"Z": 34, "A": 78.971, "J_keV": 0.348},
-    "S":  {"Z": 16, "A": 32.06,  "J_keV": 0.180},
-    "Mo": {"Z": 42, "A": 95.95,  "J_keV": 0.424},
-    "W":  {"Z": 74, "A": 183.84, "J_keV": 0.727},
+    "S": {"Z": 16, "A": 32.06, "J_keV": 0.180},
+    "Mo": {"Z": 42, "A": 95.95, "J_keV": 0.424},
+    "W": {"Z": 74, "A": 183.84, "J_keV": 0.727},
     "Zr": {"Z": 40, "A": 91.224, "J_keV": 0.393},
     "Hf": {"Z": 72, "A": 178.49, "J_keV": 0.705},
     "Pt": {"Z": 78, "A": 195.08, "J_keV": 0.790},
@@ -107,9 +120,11 @@ def _sigma_browning_cm2(Z, E_keV):
     tabulated Mott TOTAL elastic cross sections [cm^2], valid 0.1-30 keV,
     Z <= 92.
     """
-    return (3.0e-18 * Z**1.7
-            / (E_keV + 0.005 * Z**1.7 * np.sqrt(E_keV)
-               + 0.0007 * Z**2 / np.sqrt(E_keV)))
+    return (
+        3.0e-18
+        * Z**1.7
+        / (E_keV + 0.005 * Z**1.7 * np.sqrt(E_keV) + 0.0007 * Z**2 / np.sqrt(E_keV))
+    )
 
 
 def _alpha_sr_joy(Z, E_keV):
@@ -133,7 +148,7 @@ def _alpha_from_first_moment(target):
         small = val < t
         lo = np.where(small, mid, lo)
         hi = np.where(small, hi, mid)
-    return 10.0**(0.5 * (lo + hi))
+    return 10.0 ** (0.5 * (lo + hi))
 
 
 @lru_cache(maxsize=None)
@@ -149,7 +164,8 @@ def _load_mott_transport(element):
         raise FileNotFoundError(
             f"No NIST Mott transport table for '{element}' ({path}). "
             f"Download from https://srdata.nist.gov/srd64/ or use "
-            f"elastic_model='sr'.")
+            f"elastic_model='sr'."
+        )
     E, sig = [], []
     with open(path) as f:
         for line in f:
@@ -188,10 +204,12 @@ def _sample_cos_theta(Z, E_keV, rng, elastic_model, element):
     if elastic_model == "mott" and element not in _NO_MOTT:
         try:
             logE, logA = _mott_alpha_table(element, Z)
-            alpha = 10.0**np.interp(np.log10(E_keV * 1e3), logE, logA)
+            alpha = 10.0 ** np.interp(np.log10(E_keV * 1e3), logE, logA)
         except FileNotFoundError:
-            print(f"transport: no Mott transport table for {element!r}; using "
-                  f"the analytic screened-Rutherford screening for it instead.")
+            print(
+                f"transport: no Mott transport table for {element!r}; using "
+                f"the analytic screened-Rutherford screening for it instead."
+            )
             _NO_MOTT.add(element)
             alpha = _alpha_sr_joy(Z, E_keV)
     else:
@@ -204,8 +222,13 @@ def _dEds_keV_per_ang(Z, A, J_keV, rho_g_cm3, E_keV):
     """Joy-Luo modified Bethe stopping power [keV/Angstrom] (negative)."""
     k = 0.731 + 0.0688 * np.log10(Z)
     # 78500 keV/cm -> 7.85e-4 keV/Angstrom prefactor
-    return (-7.85e-4 * rho_g_cm3 * Z / (A * E_keV)
-            * np.log(1.166 * (E_keV + k * J_keV) / J_keV))
+    return (
+        -7.85e-4
+        * rho_g_cm3
+        * Z
+        / (A * E_keV)
+        * np.log(1.166 * (E_keV + k * J_keV) / J_keV)
+    )
 
 
 def _normalize_composition(element, n_atoms_per_ang3, composition):
@@ -231,7 +254,8 @@ def _dEds_compound(comp, E_keV):
         p = TRANSPORT_ELEMENTS[el]
         k = 0.731 + 0.0688 * np.log10(p["Z"])
         total = total + (n_i / 0.602214076) * p["Z"] * np.log(
-            1.166 * (E_keV + k * p["J_keV"]) / p["J_keV"])
+            1.166 * (E_keV + k * p["J_keV"]) / p["J_keV"]
+        )
     return -7.85e-4 / E_keV * total
 
 
@@ -264,9 +288,11 @@ def _rotate_directions(d, cos_t, phi):
     u = np.cross(d, ref)
     u /= np.linalg.norm(u, axis=1)[:, None]
     w = np.cross(d, u)
-    out = (cos_t[:, None] * d
-           + (sin_t * np.cos(phi))[:, None] * u
-           + (sin_t * np.sin(phi))[:, None] * w)
+    out = (
+        cos_t[:, None] * d
+        + (sin_t * np.cos(phi))[:, None] * u
+        + (sin_t * np.sin(phi))[:, None] * w
+    )
     return out / np.linalg.norm(out, axis=1)[:, None]
 
 
@@ -289,18 +315,26 @@ def tilted_geometry(theta_obs_rad, tilt_polar_rad, tilt_azim_rad=0.0):
     tilt-invariant, while v0.g picks up cos(tilt).
     """
     st, ct = np.sin(tilt_polar_rad), np.cos(tilt_polar_rad)
-    normal_lab = np.array([st * np.cos(tilt_azim_rad),
-                           st * np.sin(tilt_azim_rad), ct])
+    normal_lab = np.array([st * np.cos(tilt_azim_rad), st * np.sin(tilt_azim_rad), ct])
     R = _rotation_between(np.array([0.0, 0.0, 1.0]), normal_lab)
     beam_dir = R.T @ np.array([0.0, 0.0, 1.0])
     n_hat = R.T @ np.array([np.sin(theta_obs_rad), 0.0, np.cos(theta_obs_rad)])
     return beam_dir, n_hat
 
 
-def simulate_trajectories(E0_keV, Ne, thickness_ang, element="C",
-                          n_atoms_per_ang3=None, E_cut_keV=5.0,
-                          seed=0, max_steps=20000, elastic_model="mott",
-                          beam_dir=None, composition=None):
+def simulate_trajectories(
+    E0_keV,
+    Ne,
+    thickness_ang,
+    element="C",
+    n_atoms_per_ang3=None,
+    E_cut_keV=5.0,
+    seed=0,
+    max_steps=20000,
+    elastic_model="mott",
+    beam_dir=None,
+    composition=None,
+):
     """
     Transport Ne electrons of energy E0_keV [keV] into a slab 0<=z<=thickness.
     Beam enters at the origin along +z. Electrons terminate when they exit
@@ -355,29 +389,36 @@ def simulate_trajectories(E0_keV, Ne, thickness_ang, element="C",
     for _ in range(max_steps):
         if not alive.any():
             break
-        idx = np.flatnonzero(alive)     # indices of electrons still in play
-        Ea = E[idx]                     # their kinetic energies [keV]
+        idx = np.flatnonzero(alive)  # indices of electrons still in play
+        Ea = E[idx]  # their kinetic energies [keV]
 
         # -- 1. distance to the next elastic collision -------------------------
         # Exponential free path: P(s) = exp(-s/lambda)/lambda, with the total
         # rate additive over elements: 1/lambda = sum_i n_i sigma_i(E).
-        rates = []                       # per-element scattering rates [1/cm]
+        rates = []  # per-element scattering rates [1/cm]
         for (el_i, _), Z_i, n_i in zip(comp, Zs, n_cm3s):
             if elastic_model == "mott":
-                sig_i = _sigma_browning_cm2(Z_i, Ea)   # Browning fit to Mott
+                sig_i = _sigma_browning_cm2(Z_i, Ea)  # Browning fit to Mott
             elif elastic_model == "sr":
                 a = _alpha_sr_joy(Z_i, Ea)
-                sig_i = (5.21e-21 * Z_i**2 / Ea**2 * 4.0 * np.pi / (a * (1.0 + a))
-                         * ((Ea + 511.0) / (Ea + 1024.0))**2)
+                sig_i = (
+                    5.21e-21
+                    * Z_i**2
+                    / Ea**2
+                    * 4.0
+                    * np.pi
+                    / (a * (1.0 + a))
+                    * ((Ea + 511.0) / (Ea + 1024.0)) ** 2
+                )
             else:
                 raise ValueError("elastic_model must be 'mott' or 'sr'")
             rates.append(n_i * sig_i)
-        rates = np.array(rates)                       # (n_elements, m)
-        lam_ang = 1e8 / rates.sum(axis=0)             # mean free path [Ang]
-        step = -lam_ang * np.log(rng.random(idx.size))   # sampled flight [Ang]
+        rates = np.array(rates)  # (n_elements, m)
+        lam_ang = 1e8 / rates.sum(axis=0)  # mean free path [Ang]
+        step = -lam_ang * np.log(rng.random(idx.size))  # sampled flight [Ang]
 
-        d = dirs[idx]                   # current unit direction of each electron
-        p = pos[idx]                    # current position [Ang]
+        d = dirs[idx]  # current unit direction of each electron
+        p = pos[idx]  # current position [Ang]
 
         # -- 2. slab-boundary truncation ----------------------------------------
         # The flight is the ray r(s') = p + s' d. It crosses the entrance face
@@ -388,7 +429,9 @@ def simulate_trajectories(E0_keV, Ne, thickness_ang, element="C",
         exit_top = (d[:, 2] < 0) & (p[:, 2] + step * d[:, 2] < 0.0)
         exit_bot = (d[:, 2] > 0) & (p[:, 2] + step * d[:, 2] > thickness_ang)
         s_top = np.where(d[:, 2] < 0, p[:, 2] / (-d[:, 2] + 1e-300), np.inf)
-        s_bot = np.where(d[:, 2] > 0, (thickness_ang - p[:, 2]) / (d[:, 2] + 1e-300), np.inf)
+        s_bot = np.where(
+            d[:, 2] > 0, (thickness_ang - p[:, 2]) / (d[:, 2] + 1e-300), np.inf
+        )
         step = np.where(exit_top, s_top, step)
         step = np.where(exit_bot, s_bot, step)
 
@@ -410,7 +453,7 @@ def simulate_trajectories(E0_keV, Ne, thickness_ang, element="C",
 
         # -- 5. kill exited / exhausted electrons --------------------------------
         died = exit_top | exit_bot | (E[idx] < E_cut_keV)
-        n_back += int(exit_top.sum())   # exited the entrance face (backscattered)
+        n_back += int(exit_top.sum())  # exited the entrance face (backscattered)
         n_trans += int(exit_bot.sum())  # punched through the back face
         alive[idx[died]] = False
 
@@ -425,18 +468,18 @@ def simulate_trajectories(E0_keV, Ne, thickness_ang, element="C",
         if srv.size:
             cos_t = np.empty(srv.size)
             if len(comp) == 1:
-                cos_t = _sample_cos_theta(Zs[0], E[srv], rng,
-                                          elastic_model, comp[0][0])
+                cos_t = _sample_cos_theta(Zs[0], E[srv], rng, elastic_model, comp[0][0])
             else:
                 p_el = rates[:, srv_mask] / rates[:, srv_mask].sum(axis=0)
                 u = rng.random(srv.size)
                 cum = np.cumsum(p_el, axis=0)
-                which = (u[None, :] > cum).sum(axis=0)    # element index
+                which = (u[None, :] > cum).sum(axis=0)  # element index
                 for i_el, (el_i, _) in enumerate(comp):
                     m = which == i_el
                     if m.any():
-                        cos_t[m] = _sample_cos_theta(Zs[i_el], E[srv][m], rng,
-                                                     elastic_model, el_i)
+                        cos_t[m] = _sample_cos_theta(
+                            Zs[i_el], E[srv][m], rng, elastic_model, el_i
+                        )
             phi = 2.0 * np.pi * rng.random(srv.size)
             dirs[srv] = _rotate_directions(dirs[srv], cos_t, phi)
 
@@ -466,13 +509,23 @@ def _polarization_pair(k_hat, g_vec):
     return e_s, e_p / np.linalg.norm(e_p)
 
 
-def mc_spectrum(segments, E_grid_eV, crystal="graphite",
-                hkl_list=((0, 0, 2), (0, 0, -2)),
-                theta_obs_rad=np.deg2rad(119.0),
-                B_ang2=0.8, use_henke=True,
-                absorber_element="C", chunk=40000, n_hat=None,
-                composition=None, beam_uvw=None, azimuth_rad=0.0,
-                sinc_cutoff=None, components=False):
+def mc_spectrum(
+    segments,
+    E_grid_eV,
+    crystal="graphite",
+    hkl_list=((0, 0, 2), (0, 0, -2)),
+    theta_obs_rad=np.deg2rad(119.0),
+    B_ang2=0.8,
+    use_henke=True,
+    absorber_element="C",
+    chunk=40000,
+    n_hat=None,
+    composition=None,
+    beam_uvw=None,
+    azimuth_rad=0.0,
+    sinc_cutoff=None,
+    components=False,
+):
     """
     Per-electron CXR spectrum d2N/dE dOmega [photons / eV / sr / electron]
     on E_grid_eV, summed incoherently over the trajectory segments and the
@@ -519,8 +572,9 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         u, v, w = np.asarray(beam_uvw, dtype=float)
         a1, a2, a3 = _direct_lattice_vectors(info["lattice"])
         axis = u * a1 + v * a2 + w * a3
-        R_orient = _rotation_between(axis / np.linalg.norm(axis),
-                                     np.array([0.0, 0.0, 1.0]))
+        R_orient = _rotation_between(
+            axis / np.linalg.norm(axis), np.array([0.0, 0.0, 1.0])
+        )
     if azimuth_rad:
         ca, sa = np.cos(azimuth_rad), np.sin(azimuth_rad)
         Rz = np.array([[ca, -sa, 0.0], [sa, ca, 0.0], [0.0, 0.0, 1.0]])
@@ -542,8 +596,8 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
     seg_v = xp.asarray(segments["v_hat"], dtype=REAL)
     seg_L = xp.asarray(segments["L_ang"], dtype=REAL)
     seg_r = xp.asarray(segments["r_mid"], dtype=REAL)
-    beta_all = beta_from_keV(seg_E)                   # speed/c per segment
-    v_all = beta_all[:, None] * seg_v                 # velocity vectors (c=1)
+    beta_all = beta_from_keV(seg_E)  # speed/c per segment
+    v_all = beta_all[:, None] * seg_v  # velocity vectors (c=1)
 
     # chi_g / U_g are smooth in energy AWAY from absorption edges, so evaluate
     # them on a tabulation grid and interpolate at the per-segment resonance
@@ -555,6 +609,7 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
     # a plain uniform mesh mis-resolves the edge jumps (tens of % at e.g. the
     # C K-edge). Window matches the keep mask below.
     from atomic_form_factors import load_henke
+
     _pad = 0.2 * (float(E_grid_eV[-1]) - float(E_grid_eV[0]))
     _lo, _hi = float(E_grid_eV[0]) - _pad, float(E_grid_eV[-1]) + _pad
     _grids = [np.arange(_lo, _hi + 1.0, 1.0)]
@@ -582,23 +637,27 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         # -- 1. per-segment resonance energy (Eq. 10) ---------------------------
         #   omega_res = v.g / (1 - v.n)   [1/Ang]   (>0 required to radiate)
         v_dot_g = v_all @ g_vec_d
-        denom = 1.0 - v_all @ n_hat_d     # the Doppler-like denominator
+        denom = 1.0 - v_all @ n_hat_d  # the Doppler-like denominator
         omega_res = v_dot_g / denom
         E_res = HBARC_EV_ANG * omega_res  # -> eV
 
         # -- 2. drop segments whose line misses the spectral window -------------
         # (pad by 20% so sinc tails that reach into the window still count)
         pad = 0.2 * (E_grid[-1] - E_grid[0])
-        keep = (E_res > float(E_grid[0] - pad)) & (E_res > 10.0) & (E_res < E_grid[-1] + pad)
+        keep = (
+            (E_res > float(E_grid[0] - pad))
+            & (E_res > 10.0)
+            & (E_res < E_grid[-1] + pad)
+        )
         if not keep.any():
             continue
         idx = xp.flatnonzero(keep)
 
-        E_r = E_res[idx]                  # line energy per kept segment [eV]
-        om = omega_res[idx]               # same in 1/Ang
-        v = v_all[idx]                    # velocity vectors
+        E_r = E_res[idx]  # line energy per kept segment [eV]
+        om = omega_res[idx]  # same in 1/Ang
+        v = v_all[idx]  # velocity vectors
         beta = beta_all[idx]
-        t_L = seg_L[idx] / beta           # interaction time [Ang] (c=1)
+        t_L = seg_L[idx] / beta  # interaction time [Ang] (c=1)
         dnm = denom[idx]
         vdg = v_dot_g[idx]
 
@@ -609,16 +668,19 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         # interpolate real and imaginary parts separately.
         chi_tab = np.asarray(chi_g(crystal, hkl, E_tab, B_ang2, use_henke))
         u_tab = np.asarray(U_g(crystal, hkl, E_tab, B_ang2, use_henke))
-        chi = (xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.real, dtype=REAL))
-               + 1j * xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.imag, dtype=REAL)))
-        eUg_over_m = (xp.interp(E_r, E_tab_g, xp.asarray(u_tab.real, dtype=REAL))
-                      + 1j * xp.interp(E_r, E_tab_g, xp.asarray(u_tab.imag, dtype=REAL))) / M_E_EV
+        chi = xp.interp(
+            E_r, E_tab_g, xp.asarray(chi_tab.real, dtype=REAL)
+        ) + 1j * xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.imag, dtype=REAL))
+        eUg_over_m = (
+            xp.interp(E_r, E_tab_g, xp.asarray(u_tab.real, dtype=REAL))
+            + 1j * xp.interp(E_r, E_tab_g, xp.asarray(u_tab.imag, dtype=REAL))
+        ) / M_E_EV
 
         # -- 4. photon kinematics per segment ------------------------------------
-        k_vec = om[:, None] * n_hat_d     # photon wavevector omega * n_hat
-        kg_vec = k_vec + g_vec_d          # diffracted wavevector k + g
+        k_vec = om[:, None] * n_hat_d  # photon wavevector omega * n_hat
+        kg_vec = k_vec + g_vec_d  # diffracted wavevector k + g
         kg2 = xp.einsum("ij,ij->i", kg_vec, kg_vec)
-        detuning = kg2 - om**2            # PXR denominator (~g^2, never small)
+        detuning = kg2 - om**2  # PXR denominator (~g^2, never small)
         k_dot_g = k_vec @ g_vec_d
 
         # -- 5. Eq. (13) + relativistic Eq. (14) amplitudes, per segment ----------
@@ -629,16 +691,17 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         A2 = xp.zeros(idx.size, dtype=REAL)
         A2_pxr = xp.zeros(idx.size, dtype=REAL)
         A2_cbs = xp.zeros(idx.size, dtype=REAL)
-        for e in (e_s, e_p):              # sum |A|^2 over both polarizations
+        for e in (e_s, e_p):  # sum |A|^2 over both polarizations
             e_d = xp.asarray(e, dtype=REAL)
-            g_dot_e = g_vec_d @ e_d       # scalar (e fixed per reflection)
+            g_dot_e = g_vec_d @ e_d  # scalar (e fixed per reflection)
             v_dot_e = v @ e_d
             v_dot_kg = xp.einsum("ij,ij->i", v, kg_vec)
             A_PXR = chi / detuning * (v_dot_kg * g_dot_e - om**2 * v_dot_e)
             braced_ge = g_dot_e - vdg * v_dot_e
             braced_kg = k_dot_g - k_dot_v * vdg
-            A_CBS = (-eUg_over_m / (gamma * vdg)
-                     * (braced_ge + v_dot_e * braced_kg / vdg))
+            A_CBS = (
+                -eUg_over_m / (gamma * vdg) * (braced_ge + v_dot_e * braced_kg / vdg)
+            )
             A2 += xp.abs(A_PXR + A_CBS) ** 2
             A2_pxr += xp.abs(A_PXR) ** 2
             A2_cbs += xp.abs(A_CBS) ** 2
@@ -647,9 +710,9 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         # straight path along n_hat to whichever slab face the photon exits
         z_mid = seg_r[idx, 2]
         if n_hat[2] < 0:
-            L_esc = z_mid / (-n_hat[2])               # out the entrance face
+            L_esc = z_mid / (-n_hat[2])  # out the entrance face
         else:
-            L_esc = (thickness - z_mid) / n_hat[2]    # out the back face
+            L_esc = (thickness - z_mid) / n_hat[2]  # out the back face
         T_abs = xp.exp(-L_esc * _mu_total_inv_ang(abs_comp, E_r))
 
         # -- 7. accumulate the finite-segment lineshape ---------------------------
@@ -657,8 +720,7 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
         #                  * sinc^2[(1 - v.n)(omega - omega_res) t_L / 2] * T_abs
         # weight = everything except the sinc^2; a_width converts (E - E_res)
         # to the sinc argument: P t_L = a_width * (E - E_res).
-        pref = (ALPHA_FS * om / (4.0 * xp.pi**2 * HBARC_EV_ANG)
-                * t_L**2 * T_abs)
+        pref = ALPHA_FS * om / (4.0 * xp.pi**2 * HBARC_EV_ANG) * t_L**2 * T_abs
         weight = pref * A2
         targets = [(weight, spec)]
         if components:
@@ -672,8 +734,7 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
                 m = good[sl]
                 if not m.any():
                     continue
-                x = (a_width[sl][m, None] * (E_grid[None, :] - E_r[sl][m, None])
-                     / xp.pi)
+                x = a_width[sl][m, None] * (E_grid[None, :] - E_r[sl][m, None]) / xp.pi
                 S = xp.sinc(x) ** 2
                 for w, tgt in targets:
                     tgt += w[sl][m] @ S
@@ -682,7 +743,7 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
             order = xp.argsort(E_r)
             blk = 8192
             for j0 in range(0, order.size, blk):
-                sel = order[j0:j0 + blk]
+                sel = order[j0 : j0 + blk]
                 sel = sel[good[sel]]
                 if sel.size == 0:
                     continue
@@ -690,11 +751,17 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
                 lo = float(_to_cpu((E_r[sel] - half).min()))
                 hi = float(_to_cpu((E_r[sel] + half).max()))
                 i0 = max(int((lo - float(_to_cpu(E_grid[0]))) // float(_to_cpu(dE))), 0)
-                i1 = min(int((hi - float(_to_cpu(E_grid[0]))) // float(_to_cpu(dE))) + 2, E_grid.size)
+                i1 = min(
+                    int((hi - float(_to_cpu(E_grid[0]))) // float(_to_cpu(dE))) + 2,
+                    E_grid.size,
+                )
                 if i1 <= i0:
                     continue
-                x = (a_width[sel][:, None]
-                     * (E_grid[None, i0:i1] - E_r[sel][:, None]) / xp.pi)
+                x = (
+                    a_width[sel][:, None]
+                    * (E_grid[None, i0:i1] - E_r[sel][:, None])
+                    / xp.pi
+                )
                 S = xp.sinc(x) ** 2
                 for w, tgt in targets:
                     tgt[i0:i1] += w[sel] @ S
@@ -705,7 +772,7 @@ def mc_spectrum(segments, E_grid_eV, crystal="graphite",
 
 
 # ---- bremsstrahlung background -------------------------------------------------
-R_E_CM2 = 7.9407877e-26       # classical electron radius squared [cm^2]
+R_E_CM2 = 7.9407877e-26  # classical electron radius squared [cm^2]
 
 
 def _brem_dsigma_dk(Z, T_keV, k_eV):
@@ -724,11 +791,11 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
     (spectral grid); zero where k >= T. Adequate for Z <~ 30 and
     T <~ 100 keV; swap in Seltzer-Berger tables for better accuracy.
     """
-    mc2 = 510.99895                                    # keV
+    mc2 = 510.99895  # keV
     T_i = xp.asarray(T_keV, dtype=REAL)[:, None]
-    k = xp.asarray(k_eV, dtype=REAL)[None, :] / 1e3   # keV
+    k = xp.asarray(k_eV, dtype=REAL)[None, :] / 1e3  # keV
     T_f = T_i - k
-    ok = (T_f > 1e-6) & (k > 0.0)   # k>0: no photon (and no 1/k blowup) at k=0
+    ok = (T_f > 1e-6) & (k > 0.0)  # k>0: no photon (and no 1/k blowup) at k=0
     T_f = xp.where(ok, T_f, 1e-6)
 
     p_i = xp.sqrt(T_i * (T_i + 2.0 * mc2)) / mc2
@@ -737,19 +804,36 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
     beta_f = p_f / (1.0 + T_f / mc2)
 
     born_log = xp.log((p_i + p_f) / xp.maximum(p_i - p_f, 1e-30))
-    elwert = (beta_i / beta_f
-              * (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_i))
-              / (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_f)))
+    elwert = (
+        beta_i
+        / beta_f
+        * (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_i))
+        / (1.0 - xp.exp(-2.0 * xp.pi * Z * ALPHA_FS / beta_f))
+    )
 
-    dsig = (16.0 / 3.0 * ALPHA_FS * R_E_CM2 * Z**2
-            / xp.maximum(k * 1e3, 1e-30) / p_i**2 * born_log * elwert)   # per eV
+    dsig = (
+        16.0
+        / 3.0
+        * ALPHA_FS
+        * R_E_CM2
+        * Z**2
+        / xp.maximum(k * 1e3, 1e-30)
+        / p_i**2
+        * born_log
+        * elwert
+    )  # per eV
     return xp.where(ok, dsig, 0.0)
 
 
 def mc_brem_spectrum(
-    segments, E_grid_eV, element="C", n_atoms_per_ang3=None,
-    theta_obs_rad=np.deg2rad(119.0), n_hat=None, chunk=20000,
-    composition=None
+    segments,
+    E_grid_eV,
+    element="C",
+    n_atoms_per_ang3=None,
+    theta_obs_rad=np.deg2rad(119.0),
+    n_hat=None,
+    chunk=20000,
+    composition=None,
 ):
     """
     Incoherent bremsstrahlung background d2N/dE dOmega
@@ -782,7 +866,7 @@ def mc_brem_spectrum(
         n_hat = n_hat / np.linalg.norm(n_hat)
 
     E_grid = xp.asarray(E_grid_eV, dtype=REAL)
-    mu = _mu_total_inv_ang(comp, E_grid)               # (NE,) [1/Ang]
+    mu = _mu_total_inv_ang(comp, E_grid)  # (NE,) [1/Ang]
     # The Henke absorption tables span ~20 eV - 30 keV; outside that the wide
     # brem grid gets NaN (above 30 keV) or inf (at E=0), and a single bad bin
     # makes brem_wide -- and its integrated count rate -- NaN. Hard X-rays escape
@@ -857,17 +941,26 @@ def _transport_case(case):
     beam, n_hat = tilted_geometry(
         case["theta_obs_rad"],
         np.deg2rad(case.get("tilt_deg", 0.0)),
-        np.deg2rad(case.get("tilt_azim_deg", 0.0)))
+        np.deg2rad(case.get("tilt_azim_deg", 0.0)),
+    )
     segs = simulate_trajectories(
-        case["E0_keV"], case["Ne"], case["thickness_ang"],
+        case["E0_keV"],
+        case["Ne"],
+        case["thickness_ang"],
         composition=case["composition"],
         E_cut_keV=case.get("E_cut_lines_keV", 5.0),
-        seed=case["seed"], beam_dir=beam)
+        seed=case["seed"],
+        beam_dir=beam,
+    )
     segs_b = simulate_trajectories(
-        case["E0_keV"], case["Ne_brem"], case["thickness_ang"],
+        case["E0_keV"],
+        case["Ne_brem"],
+        case["thickness_ang"],
         composition=case["composition"],
         E_cut_keV=case.get("E_cut_brem_keV", 1.0),
-        seed=case["seed"] + 1, beam_dir=beam)
+        seed=case["seed"] + 1,
+        beam_dir=beam,
+    )
     return dict(E_grid=E_grid, E_brem=E_brem, n_hat=n_hat, segs=segs, segs_b=segs_b)
 
 
@@ -878,22 +971,41 @@ def _spectrum_case(case, tp):
     E_grid, E_brem, n_hat = tp["E_grid"], tp["E_brem"], tp["n_hat"]
     segs, segs_b = tp["segs"], tp["segs_b"]
     spec = mc_spectrum(
-        segs, E_grid, crystal=case["crystal"], hkl_list=case["hkl_list"],
-        n_hat=n_hat, B_ang2=case["B_ang2"], composition=case["composition"],
-        beam_uvw=case.get("beam_uvw"), azimuth_rad=case.get("azimuth_rad", 0.0),
-        sinc_cutoff=case.get("sinc_cutoff"), chunk=case.get("spec_chunk") or 40000)
-    brem_wide = mc_brem_spectrum(segs_b, E_brem, composition=case["composition"],
-                                 n_hat=n_hat, chunk=case.get("brem_chunk") or 20000)
-    brem = np.interp(E_grid, E_brem, brem_wide)   # brem under the lines (line grid)
+        segs,
+        E_grid,
+        crystal=case["crystal"],
+        hkl_list=case["hkl_list"],
+        n_hat=n_hat,
+        B_ang2=case["B_ang2"],
+        composition=case["composition"],
+        beam_uvw=case.get("beam_uvw"),
+        azimuth_rad=case.get("azimuth_rad", 0.0),
+        sinc_cutoff=case.get("sinc_cutoff"),
+        chunk=case.get("spec_chunk") or 40000,
+    )
+    brem_wide = mc_brem_spectrum(
+        segs_b,
+        E_brem,
+        composition=case["composition"],
+        n_hat=n_hat,
+        chunk=case.get("brem_chunk") or 20000,
+    )
+    brem = np.interp(E_grid, E_brem, brem_wide)  # brem under the lines (line grid)
     # Hand this case's GPU scratch back to the OS so the CuPy memory pool can't
     # accumulate (and fragment) across a long sweep until it fills the card.
     if _GPU:
         cp.get_default_memory_pool().free_all_blocks()
-    return dict(E_grid=E_grid, spec=spec, brem=brem,
-                E_grid_brem=E_brem, brem_wide=brem_wide,
-                eta=segs["n_backscattered"] / segs["Ne"],
-                n_segments=int(segs["L_ang"].size),
-                crystal=case["crystal"], E0_keV=case["E0_keV"])
+    return dict(
+        E_grid=E_grid,
+        spec=spec,
+        brem=brem,
+        E_grid_brem=E_brem,
+        brem_wide=brem_wide,
+        eta=segs["n_backscattered"] / segs["Ne"],
+        n_segments=int(segs["L_ang"].size),
+        crystal=case["crystal"],
+        E0_keV=case["E0_keV"],
+    )
 
 
 def _worker_init():
@@ -904,6 +1016,7 @@ def _worker_init():
     """
     try:
         import ctypes
+
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         # typed signatures matter: the untyped pseudo-handle (-1) gets
         # truncated on 64-bit and the call silently fails
@@ -912,7 +1025,7 @@ def _worker_init():
         k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000)  # BELOW_NORMAL
     except Exception:
         try:
-            os.nice(10)                       # POSIX fallback
+            os.nice(10)  # POSIX fallback
         except Exception:
             pass
 
@@ -942,11 +1055,13 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
     single-threaded BLAS (OMP/OPENBLAS/MKL_NUM_THREADS=1, inherited) -- N workers
     x M BLAS threads is the classic oversubscription freeze.
     """
+
     def _maybe_bar(iterable):
         if not progress:
             return iterable
         try:
             from tqdm.auto import tqdm
+
             return tqdm(iterable, total=len(cases), desc="cases")
         except ImportError:
             # tqdm.auto picks the widget bar inside Jupyter, and that bar
@@ -954,6 +1069,7 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
             # fall back to the plain-text console bar before giving up.
             try:
                 from tqdm import tqdm
+
                 return tqdm(iterable, total=len(cases), desc="cases")
             except ImportError:
                 return iterable
@@ -972,8 +1088,12 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
         return results
 
     def _single_thread_blas():
-        for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
-                    "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        for var in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        ):
             os.environ[var] = "1"
 
     # ---- GPU: pipeline CPU transport (worker pool) behind the serial GPU ------
@@ -982,23 +1102,25 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
             return _serial()
         if max_workers is None:
             ncpu = os.process_cpu_count() or os.cpu_count() or 8
-            nw = max(2, min(n, ncpu // 2))   # ~physical cores; transport is the tail
+            nw = max(2, min(n, ncpu // 2))  # ~physical cores; transport is the tail
         else:
             nw = min(max_workers, n)
         if nw < 2:
             return _serial()
         _single_thread_blas()
         from concurrent.futures import ProcessPoolExecutor
-        prefetch = nw + 2                          # keep the transport pool ahead
+
+        prefetch = nw + 2  # keep the transport pool ahead
         with ProcessPoolExecutor(max_workers=nw, initializer=_worker_init) as ex:
-            inflight = {i: ex.submit(_transport_case, cases[i])
-                        for i in range(min(prefetch, n))}
+            inflight = {
+                i: ex.submit(_transport_case, cases[i]) for i in range(min(prefetch, n))
+            }
             for i in _maybe_bar(range(n)):
-                tp = inflight.pop(i).result()         # transport (already overlapped)
+                tp = inflight.pop(i).result()  # transport (already overlapped)
                 j = i + prefetch
                 if j < n:
                     inflight[j] = ex.submit(_transport_case, cases[j])
-                out = _spectrum_case(cases[i], tp)    # GPU, THIS process only
+                out = _spectrum_case(cases[i], tp)  # GPU, THIS process only
                 results[i] = out
                 if callback is not None:
                     callback(i, cases[i], out)
@@ -1012,8 +1134,8 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
         return _serial()
     _single_thread_blas()
     from concurrent.futures import ProcessPoolExecutor, as_completed
-    with ProcessPoolExecutor(max_workers=max_workers,
-                             initializer=_worker_init) as ex:
+
+    with ProcessPoolExecutor(max_workers=max_workers, initializer=_worker_init) as ex:
         futures = {ex.submit(run_case, c): i for i, c in enumerate(cases)}
         for fut in _maybe_bar(as_completed(futures)):
             i = futures[fut]
@@ -1049,12 +1171,13 @@ def load_external_brem(path, E_grid_eV):
             try:
                 rows.append((float(parts[0]), float(parts[1])))
             except ValueError:
-                continue                      # header / text line
+                continue  # header / text line
     if not rows:
         raise ValueError(f"no numeric (E, intensity) rows found in {path}")
     arr = np.array(sorted(rows))
-    return np.interp(np.asarray(E_grid_eV, dtype=float), arr[:, 0], arr[:, 1],
-                     left=0.0, right=0.0)
+    return np.interp(
+        np.asarray(E_grid_eV, dtype=float), arr[:, 0], arr[:, 1], left=0.0, right=0.0
+    )
 
 
 # ---- detector model (SI S3/S4) -----------------------------------------------
@@ -1076,8 +1199,10 @@ def detector_efficiency(E_eV, polymer_nm=300.0, al_nm=40.0, grid_open=0.78):
     E = np.asarray(E_eV, dtype=float)
     # polyimide C22 H10 N2 O5: formula units per Ang^3 at rho = 1.42 g/cm^3
     n_f = 1.42 / 382.31 * 0.602214076
-    mu_poly = sum(count * _mu_total_inv_ang([(el, n_f)], E)
-                  for el, count in (("C", 22), ("H", 10), ("N", 2), ("O", 5)))
+    mu_poly = sum(
+        count * _mu_total_inv_ang([(el, n_f)], E)
+        for el, count in (("C", 22), ("H", 10), ("N", 2), ("O", 5))
+    )
     n_al = 2.70 / 26.982 * 0.602214076
     mu_al = _mu_total_inv_ang([("Al", n_al)], E)
     # Above the Henke ceiling (~30 keV) the window attenuation is unavailable
@@ -1090,8 +1215,7 @@ def detector_efficiency(E_eV, polymer_nm=300.0, al_nm=40.0, grid_open=0.78):
     # detector response.
     mu_poly = np.nan_to_num(mu_poly, nan=0.0, posinf=0.0, neginf=0.0)
     mu_al = np.nan_to_num(mu_al, nan=0.0, posinf=0.0, neginf=0.0)
-    return grid_open * np.exp(-mu_poly * polymer_nm * 10.0
-                              - mu_al * al_nm * 10.0)
+    return grid_open * np.exp(-mu_poly * polymer_nm * 10.0 - mu_al * al_nm * 10.0)
 
 
 def eds_fwhm_eV(E_eV):
@@ -1116,7 +1240,9 @@ def convolve_detector(E_grid_eV, spec, fwhm_eV):
     uniform energy grid.
     """
     from scipy.ndimage import gaussian_filter1d
+
     dE = E_grid_eV[1] - E_grid_eV[0]
     sigma_bins = fwhm_eV / (2.0 * np.sqrt(2.0 * np.log(2.0))) / dE
-    return gaussian_filter1d(np.asarray(spec, dtype=float), sigma_bins,
-                             mode="constant", cval=0.0)
+    return gaussian_filter1d(
+        np.asarray(spec, dtype=float), sigma_bins, mode="constant", cval=0.0
+    )

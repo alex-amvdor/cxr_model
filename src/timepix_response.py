@@ -81,43 +81,44 @@ quoted front-end figures convert as:
 ### of all, since sigma_diff ~ 1/sqrt(V) controls the whole charge-sharing /
 ### tail / turn-on behaviour.
 """
+
 import numpy as np
 from scipy.special import erf
 
 from cxr_feranchuk_spence import absorption_length_ang
 
 # ---- silicon sensor physics (fixed material constants) -----------------------
-W_EHP_EV = 3.65               # mean energy to make one electron-hole pair [eV]
-FANO_SI = 0.115               # Fano factor: Var(N) = F * N (sub-Poisson) for Si
+W_EHP_EV = 3.65  # mean energy to make one electron-hole pair [eV]
+FANO_SI = 0.115  # Fano factor: Var(N) = F * N (sub-Poisson) for Si
 SI_DENSITY_G_CM3 = 2.329
-SI_A = 28.085                 # Si molar mass [g/mol]
+SI_A = 28.085  # Si molar mass [g/mol]
 # number density n = rho/A * N_A, converted cm^-3 -> Ang^-3 (the unit
 # absorption_length_ang wants). 0.602214076 = N_A * 1e-24.
 SI_N_PER_ANG3 = SI_DENSITY_G_CM3 / SI_A * 0.602214076
-K_OVER_Q_V_PER_K = 8.617333e-5   # Boltzmann constant / elementary charge [V/K]
+K_OVER_Q_V_PER_K = 8.617333e-5  # Boltzmann constant / elementary charge [V/K]
 
 # ---- hardware / operating point (### FILL IN with the real quad values) -------
-SENSOR_THICKNESS_UM = 300.0   ### FILL IN -- Si sensor thickness [um] (placeholder)
-BIAS_VOLTAGE_V = 100.0        ### FILL IN -- applied reverse bias [V] (placeholder)
-PIXEL_PITCH_UM = 55.0         # Timepix3 pixel pitch [um] (fixed by the chip)
-TEMPERATURE_K = 300.0         ### FILL IN if the quad runs cooled (placeholder)
+SENSOR_THICKNESS_UM = 300.0  ### FILL IN -- Si sensor thickness [um] (placeholder)
+BIAS_VOLTAGE_V = 100.0  ### FILL IN -- applied reverse bias [V] (placeholder)
+PIXEL_PITCH_UM = 55.0  # Timepix3 pixel pitch [um] (fixed by the chip)
+TEMPERATURE_K = 300.0  ### FILL IN if the quad runs cooled (placeholder)
 
 # ---- front-end electronics (translated from the quoted electron figures) -----
-THRESHOLD_E = 525.0           # discriminator threshold Q_thr [e-] (quoted 500-550)
-ENC_E = 61.0                  # equivalent noise charge on the discriminator [e-]
-THRESHOLD_DISP_E = 35.0       # residual pixel-to-pixel threshold spread after
-                              #   equalization [e-]
-TOT_RES_E = 124.0             # Time-over-Threshold energy resolution, per pixel
-                              #   [e-]: folds in ToT quantization, gain spread,
-                              #   and per-pixel calibration residuals
+THRESHOLD_E = 525.0  # discriminator threshold Q_thr [e-] (quoted 500-550)
+ENC_E = 61.0  # equivalent noise charge on the discriminator [e-]
+THRESHOLD_DISP_E = 35.0  # residual pixel-to-pixel threshold spread after
+#   equalization [e-]
+TOT_RES_E = 124.0  # Time-over-Threshold energy resolution, per pixel
+#   [e-]: folds in ToT quantization, gain spread,
+#   and per-pixel calibration residuals
 
 # Two DISTINCT noises, kept separate on purpose (they act at different stages):
 #   * whether a pixel FIRES is governed by the discriminator noise -- ENC and
 #     the post-equalization threshold dispersion, independent, so in quadrature:
-SIGMA_THR_E = float(np.hypot(ENC_E, THRESHOLD_DISP_E))   # ~70 e- counting noise
+SIGMA_THR_E = float(np.hypot(ENC_E, THRESHOLD_DISP_E))  # ~70 e- counting noise
 #   * how well a fired pixel's charge is MEASURED is the ToT resolution, which we
 #     also carry in energy units for the analytic FWHM:
-SIGMA_TOT_EV = TOT_RES_E * W_EHP_EV                       # ~453 eV per pixel
+SIGMA_TOT_EV = TOT_RES_E * W_EHP_EV  # ~453 eV per pixel
 
 
 def sigma_diffusion_um(thickness_um=None, bias_v=None, temperature_k=None):
@@ -151,8 +152,8 @@ def absorption_efficiency(E_eV, thickness_um=None):
     in a much thinner sensor. Accepts scalars or arrays."""
     d = SENSOR_THICKNESS_UM if thickness_um is None else thickness_um
     E = np.asarray(E_eV, dtype=float)
-    L_abs_ang = absorption_length_ang("Si", E, SI_N_PER_ANG3)   # [Angstrom]
-    return 1.0 - np.exp(-(d * 1e4) / L_abs_ang)                 # d: um -> Angstrom
+    L_abs_ang = absorption_length_ang("Si", E, SI_N_PER_ANG3)  # [Angstrom]
+    return 1.0 - np.exp(-(d * 1e4) / L_abs_ang)  # d: um -> Angstrom
 
 
 def energy_fwhm_eV(E_eV, n_pix=1):
@@ -167,8 +168,8 @@ def energy_fwhm_eV(E_eV, n_pix=1):
     This is the analytic core only; the MC effective width (build_response's
     fwhm_rec) is larger because it also includes the charge-loss tail."""
     E = np.asarray(E_eV, dtype=float)
-    sigma2 = n_pix * SIGMA_TOT_EV**2 + W_EHP_EV * FANO_SI * E   # variance [eV^2]
-    return 2.3548 * np.sqrt(sigma2)                            # 2*sqrt(2 ln2)*sigma
+    sigma2 = n_pix * SIGMA_TOT_EV**2 + W_EHP_EV * FANO_SI * E  # variance [eV^2]
+    return 2.3548 * np.sqrt(sigma2)  # 2*sqrt(2 ln2)*sigma
 
 
 def _split_fractions(x_um, y_um, sigma_um, pitch_um, half=1):
@@ -188,21 +189,33 @@ def _split_fractions(x_um, y_um, sigma_um, pitch_um, half=1):
     inside the 3x3 block (half=1), so the fractions sum to ~1 and almost no
     charge escapes the block. Fully vectorized over the n_photon hit positions;
     returns shape (n_photon, (2*half+1)^2)."""
-    k = np.arange(-half, half + 1)                  # pixel indices, e.g. [-1,0,1]
-    lo = (k - 0.5) * pitch_um                        # each pixel's lower edges
-    hi = (k + 0.5) * pitch_um                        # each pixel's upper edges
-    s2 = np.sqrt(2.0) * sigma_um                      # the sqrt(2) sigma in erf
+    k = np.arange(-half, half + 1)  # pixel indices, e.g. [-1,0,1]
+    lo = (k - 0.5) * pitch_um  # each pixel's lower edges
+    hi = (k + 0.5) * pitch_um  # each pixel's upper edges
+    s2 = np.sqrt(2.0) * sigma_um  # the sqrt(2) sigma in erf
     # broadcast hit positions (n,1) against pixel edges (1,m) -> (n_photon, m)
-    fx = 0.5 * (erf((hi[None, :] - x_um[:, None]) / s2)
-                - erf((lo[None, :] - x_um[:, None]) / s2))
-    fy = 0.5 * (erf((hi[None, :] - y_um[:, None]) / s2)
-                - erf((lo[None, :] - y_um[:, None]) / s2))
+    fx = 0.5 * (
+        erf((hi[None, :] - x_um[:, None]) / s2)
+        - erf((lo[None, :] - x_um[:, None]) / s2)
+    )
+    fy = 0.5 * (
+        erf((hi[None, :] - y_um[:, None]) / s2)
+        - erf((lo[None, :] - y_um[:, None]) / s2)
+    )
     # outer product over the two pixel axes -> (n_photon, m, m), flattened to m*m
     return (fx[:, :, None] * fy[:, None, :]).reshape(x_um.size, -1)
 
 
-def build_response(E_in_eV, E_out_edges_eV, *, thickness_um=None, bias_v=None,
-                   n_mc=60000, neighborhood=1, seed=0):
+def build_response(
+    E_in_eV,
+    E_out_edges_eV,
+    *,
+    thickness_um=None,
+    bias_v=None,
+    n_mc=60000,
+    neighborhood=1,
+    seed=0,
+):
     """
     Monte-Carlo the detector response on a grid of input photon energies.
 
@@ -238,9 +251,9 @@ def build_response(E_in_eV, E_out_edges_eV, *, thickness_um=None, bias_v=None,
     rng = np.random.default_rng(seed)
     E_in = np.asarray(E_in_eV, dtype=float)
     edges = np.asarray(E_out_edges_eV, dtype=float)
-    E_out = 0.5 * (edges[:-1] + edges[1:])              # bin centres
+    E_out = 0.5 * (edges[:-1] + edges[1:])  # bin centres
     pitch = PIXEL_PITCH_UM
-    sigma = sigma_diffusion_um(thickness_um, bias_v)    # same for every energy
+    sigma = sigma_diffusion_um(thickness_um, bias_v)  # same for every energy
     eps_abs = absorption_efficiency(E_in, thickness_um)
 
     R = np.zeros((E_out.size, E_in.size))
@@ -278,12 +291,19 @@ def build_response(E_in_eV, E_out_edges_eV, *, thickness_um=None, bias_v=None,
         hist, _ = np.histogram(rec_E, bins=edges)
         R[:, i] = hist / n_mc * eps_abs[i]
         P_det[i] = any_fired.mean() * eps_abs[i]
-        if rec_E.size:                                   # tail/peak diagnostics
+        if rec_E.size:  # tail/peak diagnostics
             mean_rec[i] = rec_E.mean()
             fwhm_rec[i] = 2.3548 * rec_E.std()
 
-    return dict(R=R, P_det=P_det, eps_abs=eps_abs, E_out=E_out,
-                mean_rec=mean_rec, fwhm_rec=fwhm_rec, sigma_diff_um=sigma)
+    return dict(
+        R=R,
+        P_det=P_det,
+        eps_abs=eps_abs,
+        E_out=E_out,
+        mean_rec=mean_rec,
+        fwhm_rec=fwhm_rec,
+        sigma_diff_um=sigma,
+    )
 
 
 class TimepixResponse:
@@ -314,23 +334,31 @@ class TimepixResponse:
     thickness_um, bias_v : override the module hardware defaults.
     """
 
-    def __init__(self, E_grid_eV, *, dE_mc=50.0, dE_out=25.0, n_mc=60000,
-                 seed=0, thickness_um=None, bias_v=None):
+    def __init__(
+        self,
+        E_grid_eV,
+        *,
+        dE_mc=50.0,
+        dE_out=25.0,
+        n_mc=60000,
+        seed=0,
+        thickness_um=None,
+        bias_v=None,
+    ):
         E = np.asarray(E_grid_eV, dtype=float)
-        self.E = E                                  # the fine output grid
-        self.dE_fine = float(E[1] - E[0])           # fine bin width [eV]
+        self.E = E  # the fine output grid
+        self.dE_fine = float(E[1] - E[0])  # fine bin width [eV]
         lo, hi = float(E[0]), float(E[-1])
 
         # --- coarse INPUT grid ---------------------------------------------
         # edges start half a fine-bin below the first sample so each fine bin
         # falls cleanly inside one coarse bin
         in_edges = np.arange(lo - self.dE_fine / 2, hi + dE_mc, dE_mc)
-        self.E_in = 0.5 * (in_edges[:-1] + in_edges[1:])   # coarse bin centres
+        self.E_in = 0.5 * (in_edges[:-1] + in_edges[1:])  # coarse bin centres
         self.n_in = self.E_in.size
         # precompute which coarse-input bin each fine bin maps to, so .apply()
         # can re-bin any spectrum with a single bincount (flux-conserving)
-        self.idx_in = np.clip(((E - in_edges[0]) / dE_mc).astype(int),
-                              0, self.n_in - 1)
+        self.idx_in = np.clip(((E - in_edges[0]) / dE_mc).astype(int), 0, self.n_in - 1)
 
         # --- coarse OUTPUT grid --------------------------------------------
         # recorded energy can sit below E_in (charge loss) or above it (ToT
@@ -339,11 +367,17 @@ class TimepixResponse:
         self.dE_out = dE_out
 
         # run the Monte Carlo once; everything below is reused on every .apply()
-        resp = build_response(self.E_in, out_edges, n_mc=n_mc, seed=seed,
-                              thickness_um=thickness_um, bias_v=bias_v)
-        self.R = resp["R"]                      # (n_out, n_in) response operator
-        self.E_out = resp["E_out"]              # coarse output bin centres
-        self.P_det = resp["P_det"]              # detection efficiency on E_in
+        resp = build_response(
+            self.E_in,
+            out_edges,
+            n_mc=n_mc,
+            seed=seed,
+            thickness_um=thickness_um,
+            bias_v=bias_v,
+        )
+        self.R = resp["R"]  # (n_out, n_in) response operator
+        self.E_out = resp["E_out"]  # coarse output bin centres
+        self.P_det = resp["P_det"]  # detection efficiency on E_in
         self.eps_abs = resp["eps_abs"]
         self.mean_rec = resp["mean_rec"]
         self.fwhm_rec = resp["fwhm_rec"]
@@ -364,16 +398,19 @@ class TimepixResponse:
         coarse-OUTPUT bin (R already carries absorption + counting efficiency);
         dividing by dE_out makes it a density again; interp lifts it back onto
         the fine grid. Total detected photons are conserved through the chain."""
-        spec = np.nan_to_num(np.asarray(spec, dtype=float),
-                             nan=0.0, posinf=0.0, neginf=0.0)
+        spec = np.nan_to_num(
+            np.asarray(spec, dtype=float), nan=0.0, posinf=0.0, neginf=0.0
+        )
         if spec.shape != self.E.shape:
             raise ValueError(
                 f"spec length {spec.shape} != response grid {self.E.shape}. "
                 f"Build a matching response with "
-                f"timepix_response.get_response(E_grid, ...).")
-        n_in = np.bincount(self.idx_in, weights=spec * self.dE_fine,
-                           minlength=self.n_in)          # photons / coarse bin
-        S_out_coarse = (self.R @ n_in) / self.dE_out     # detected density / eV
+                f"timepix_response.get_response(E_grid, ...)."
+            )
+        n_in = np.bincount(
+            self.idx_in, weights=spec * self.dE_fine, minlength=self.n_in
+        )  # photons / coarse bin
+        S_out_coarse = (self.R @ n_in) / self.dE_out  # detected density / eV
         return np.interp(self.E, self.E_out, S_out_coarse, left=0.0, right=0.0)
 
     def detection_efficiency(self, E_eV=None):
@@ -390,8 +427,16 @@ class TimepixResponse:
 _RESPONSE_CACHE = {}
 
 
-def get_response(E_grid_eV, *, dE_mc=50.0, dE_out=25.0, n_mc=60000, seed=0,
-                 thickness_um=None, bias_v=None):
+def get_response(
+    E_grid_eV,
+    *,
+    dE_mc=50.0,
+    dE_out=25.0,
+    n_mc=60000,
+    seed=0,
+    thickness_um=None,
+    bias_v=None,
+):
     """
     Cached TimepixResponse for a given energy grid + settings: built once per
     unique (grid, hardware, MC) signature and reused thereafter. Prefer this over
@@ -404,12 +449,28 @@ def get_response(E_grid_eV, *, dE_mc=50.0, dE_out=25.0, n_mc=60000, seed=0,
     bias = BIAS_VOLTAGE_V if bias_v is None else bias_v
     # grid identity = (size, endpoints) since the grids are uniform; plus the
     # hardware/MC settings that change the matrix
-    key = (E.size, round(float(E[0]), 6), round(float(E[-1]), 6),
-           dE_mc, dE_out, n_mc, seed, thick, bias)
+    key = (
+        E.size,
+        round(float(E[0]), 6),
+        round(float(E[-1]), 6),
+        dE_mc,
+        dE_out,
+        n_mc,
+        seed,
+        thick,
+        bias,
+    )
     resp = _RESPONSE_CACHE.get(key)
     if resp is None:
-        resp = TimepixResponse(E, dE_mc=dE_mc, dE_out=dE_out, n_mc=n_mc,
-                               seed=seed, thickness_um=thickness_um, bias_v=bias_v)
+        resp = TimepixResponse(
+            E,
+            dE_mc=dE_mc,
+            dE_out=dE_out,
+            n_mc=n_mc,
+            seed=seed,
+            thickness_um=thickness_um,
+            bias_v=bias_v,
+        )
         _RESPONSE_CACHE[key] = resp
     return resp
 
@@ -431,5 +492,5 @@ def poisson_counts(E_grid_eV, detected_per_s, time_s, rng=None):
     E = np.asarray(E_grid_eV, dtype=float)
     dE = E[1] - E[0]
     expected = np.asarray(detected_per_s, dtype=float) * dE * time_s
-    expected = np.clip(expected, 0.0, None)          # guard tiny negative noise
+    expected = np.clip(expected, 0.0, None)  # guard tiny negative noise
     return rng.poisson(expected), expected

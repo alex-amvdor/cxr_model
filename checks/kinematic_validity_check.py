@@ -40,29 +40,38 @@ import numpy as np
 # the core modules now live in ../src; put it on the path regardless of CWD
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+)
 
 from cxr_feranchuk_spence import (
-    CRYSTALS, Z_TABLE, HBARC_EV_ANG, M_E_EV,
-    chi_g, U_g, absorption_length_ang, reciprocal_g_vector,
+    CRYSTALS,
+    Z_TABLE,
+    HBARC_EV_ANG,
+    M_E_EV,
+    chi_g,
+    U_g,
+    absorption_length_ang,
+    reciprocal_g_vector,
 )
 from cxr_montecarlo import beta_from_keV, _sigma_browning_cm2
 
 THETA_OBS = np.deg2rad(119.0)
 CASES = [
     ("graphite", (0, 0, 2)),
-    ("mose2",    (0, 0, 2)),
-    ("diamond",  (1, 1, 1)),
-    ("diamond",  (4, 0, 0)),
-    ("silicon",  (1, 1, 1)),
-    ("silicon",  (4, 4, 0)),
-    ("lif",      (2, 0, 0)),
+    ("mose2", (0, 0, 2)),
+    ("diamond", (1, 1, 1)),
+    ("diamond", (4, 0, 0)),
+    ("silicon", (1, 1, 1)),
+    ("silicon", (4, 4, 0)),
+    ("lif", (2, 0, 0)),
 ]
 ENERGIES_KEV = (25.0, 120.0)
 
-DYN_OK = 1e-2     # photon dynamical parameter
-KE_OK = 0.1       # Feranchuk Eq. (6)
-REC_OK = 0.05     # quantum recoil
+DYN_OK = 1e-2  # photon dynamical parameter
+KE_OK = 0.1  # Feranchuk Eq. (6)
+REC_OK = 0.05  # quantum recoil
 
 
 def composition(info):
@@ -76,8 +85,9 @@ def composition(info):
 
 
 def mean_free_path_ang(comp, E_keV):
-    inv = sum(n * 1e24 * _sigma_browning_cm2(Z_TABLE[el], E_keV)
-              for el, n in comp)                       # 1/cm
+    inv = sum(
+        n * 1e24 * _sigma_browning_cm2(Z_TABLE[el], E_keV) for el, n in comp
+    )  # 1/cm
     return 1e8 / inv
 
 
@@ -90,12 +100,16 @@ def flag(value, limit):
     return "ok  " if value < limit else "WARN"
 
 
-print(f"{'crystal':9s} {'hkl':6s} {'Ee':>5s} | {'E_p':>6s} {'|chi_g|':>8s} "
-      f"{'DYN':>8s}      {'L_ext':>7s} {'L_abs':>7s} | {'K_e(mfp)':>8s}      "
-      f"{'K_e(Labs)':>9s}      {'xi_e':>6s} {'mfp':>6s} | {'REC':>5s}")
-print(f"{'':9s} {'':6s} {'keV':>5s} | {'eV':>6s} {'':>8s} {'':>8s}      "
-      f"{'um':>7s} {'um':>7s} | {'':>8s}      {'':>9s}      "
-      f"{'nm':>6s} {'nm':>6s} | {'':>5s}")
+print(
+    f"{'crystal':9s} {'hkl':6s} {'Ee':>5s} | {'E_p':>6s} {'|chi_g|':>8s} "
+    f"{'DYN':>8s}      {'L_ext':>7s} {'L_abs':>7s} | {'K_e(mfp)':>8s}      "
+    f"{'K_e(Labs)':>9s}      {'xi_e':>6s} {'mfp':>6s} | {'REC':>5s}"
+)
+print(
+    f"{'':9s} {'':6s} {'keV':>5s} | {'eV':>6s} {'':>8s} {'':>8s}      "
+    f"{'um':>7s} {'um':>7s} | {'':>8s}      {'':>9s}      "
+    f"{'nm':>6s} {'nm':>6s} | {'':>5s}"
+)
 print("-" * 132)
 
 for crystal, hkl in CASES:
@@ -116,7 +130,7 @@ for crystal, hkl in CASES:
         # photon side
         detune = abs(g**2 + 2.0 * omega * g * np.cos(THETA_OBS))
         dyn = omega**2 * chi / detune
-        L_ext = 2.0 / (omega * chi)                    # Ang
+        L_ext = 2.0 / (omega * chi)  # Ang
         L_abs = absorption_length_total_ang(comp, E_p)
 
         # electron side (Eq. 6)
@@ -129,13 +143,15 @@ for crystal, hkl in CASES:
 
         rec = E_p / (Ee * 1e3)
 
-        print(f"{crystal:9s} {''.join(map(str, hkl)):6s} {Ee:5.0f} | "
-              f"{E_p:6.0f} {chi:8.1e} {dyn:8.1e} {flag(dyn, DYN_OK)} "
-              f"{L_ext / 1e4:7.2f} {L_abs / 1e4:7.2f} | "
-              f"{K_mfp:8.1e} {flag(K_mfp, KE_OK)} "
-              f"{K_sat:9.1e} {flag(K_sat, KE_OK)} "
-              f"{xi_e / 10:6.0f} {mfp / 10:6.0f} | "
-              f"{rec:5.1%} {flag(rec, REC_OK)}")
+        print(
+            f"{crystal:9s} {''.join(map(str, hkl)):6s} {Ee:5.0f} | "
+            f"{E_p:6.0f} {chi:8.1e} {dyn:8.1e} {flag(dyn, DYN_OK)} "
+            f"{L_ext / 1e4:7.2f} {L_abs / 1e4:7.2f} | "
+            f"{K_mfp:8.1e} {flag(K_mfp, KE_OK)} "
+            f"{K_sat:9.1e} {flag(K_sat, KE_OK)} "
+            f"{xi_e / 10:6.0f} {mfp / 10:6.0f} | "
+            f"{rec:5.1%} {flag(rec, REC_OK)}"
+        )
 
 print("""
 Legend: DYN  photon dynamical-diffraction parameter (kinematic needs << 1)
@@ -150,8 +166,10 @@ Legend: DYN  photon dynamical-diffraction parameter (kinematic needs << 1)
 
 # ---- vdW enhancement anatomy: the paper's merit-parameter ingredients --------
 print("vdW enhancement anatomy at 25 keV (per crystal, strongest listed g):")
-print(f"{'crystal':9s} {'hkl':6s} {'E_p':>6s} {'|chi|^2':>9s} {'Z_eff':>7s} "
-      f"{'mfp':>7s} {'L_abs':>7s} {'Ep|chi|^2/(Zeff/Ep)':>20s}")
+print(
+    f"{'crystal':9s} {'hkl':6s} {'E_p':>6s} {'|chi|^2':>9s} {'Z_eff':>7s} "
+    f"{'mfp':>7s} {'L_abs':>7s} {'Ep|chi|^2/(Zeff/Ep)':>20s}"
+)
 print(f"{'':9s} {'':6s} {'eV':>6s} {'':>9s} {'1/A^3':>7s} {'nm':>7s} {'um':>7s}")
 print("-" * 78)
 seen = set()
@@ -168,5 +186,7 @@ for crystal, hkl in CASES:
     mfp = mean_free_path_ang(comp, 25.0)
     L_abs = absorption_length_total_ang(comp, E_p)
     merit = E_p * chi**2 / (z_eff / E_p)
-    print(f"{crystal:9s} {''.join(map(str, hkl)):6s} {E_p:6.0f} {chi**2:9.1e} "
-          f"{z_eff:7.3f} {mfp / 10:7.0f} {L_abs / 1e4:7.2f} {merit:20.2e}")
+    print(
+        f"{crystal:9s} {''.join(map(str, hkl)):6s} {E_p:6.0f} {chi**2:9.1e} "
+        f"{z_eff:7.3f} {mfp / 10:7.0f} {L_abs / 1e4:7.2f} {merit:20.2e}"
+    )

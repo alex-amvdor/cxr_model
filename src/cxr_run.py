@@ -21,6 +21,7 @@ hence the explicit "tilt N/M" progress line printed with each chunk here, which
 stays next to the latest output. With a GPU present the run is serial (one CUDA
 context); see cxr_montecarlo.run_cases.
 """
+
 import os
 import pickle
 import time
@@ -102,7 +103,9 @@ def run_sweep(
             if sub:
                 with open(checkpoint_path, "wb") as f:
                     pickle.dump(sub, f)
-                print(f"migrated {len(sub)} {material} configs from {legacy} -> {checkpoint_path}")
+                print(
+                    f"migrated {len(sub)} {material} configs from {legacy} -> {checkpoint_path}"
+                )
         except Exception as e:  # corrupt/locked legacy pickle -> just skip it
             print(f"(legacy checkpoint migration skipped: {e})")
 
@@ -110,10 +113,13 @@ def run_sweep(
         with open(checkpoint_path, "rb") as f:
             loaded = pickle.load(f)
         results.update(loaded)
-        print(f"resumed {sum(len(v) for v in loaded.values())} {material} cases from {checkpoint_path}")
+        print(
+            f"resumed {sum(len(v) for v in loaded.values())} {material} cases from {checkpoint_path}"
+        )
 
     todo = [
-        c for c in cases
+        c
+        for c in cases
         if not (c["name"] in results and c["E0_keV"] in results[c["name"]])
     ]
     print(f"{len(todo)} of {len(cases)} cases to run ({len(cases) - len(todo)} cached)")
@@ -163,8 +169,10 @@ def run_sweep(
     if on_chunk is not None:
         for g in sorted(g for g in group_names if group_remaining.get(g, 0) == 0):
             rep = next(iter(results[group_names[g][0]].values()))["case"]
-            print(f"\n=== cached: {rep['thickness_ang'] / 1e4:g} um, "
-                  f"tilt {rep['tilt_deg']:g} deg (already computed) ===")
+            print(
+                f"\n=== cached: {rep['thickness_ang'] / 1e4:g} um, "
+                f"tilt {rep['tilt_deg']:g} deg (already computed) ==="
+            )
             on_chunk(group_names[g])
 
     t0 = time.perf_counter()
@@ -173,8 +181,9 @@ def run_sweep(
 
 
 # ---- brem-only repair --------------------------------------------------------
-def repair_brem_wide(results, only_nonfinite=True, progress=True,
-                     save_every=0, save_cb=None):
+def repair_brem_wide(
+    results, only_nonfinite=True, progress=True, save_every=0, save_cb=None
+):
     """Regenerate ``brem_wide`` (and the line-grid ``brem``) for cached records
     using the CURRENT ``mc_brem_spectrum`` -- WITHOUT re-running the expensive
     line spectrum.
@@ -197,7 +206,9 @@ def repair_brem_wide(results, only_nonfinite=True, progress=True,
     """
     import numpy as np
     from cxr_montecarlo import (
-        simulate_trajectories, mc_brem_spectrum, tilted_geometry,
+        simulate_trajectories,
+        mc_brem_spectrum,
+        tilted_geometry,
     )
 
     todo = []
@@ -214,23 +225,31 @@ def repair_brem_wide(results, only_nonfinite=True, progress=True,
     t0 = time.perf_counter()
     for k, r in enumerate(todo, 1):
         c = r["case"]
-        if "E_grid_brem" in c:                       # (start, stop, step) tuple
+        if "E_grid_brem" in c:  # (start, stop, step) tuple
             E_brem = np.arange(*c["E_grid_brem"])
         elif r.get("E_grid_brem") is not None and np.asarray(r["E_grid_brem"]).size:
             E_brem = np.asarray(r["E_grid_brem"], float)
-        else:                                        # legacy single-grid record
+        else:  # legacy single-grid record
             step_b = c.get("brem_step_eV", 10.0)
             eg = np.asarray(r["E_grid"], float)
             E_brem = np.arange(eg[0], eg[-1] + step_b, step_b)
         beam, n_hat = tilted_geometry(
-            c["theta_obs_rad"], np.deg2rad(c.get("tilt_deg", 0.0)),
-            np.deg2rad(c.get("tilt_azim_deg", 0.0)))
+            c["theta_obs_rad"],
+            np.deg2rad(c.get("tilt_deg", 0.0)),
+            np.deg2rad(c.get("tilt_azim_deg", 0.0)),
+        )
         segs_b = simulate_trajectories(
-            c["E0_keV"], c["Ne_brem"], c["thickness_ang"],
-            composition=c["composition"], E_cut_keV=c.get("E_cut_brem_keV", 1.0),
-            seed=c["seed"] + 1, beam_dir=beam)
-        brem_wide = mc_brem_spectrum(segs_b, E_brem, composition=c["composition"],
-                                     n_hat=n_hat)
+            c["E0_keV"],
+            c["Ne_brem"],
+            c["thickness_ang"],
+            composition=c["composition"],
+            E_cut_keV=c.get("E_cut_brem_keV", 1.0),
+            seed=c["seed"] + 1,
+            beam_dir=beam,
+        )
+        brem_wide = mc_brem_spectrum(
+            segs_b, E_brem, composition=c["composition"], n_hat=n_hat
+        )
         r["brem_wide"] = brem_wide
         r["E_grid_brem"] = E_brem
         r["brem"] = np.interp(np.asarray(r["E_grid"], float), E_brem, brem_wide)
@@ -241,7 +260,7 @@ def repair_brem_wide(results, only_nonfinite=True, progress=True,
         if progress and (k % 50 == 0 or k == len(todo)):
             print(f"  {k}/{len(todo)}  ({time.perf_counter() - t0:.0f} s)")
     if save_cb is not None:
-        save_cb(results)   # final save
+        save_cb(results)  # final save
     return len(todo)
 
 
@@ -261,7 +280,7 @@ def repair_checkpoint(checkpoint_path, save_every=100, **kw):
         tmp = checkpoint_path + ".tmp"
         with open(tmp, "wb") as f:
             pickle.dump(res, f)
-        os.replace(tmp, checkpoint_path)   # atomic: never leaves a half-written pkl
+        os.replace(tmp, checkpoint_path)  # atomic: never leaves a half-written pkl
 
     n = repair_brem_wide(results, save_every=save_every, save_cb=_save, **kw)
     print(f"re-saved {checkpoint_path}" if n else "checkpoint unchanged")

@@ -41,15 +41,22 @@ from pathlib import Path
 
 import numpy as np
 
-from atomic_form_factors import cromer_mann_f0, atomic_form_factor, henke_dispersion, Z_TABLE
+from atomic_form_factors import (
+    cromer_mann_f0,
+    atomic_form_factor,
+    henke_dispersion,
+    Z_TABLE,
+)
 
 # ---- constants --------------------------------------------------------------
-HC_EV_ANG = 12398.4198        # h c [eV*Angstrom]
-HBARC_EV_ANG = 1973.269804    # hbar c [eV*Angstrom]
+HC_EV_ANG = 12398.4198  # h c [eV*Angstrom]
+HBARC_EV_ANG = 1973.269804  # hbar c [eV*Angstrom]
 ALPHA_FS = 1.0 / 137.035999
-M_E_EV = 510998.95            # electron rest energy [eV]
-R_E_ANG = 2.8179403e-5        # classical electron radius [Angstrom]
-E2_EV_ANG = ALPHA_FS * HBARC_EV_ANG   # e^2 (Gaussian) = alpha hbar c = 14.3996 [eV*Angstrom]
+M_E_EV = 510998.95  # electron rest energy [eV]
+R_E_ANG = 2.8179403e-5  # classical electron radius [Angstrom]
+E2_EV_ANG = (
+    ALPHA_FS * HBARC_EV_ANG
+)  # e^2 (Gaussian) = alpha hbar c = 14.3996 [eV*Angstrom]
 
 # elements whose edges fall in the soft-x-ray band -> force Henke correction
 _EDGE_PRONE = {"Si", "Ge", "Mo", "Se"}
@@ -69,25 +76,33 @@ def _direct_lattice_vectors(lattice):
     sysname = lattice["system"]
     if sysname == "cubic":
         a = lattice["a"]
-        return (np.array([a, 0.0, 0.0]),
-                np.array([0.0, a, 0.0]),
-                np.array([0.0, 0.0, a]))
+        return (
+            np.array([a, 0.0, 0.0]),
+            np.array([0.0, a, 0.0]),
+            np.array([0.0, 0.0, a]),
+        )
     if sysname == "tetragonal":
         a, c = lattice["a"], lattice["c"]
-        return (np.array([a, 0.0, 0.0]),
-                np.array([0.0, a, 0.0]),
-                np.array([0.0, 0.0, c]))
+        return (
+            np.array([a, 0.0, 0.0]),
+            np.array([0.0, a, 0.0]),
+            np.array([0.0, 0.0, c]),
+        )
     if sysname == "orthorhombic":
         a, b, c = lattice["a"], lattice["b"], lattice["c"]
-        return (np.array([a, 0.0, 0.0]),
-                np.array([0.0, b, 0.0]),
-                np.array([0.0, 0.0, c]))
+        return (
+            np.array([a, 0.0, 0.0]),
+            np.array([0.0, b, 0.0]),
+            np.array([0.0, 0.0, c]),
+        )
     if sysname == "hexagonal":
         a, c = lattice["a"], lattice["c"]
         # standard hexagonal: gamma = 120 deg between a1 and a2
-        return (np.array([a, 0.0, 0.0]),
-                np.array([-a / 2.0, a * np.sqrt(3) / 2.0, 0.0]),
-                np.array([0.0, 0.0, c]))
+        return (
+            np.array([a, 0.0, 0.0]),
+            np.array([-a / 2.0, a * np.sqrt(3) / 2.0, 0.0]),
+            np.array([0.0, 0.0, c]),
+        )
     if sysname == "general":
         a, b, c = lattice["a"], lattice["b"], lattice["c"]
         al = np.radians(lattice["alpha"])
@@ -104,9 +119,13 @@ def _direct_lattice_vectors(lattice):
 
 def _cross3(u, v):
     """Cross product for plain 3-vectors (much faster than np.cross)."""
-    return np.array([u[1] * v[2] - u[2] * v[1],
-                     u[2] * v[0] - u[0] * v[2],
-                     u[0] * v[1] - u[1] * v[0]])
+    return np.array(
+        [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ]
+    )
 
 
 _RECIP_BASIS_CACHE = {}
@@ -119,9 +138,12 @@ def _reciprocal_basis(lattice):
     if B is None:
         a1, a2, a3 = _direct_lattice_vectors(lattice)
         V = np.dot(a1, _cross3(a2, a3))
-        B = 2.0 * np.pi * np.array([_cross3(a2, a3),
-                                    _cross3(a3, a1),
-                                    _cross3(a1, a2)]) / V
+        B = (
+            2.0
+            * np.pi
+            * np.array([_cross3(a2, a3), _cross3(a3, a1), _cross3(a1, a2)])
+            / V
+        )
         _RECIP_BASIS_CACHE[key] = B
     return B
 
@@ -137,7 +159,9 @@ def reciprocal_g_vector(hkl, lattice):
 
 
 # ---- crystal database (crystal_structures.toml) ------------------------------
-def load_crystals(path=Path(__file__).parent.parent / "data" / "crystal_structures.toml"):
+def load_crystals(
+    path=Path(__file__).parent.parent / "data" / "crystal_structures.toml",
+):
     """
     Load the crystal database. Each entry becomes
         {"lattice": {...}, "basis": [(element, frac_pos), ...], "V_cell": float}
@@ -148,8 +172,10 @@ def load_crystals(path=Path(__file__).parent.parent / "data" / "crystal_structur
     crystals = {}
     for name, spec in raw.items():
         lattice = {key: val for key, val in spec.items() if key != "basis"}
-        basis = [(atom["element"], np.array(atom["pos"], dtype=float))
-                 for atom in spec["basis"]]
+        basis = [
+            (atom["element"], np.array(atom["pos"], dtype=float))
+            for atom in spec["basis"]
+        ]
         a1, a2, a3 = _direct_lattice_vectors(lattice)
         crystals[name] = {
             "lattice": lattice,
@@ -188,8 +214,13 @@ def omega_n(d_ang, beta, theta_B_normal, n=1, eps0=1.0):
     # with theta_Bragg = 90deg - theta_B_normal, Omega = 2 theta_Bragg.
     theta_bragg = 0.5 * np.pi - theta_B_normal
     Omega = 2.0 * theta_bragg
-    return (HC_EV_ANG / d_ang) * n * beta * np.sin(theta_bragg) / (
-        1.0 - np.sqrt(eps0) * beta * np.cos(Omega))
+    return (
+        (HC_EV_ANG / d_ang)
+        * n
+        * beta
+        * np.sin(theta_bragg)
+        / (1.0 - np.sqrt(eps0) * beta * np.cos(Omega))
+    )
 
 
 # ---- structure & Debye-Waller ----------------------------------------------
@@ -232,7 +263,9 @@ def structure_factor(crystal, hkl, photon_E_eV, B_ang2=0.0, use_henke=False):
     _, g = reciprocal_g_vector(hkl, info["lattice"])
     dwf = debye_waller(g, B_ang2)
     S = 0.0 + 0.0j
-    for (el, R), F in zip(info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)):
+    for (el, R), F in zip(
+        info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)
+    ):
         phase = np.exp(1j * 2.0 * np.pi * np.dot(hkl, R))
         S += F * phase * dwf
     return S, g
@@ -247,7 +280,7 @@ def chi_g(crystal, hkl, photon_E_eV, B_ang2=0.0, use_henke=False):
         chi_g = - r_e lambda^2 / (pi V_cell) * S(g)     [dimensionless]
     """
     S, _ = structure_factor(crystal, hkl, photon_E_eV, B_ang2, use_henke)
-    lam = HC_EV_ANG / photon_E_eV                         # wavelength [Angstrom]
+    lam = HC_EV_ANG / photon_E_eV  # wavelength [Angstrom]
     return -R_E_ANG * lam**2 / (np.pi * CRYSTALS[crystal]["V_cell"]) * S
 
 
@@ -264,7 +297,9 @@ def U_g(crystal, hkl, photon_E_eV, B_ang2=0.0, use_henke=False):
     _, g = reciprocal_g_vector(hkl, info["lattice"])
     dwf = debye_waller(g, B_ang2)
     acc = 0.0 + 0.0j
-    for (el, R), F in zip(info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)):
+    for (el, R), F in zip(
+        info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)
+    ):
         phase = np.exp(1j * 2.0 * np.pi * np.dot(hkl, R))
         acc += phase * (Z_TABLE[el] - F.real) / g**2 * dwf
     return 4.0 * np.pi * E2_EV_ANG * acc / info["V_cell"]
@@ -284,7 +319,9 @@ def delta_g(crystal, hkl, photon_E_eV, B_ang2=0.0, use_henke=False):
     _, g = reciprocal_g_vector(hkl, info["lattice"])
     num = 0.0 + 0.0j
     den = 0.0 + 0.0j
-    for (el, R), F in zip(info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)):
+    for (el, R), F in zip(
+        info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)
+    ):
         phase = np.exp(1j * 2.0 * np.pi * np.dot(hkl, R))
         num += F.real * phase
         den += (Z_TABLE[el] - F.real) * phase
@@ -302,7 +339,7 @@ def absorption_length_ang(element, photon_E_eV, number_density_per_ang3):
     lam = HC_EV_ANG / photon_E_eV
     beta_idx = R_E_ANG * lam**2 / (2.0 * np.pi) * number_density_per_ang3 * f2
     k = 2.0 * np.pi / lam
-    mu = 2.0 * k * beta_idx                # 1/Angstrom
+    mu = 2.0 * k * beta_idx  # 1/Angstrom
     return 1.0 / mu
 
 
@@ -333,9 +370,17 @@ def _polarization_vectors(k_hat, g_vec):
     return e_sigma, e_pi
 
 
-def amplitudes_PXR_CBS_both(crystal, hkl, photon_E_eV, beta,
-                            theta_B_normal, B_ang2=0.0, use_henke=False,
-                            geometry="symmetric", theta_obs=None):
+def amplitudes_PXR_CBS_both(
+    crystal,
+    hkl,
+    photon_E_eV,
+    beta,
+    theta_B_normal,
+    B_ang2=0.0,
+    use_henke=False,
+    geometry="symmetric",
+    theta_obs=None,
+):
     """
     Full A_PXR and A_CBS from Feranchuk-Spence Eqs. (13)/(14), for BOTH
     polarizations at once (the couplings chi_g and U_g are polarization-
@@ -362,12 +407,12 @@ def amplitudes_PXR_CBS_both(crystal, hkl, photon_E_eV, beta,
     """
     info = CRYSTALS[crystal]
 
-    omega = photon_E_eV / HBARC_EV_ANG          # photon wavenumber omega/c [1/Angstrom]
-    k0 = omega                                  # |k| = omega/c (eps0 ~ 1)
+    omega = photon_E_eV / HBARC_EV_ANG  # photon wavenumber omega/c [1/Angstrom]
+    k0 = omega  # |k| = omega/c (eps0 ~ 1)
 
     # geometry: electron along +z
     v0_hat = np.array([0.0, 0.0, 1.0])
-    v0 = beta                                   # speed in units of c
+    v0 = beta  # speed in units of c
 
     g_vec, g = reciprocal_g_vector(hkl, info["lattice"])
 
@@ -396,9 +441,9 @@ def amplitudes_PXR_CBS_both(crystal, hkl, photon_E_eV, beta,
     else:
         raise ValueError("geometry must be 'symmetric', 'fixed' or 'lif'")
 
-    k_vec = k0 * k_hat              # photon wavevector, |k| = omega/c [1/Ang]
-    kg_vec = k_vec + g_vec          # diffracted wavevector k_g = k + g
-    kg2 = kg_vec @ kg_vec           # |k_g|^2
+    k_vec = k0 * k_hat  # photon wavevector, |k| = omega/c [1/Ang]
+    kg_vec = k_vec + g_vec  # diffracted wavevector k_g = k + g
+    kg2 = kg_vec @ kg_vec  # |k_g|^2
 
     # sigma (out of the k-g plane) and pi (in-plane) unit polarization vectors
     e_sigma, e_pi = _polarization_vectors(k_hat, g_vec)
@@ -410,10 +455,10 @@ def amplitudes_PXR_CBS_both(crystal, hkl, photon_E_eV, beta,
     chi = chi_g(crystal, hkl, photon_E_eV, B_ang2, use_henke)
     eUg = U_g(crystal, hkl, photon_E_eV, B_ang2, use_henke)
 
-    detuning = kg2 - omega**2       # PXR denominator; ~g^2(1-beta...) > 0
-    v0_vec = v0 * v0_hat            # electron velocity vector (units of c)
-    eUg_over_m = eUg / M_E_EV       # dimensionless (m c^2 = 511 keV in eV)
-    g_dot_v0 = g_vec @ v0_vec       # = omega(1 - v.n) at resonance, > 0
+    detuning = kg2 - omega**2  # PXR denominator; ~g^2(1-beta...) > 0
+    v0_vec = v0 * v0_hat  # electron velocity vector (units of c)
+    eUg_over_m = eUg / M_E_EV  # dimensionless (m c^2 = 511 keV in eV)
+    g_dot_v0 = g_vec @ v0_vec  # = omega(1 - v.n) at resonance, > 0
 
     amps = {}
     for pol, e in (("sigma", e_sigma), ("pi", e_pi)):
@@ -441,25 +486,49 @@ def amplitudes_PXR_CBS_both(crystal, hkl, photon_E_eV, beta,
     return amps, omega, g
 
 
-def amplitudes_PXR_CBS(crystal, hkl, photon_E_eV, beta,
-                       theta_B_normal, polarization="pi",
-                       B_ang2=0.0, use_henke=False,
-                       geometry="symmetric", theta_obs=None):
+def amplitudes_PXR_CBS(
+    crystal,
+    hkl,
+    photon_E_eV,
+    beta,
+    theta_B_normal,
+    polarization="pi",
+    B_ang2=0.0,
+    use_henke=False,
+    geometry="symmetric",
+    theta_obs=None,
+):
     """
     Single-polarization wrapper around amplitudes_PXR_CBS_both.
     Returns (A_PXR, A_CBS, omega_per_ang, g). If you need both polarizations,
     call amplitudes_PXR_CBS_both directly -- it is twice as fast.
     """
     amps, omega, g = amplitudes_PXR_CBS_both(
-        crystal, hkl, photon_E_eV, beta, theta_B_normal,
-        B_ang2, use_henke, geometry, theta_obs)
+        crystal,
+        hkl,
+        photon_E_eV,
+        beta,
+        theta_B_normal,
+        B_ang2,
+        use_henke,
+        geometry,
+        theta_obs,
+    )
     A_PXR, A_CBS = amps[polarization]
     return A_PXR, A_CBS, omega, g
 
 
-def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
-                             B_ang2=0.0, use_henke=False, geometry="symmetric",
-                             theta_obs=None):
+def amplitudes_PXR_CBS_sweep(
+    crystal,
+    hkl,
+    photon_E_eV,
+    beta,
+    theta_B_normal,
+    B_ang2=0.0,
+    use_henke=False,
+    geometry="symmetric",
+    theta_obs=None,
+):
     """
     Vectorized amplitudes_PXR_CBS_both over arrays of photon energy and angle:
     photon_E_eV and theta_B_normal are broadcast-compatible 1-D arrays (one
@@ -475,7 +544,7 @@ def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
     th = np.broadcast_to(np.asarray(theta_B_normal, dtype=float), E.shape)
     n = E.size
 
-    omega = E / HBARC_EV_ANG                    # (n,) photon wavenumber [1/Ang]
+    omega = E / HBARC_EV_ANG  # (n,) photon wavenumber [1/Ang]
     _, g = reciprocal_g_vector(hkl, info["lattice"])
     zeros = np.zeros(n)
 
@@ -507,8 +576,11 @@ def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
     npl = np.linalg.norm(n_plane, axis=1)
     bad = npl < 1e-12
     if np.any(bad):
-        tmp = np.where(np.abs(k_hat[bad, 0:1]) > 0.9,
-                       np.array([0.0, 1.0, 0.0]), np.array([1.0, 0.0, 0.0]))
+        tmp = np.where(
+            np.abs(k_hat[bad, 0:1]) > 0.9,
+            np.array([0.0, 1.0, 0.0]),
+            np.array([1.0, 0.0, 0.0]),
+        )
         n_plane[bad] = np.cross(k_hat[bad], tmp)
         npl[bad] = np.linalg.norm(n_plane[bad], axis=1)
     e_sigma = n_plane / npl[:, None]
@@ -517,7 +589,7 @@ def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
 
     # couplings: chi_g / U_g already broadcast over array photon energies
     chi = chi_g(crystal, hkl, E, B_ang2, use_henke)
-    eUg = U_g(crystal, hkl, E, B_ang2, use_henke)   # e*U_g/V [eV]
+    eUg = U_g(crystal, hkl, E, B_ang2, use_henke)  # e*U_g/V [eV]
 
     detuning = kg2 - omega**2
     v0_vec = beta * np.array([0.0, 0.0, 1.0])
@@ -526,14 +598,16 @@ def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
     safe_g_dot_v0 = np.where(np.abs(g_dot_v0) < 1e-12, 1.0, g_dot_v0)
 
     gamma = 1.0 / np.sqrt(1.0 - beta**2)
-    k_dot_v0 = k_vec @ v0_vec                  # (n,) since v0_vec is constant
+    k_dot_v0 = k_vec @ v0_vec  # (n,) since v0_vec is constant
 
     amps = {}
     for pol, e in (("sigma", e_sigma), ("pi", e_pi)):
         v0_dot_e = e @ v0_vec
         g_dot_e = np.einsum("ij,ij->i", g_vec, e)
-        bracket_pxr = np.einsum("ij,ij->i", kg_vec, np.broadcast_to(v0_vec, (n, 3))) \
-            * g_dot_e - omega**2 * v0_dot_e
+        bracket_pxr = (
+            np.einsum("ij,ij->i", kg_vec, np.broadcast_to(v0_vec, (n, 3))) * g_dot_e
+            - omega**2 * v0_dot_e
+        )
         A_PXR = chi / detuning * bracket_pxr
 
         # relativistic A_CBS (Zhai SI Eq. 6): braced {a;b} = a.b - (a.v)(b.v),
@@ -541,8 +615,11 @@ def amplitudes_PXR_CBS_sweep(crystal, hkl, photon_E_eV, beta, theta_B_normal,
         braced_ge = g_dot_e - g_dot_v0 * v0_dot_e
         braced_kg = np.einsum("ij,ij->i", k_vec, g_vec) - k_dot_v0 * g_dot_v0
         bracket_cbs = braced_ge + v0_dot_e * braced_kg / safe_g_dot_v0
-        A_CBS = np.where(np.abs(g_dot_v0) < 1e-12, 0.0 + 0.0j,
-                         -eUg_over_m / (gamma * safe_g_dot_v0) * bracket_cbs)
+        A_CBS = np.where(
+            np.abs(g_dot_v0) < 1e-12,
+            0.0 + 0.0j,
+            -eUg_over_m / (gamma * safe_g_dot_v0) * bracket_cbs,
+        )
         amps[pol] = (A_PXR, A_CBS)
 
     return amps, omega, g
@@ -557,24 +634,42 @@ def _rotation_between(u_hat, t_hat):
         if c > 0:
             return np.eye(3)
         # antiparallel: 180 deg about any axis perpendicular to u_hat
-        tmp = np.array([1.0, 0.0, 0.0]) if abs(u_hat[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        tmp = (
+            np.array([1.0, 0.0, 0.0])
+            if abs(u_hat[0]) < 0.9
+            else np.array([0.0, 1.0, 0.0])
+        )
         axis = _cross3(u_hat, tmp)
         axis /= np.linalg.norm(axis)
-        K = np.array([[0.0, -axis[2], axis[1]],
-                      [axis[2], 0.0, -axis[0]],
-                      [-axis[1], axis[0], 0.0]])
+        K = np.array(
+            [
+                [0.0, -axis[2], axis[1]],
+                [axis[2], 0.0, -axis[0]],
+                [-axis[1], axis[0], 0.0],
+            ]
+        )
         return np.eye(3) + 2.0 * K @ K
     axis = axis / s
-    K = np.array([[0.0, -axis[2], axis[1]],
-                  [axis[2], 0.0, -axis[0]],
-                  [-axis[1], axis[0], 0.0]])
+    K = np.array(
+        [[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]]
+    )
     return np.eye(3) + s * K + (1.0 - c) * (K @ K)
 
 
-def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=None,
-                    E_min_eV=300.0, E_max_eV=15000.0,
-                    B_ang2=0.0, use_henke=False, g_max_invang=16.0,
-                    beam_uvw=None, azimuth_rad=0.0):
+def cxr_lines_fixed(
+    crystal,
+    beta,
+    theta_obs,
+    orient_hkl=None,
+    theta_B_normal=None,
+    E_min_eV=300.0,
+    E_max_eV=15000.0,
+    B_ang2=0.0,
+    use_henke=False,
+    g_max_invang=16.0,
+    beam_uvw=None,
+    azimuth_rad=0.0,
+):
     """
     ALL CXR lines a detector at polar angle theta_obs sees from a crystal at
     FIXED orientation: every reciprocal lattice vector g with g.v0 > 0 emits a
@@ -603,15 +698,14 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
     """
     info = CRYSTALS[crystal]
     lattice = info["lattice"]
-    B = _reciprocal_basis(lattice)               # rows b1, b2, b3
+    B = _reciprocal_basis(lattice)  # rows b1, b2, b3
     a_vecs = _direct_lattice_vectors(lattice)
 
     # --- orientation
     if beam_uvw is not None:
         u, v, w = np.asarray(beam_uvw, dtype=float)
         axis = u * a_vecs[0] + v * a_vecs[1] + w * a_vecs[2]
-        R = _rotation_between(axis / np.linalg.norm(axis),
-                              np.array([0.0, 0.0, 1.0]))
+        R = _rotation_between(axis / np.linalg.norm(axis), np.array([0.0, 0.0, 1.0]))
     elif orient_hkl is not None and theta_B_normal is not None:
         g0 = np.asarray(orient_hkl, dtype=float) @ B
         t_hat = np.array([-np.sin(theta_B_normal), 0.0, np.cos(theta_B_normal)])
@@ -621,11 +715,12 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
     if azimuth_rad:
         ca, sa = np.cos(azimuth_rad), np.sin(azimuth_rad)
         R = np.array([[ca, -sa, 0.0], [sa, ca, 0.0], [0.0, 0.0, 1.0]]) @ R
-    B_lab = B @ R.T                              # g_lab = hkl @ B_lab
+    B_lab = B @ R.T  # g_lab = hkl @ B_lab
 
     # --- enumerate candidate hkl (exact bound: |h_i| <= g_max |a_i| / 2 pi)
-    nmax = [int(np.floor(g_max_invang * np.linalg.norm(a) / (2.0 * np.pi)))
-            for a in a_vecs]
+    nmax = [
+        int(np.floor(g_max_invang * np.linalg.norm(a) / (2.0 * np.pi))) for a in a_vecs
+    ]
     grids = np.meshgrid(*(np.arange(-n, n + 1) for n in nmax), indexing="ij")
     hkl = np.column_stack([G.ravel() for G in grids]).astype(float)
     g_vec = hkl @ B_lab
@@ -655,8 +750,8 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
         S += F_el[el] * phase * dwf
         ZmF += (Z_TABLE[el] - F_el[el].real) * phase * dwf
     lam = HC_EV_ANG / E
-    chi = -R_E_ANG * lam**2 / (np.pi * info["V_cell"]) * S            # Eq. (3)
-    eUg = 4.0 * np.pi * E2_EV_ANG * ZmF / g_mag**2 / info["V_cell"]   # Eq. (4)/(14)
+    chi = -R_E_ANG * lam**2 / (np.pi * info["V_cell"]) * S  # Eq. (3)
+    eUg = 4.0 * np.pi * E2_EV_ANG * ZmF / g_mag**2 / info["V_cell"]  # Eq. (4)/(14)
 
     # --- geometry & amplitudes, Eqs. (13)/(14)
     k_hat = np.array([np.sin(theta_obs), 0.0, np.cos(theta_obs)])
@@ -668,7 +763,7 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
     n_plane = np.cross(k_hat_rows, g_vec)
     npl = np.linalg.norm(n_plane, axis=1)
     bad = npl < 1e-12
-    if np.any(bad):                              # k || g degeneracy
+    if np.any(bad):  # k || g degeneracy
         n_plane[bad] = _cross3(k_hat, np.array([0.0, 1.0, 0.0]))
         npl[bad] = np.linalg.norm(n_plane[bad], axis=1)
     e_sigma = n_plane / npl[:, None]
@@ -696,8 +791,11 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
         # 1/gamma prefactor; reduces to Feranchuk Eq. (14) at beta -> 0
         braced_ge = g_dot_e - g_dot_v0 * v0_dot_e
         braced_kg = k_dot_g - k_dot_v0 * g_dot_v0
-        A_CBS = (-eUg_over_m / (gamma * g_dot_v0)
-                 * (braced_ge + v0_dot_e * braced_kg / g_dot_v0))
+        A_CBS = (
+            -eUg_over_m
+            / (gamma * g_dot_v0)
+            * (braced_ge + v0_dot_e * braced_kg / g_dot_v0)
+        )
         A2 += np.abs(A_PXR + A_CBS) ** 2
         A2_pxr += np.abs(A_PXR) ** 2
         A2_cbs += np.abs(A_CBS) ** 2
@@ -714,10 +812,21 @@ def cxr_lines_fixed(crystal, beta, theta_obs, orient_hkl=None, theta_B_normal=No
     }
 
 
-def photons_per_electron(crystal, hkl, photon_E_eV, theta_B_normal, beta,
-                         L_z_ang, L_abs_ang, dOmega_sr,
-                         polarization="pi", B_ang2=0.0, use_henke=False,
-                         geometry="symmetric", theta_obs=None):
+def photons_per_electron(
+    crystal,
+    hkl,
+    photon_E_eV,
+    theta_B_normal,
+    beta,
+    L_z_ang,
+    L_abs_ang,
+    dOmega_sr,
+    polarization="pi",
+    B_ang2=0.0,
+    use_henke=False,
+    geometry="symmetric",
+    theta_obs=None,
+):
     """
     Photons per electron into dOmega: Feranchuk-Spence Eq. (12) with the full
     Eq. (13)/(14) amplitudes, the Eq. (9) absorption-limited length, AND the
@@ -736,10 +845,18 @@ def photons_per_electron(crystal, hkl, photon_E_eV, theta_B_normal, beta,
     hbar = c = 1). polarization="both" sums sigma and pi.
     """
     amps, omega, _ = amplitudes_PXR_CBS_both(
-        crystal, hkl, photon_E_eV, beta, theta_B_normal,
-        B_ang2, use_henke, geometry, theta_obs)
+        crystal,
+        hkl,
+        photon_E_eV,
+        beta,
+        theta_B_normal,
+        B_ang2,
+        use_henke,
+        geometry,
+        theta_obs,
+    )
     pols = ("sigma", "pi") if polarization == "both" else (polarization,)
-    A2 = sum(abs(amps[pol][0] + amps[pol][1])**2 for pol in pols)
+    A2 = sum(abs(amps[pol][0] + amps[pol][1]) ** 2 for pol in pols)
 
     # observation-direction z-component per geometry (v0 is along +z)
     if geometry == "symmetric":
@@ -747,29 +864,65 @@ def photons_per_electron(crystal, hkl, photon_E_eV, theta_B_normal, beta,
         n_z = -np.cos(2.0 * theta_B_normal)
     elif geometry == "fixed":
         n_z = np.cos(theta_obs)
-    else:                                   # "lif": theta_B_normal IS theta_obs
+    else:  # "lif": theta_B_normal IS theta_obs
         n_z = np.cos(theta_B_normal)
 
     L_eff = L_abs_ang * (1.0 - np.exp(-L_z_ang / L_abs_ang))
-    return (ALPHA_FS / (2.0 * np.pi) * omega * (L_eff / beta) * A2
-            * dOmega_sr / (1.0 - beta * n_z))
+    return (
+        ALPHA_FS
+        / (2.0 * np.pi)
+        * omega
+        * (L_eff / beta)
+        * A2
+        * dOmega_sr
+        / (1.0 - beta * n_z)
+    )
 
 
-def flux_per_second(crystal, hkl, photon_E_eV, theta_B_normal, beta,
-                    L_z_ang, L_abs_ang, dOmega_sr, current_A,
-                    polarization="pi", B_ang2=0.0, use_henke=False,
-                    geometry="symmetric", theta_obs=None):
+def flux_per_second(
+    crystal,
+    hkl,
+    photon_E_eV,
+    theta_B_normal,
+    beta,
+    L_z_ang,
+    L_abs_ang,
+    dOmega_sr,
+    current_A,
+    polarization="pi",
+    B_ang2=0.0,
+    use_henke=False,
+    geometry="symmetric",
+    theta_obs=None,
+):
     """photons_per_electron scaled by the electron rate current_A/e."""
     e_charge = 1.602176634e-19
     n_e_per_s = current_A / e_charge
     return n_e_per_s * photons_per_electron(
-        crystal, hkl, photon_E_eV, theta_B_normal, beta,
-        L_z_ang, L_abs_ang, dOmega_sr, polarization, B_ang2, use_henke,
-        geometry, theta_obs)
+        crystal,
+        hkl,
+        photon_E_eV,
+        theta_B_normal,
+        beta,
+        L_z_ang,
+        L_abs_ang,
+        dOmega_sr,
+        polarization,
+        B_ang2,
+        use_henke,
+        geometry,
+        theta_obs,
+    )
 
 
-def dominant_reflections(crystal, n_families=4, E_ref_eV=1000.0, B_ang2=0.0,
-                         use_henke=False, g_max_invang=8.0):
+def dominant_reflections(
+    crystal,
+    n_families=4,
+    E_ref_eV=1000.0,
+    B_ang2=0.0,
+    use_henke=False,
+    g_max_invang=8.0,
+):
     """
     Automatically select the strongest reflection FAMILIES of a crystal,
     Zhai-style (their Table 5 keeps the four planes of largest |chi_g| per
@@ -792,8 +945,9 @@ def dominant_reflections(crystal, n_families=4, E_ref_eV=1000.0, B_ang2=0.0,
     a_vecs = _direct_lattice_vectors(info["lattice"])
 
     # exact per-axis index bounds: |h_i| <= g_max |a_i| / 2 pi
-    nmax = [int(np.floor(g_max_invang * np.linalg.norm(a) / (2.0 * np.pi)))
-            for a in a_vecs]
+    nmax = [
+        int(np.floor(g_max_invang * np.linalg.norm(a) / (2.0 * np.pi))) for a in a_vecs
+    ]
     grids = np.meshgrid(*(np.arange(-n, n + 1) for n in nmax), indexing="ij")
     hkl = np.column_stack([G.ravel() for G in grids]).astype(float)
     g_vec = hkl @ B
@@ -821,13 +975,12 @@ def dominant_reflections(crystal, n_families=4, E_ref_eV=1000.0, B_ang2=0.0,
     out = []
     for (_, m), members in ranked[:n_families]:
         if m < 1e-9 * ranked[0][0][1]:
-            break                      # forbidden/negligible families
+            break  # forbidden/negligible families
         out.extend(sorted(members))
     return out
 
 
-def bremsstrahlung_background(photon_E_eV, Z, number_density_per_ang3,
-                              L_z_ang, dE_eV):
+def bremsstrahlung_background(photon_E_eV, Z, number_density_per_ang3, L_z_ang, dE_eV):
     """
     Incoherent bremsstrahlung background, Feranchuk-Spence Eq. (17) (their
     Akhiezer-Berestetskii estimate): photons per electron per steradian
@@ -838,14 +991,22 @@ def bremsstrahlung_background(photon_E_eV, Z, number_density_per_ang3,
     paper); single-element approximation for compounds.
     """
     m_inv_ang = M_E_EV / HBARC_EV_ANG
-    return (4.0 * ALPHA_FS / (3.0 * np.pi) * Z**2 * (ALPHA_FS / m_inv_ang)**2
-            * number_density_per_ang3 * L_z_ang
-            * np.log(137.0 / Z**(1.0 / 3.0)) * dE_eV / photon_E_eV)
+    return (
+        4.0
+        * ALPHA_FS
+        / (3.0 * np.pi)
+        * Z**2
+        * (ALPHA_FS / m_inv_ang) ** 2
+        * number_density_per_ang3
+        * L_z_ang
+        * np.log(137.0 / Z ** (1.0 / 3.0))
+        * dE_eV
+        / photon_E_eV
+    )
 
 
 # ---- CXR / bremsstrahlung-background ratio (Eq. 18) ------------------------
-def cxr_to_bremsstrahlung(photon_E_eV, number_density_per_ang3, beta,
-                          Z_avg, dE_over_E):
+def cxr_to_bremsstrahlung(photon_E_eV, number_density_per_ang3, beta, Z_avg, dE_over_E):
     """
     eta = [dN/dn]_CXR / [dN/dn]_BS, Feranchuk-Spence Eq. (18):
         eta ~ (rho / omega_n^3) * (6 pi^2 v0 / ln(137/Z^{1/3})) * (omega_n/dE)
@@ -853,9 +1014,13 @@ def cxr_to_bremsstrahlung(photon_E_eV, number_density_per_ang3, beta,
     The coherency factor xi_n = rho / omega_n^3 (Eq. 19) is the key scaling.
     Higher detector resolution (smaller dE/E) -> larger eta.
     """
-    omega_per_ang = photon_E_eV / HC_EV_ANG * 2.0 * np.pi   # omega/c [1/Angstrom]
-    xi_n = number_density_per_ang3 / omega_per_ang**3       # Eq.(19)
-    eta = xi_n * (6.0 * np.pi**2 * beta / np.log(137.0 / Z_avg**(1.0/3.0))) / dE_over_E
+    omega_per_ang = photon_E_eV / HC_EV_ANG * 2.0 * np.pi  # omega/c [1/Angstrom]
+    xi_n = number_density_per_ang3 / omega_per_ang**3  # Eq.(19)
+    eta = (
+        xi_n
+        * (6.0 * np.pi**2 * beta / np.log(137.0 / Z_avg ** (1.0 / 3.0)))
+        / dE_over_E
+    )
     return eta, xi_n
 
 

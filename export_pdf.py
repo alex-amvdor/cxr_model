@@ -5,6 +5,7 @@ sweeps in the parameters cell are skipped) plus today's date, so successive
 exports are self-describing instead of all landing on cxr_analysis.pdf. Pass an
 explicit stem to override:  python export_pdf.py my_custom_name
 """
+
 import sys
 import asyncio
 import json
@@ -27,7 +28,7 @@ def _material(nb_path):
         if cell.get("cell_type") != "code":
             continue
         for line in "".join(cell.get("source", [])).splitlines():
-            if line.lstrip().startswith("#"):   # skip commented-out example sweeps
+            if line.lstrip().startswith("#"):  # skip commented-out example sweeps
                 continue
             m = pat.search(line)
             if m:
@@ -42,13 +43,23 @@ def _default_stem():
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-        asyncio.set_event_loop_policy = lambda *a, **k: None  # block jupyter reverting it
+        asyncio.set_event_loop_policy = lambda *a, **k: (
+            None
+        )  # block jupyter reverting it
 
     stem = sys.argv[1] if len(sys.argv) > 1 else _default_stem()
     print(f"exporting {NOTEBOOK} -> results/{stem}.pdf")
 
     from nbconvert.nbconvertapp import main
 
-    sys.argv = ["jupyter-nbconvert", "--to", "webpdf", "--output-dir", "results",
-                "--output", stem, NOTEBOOK]
+    sys.argv = [
+        "jupyter-nbconvert",
+        "--to",
+        "webpdf",
+        "--output-dir",
+        "results",
+        "--output",
+        stem,
+        NOTEBOOK,
+    ]
     main()

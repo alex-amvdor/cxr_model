@@ -26,14 +26,23 @@ Eagle XO detector view (forward model in ``eaglexo_response``)
 
 Everything takes ``results`` + a :class:`cxr_results.Settings` explicitly.
 """
+
 import numpy as np
 import matplotlib.pyplot as plt
 
 from cxr_montecarlo import (
-    convolve_detector, detector_efficiency, simulate_trajectories, tilted_geometry,
+    convolve_detector,
+    detector_efficiency,
+    simulate_trajectories,
+    tilted_geometry,
 )
 from cxr_results import (
-    detected_background, records, best_azimuth, show_summary, line_metrics, PER_NA,
+    detected_background,
+    records,
+    best_azimuth,
+    show_summary,
+    line_metrics,
+    PER_NA,
 )
 import timepix_response as tpx
 import eaglexo_response as eag
@@ -48,7 +57,11 @@ _EFF_CACHE = {}
 
 
 def _mode(settings):
-    return "EDS-convolved" if getattr(settings, "convolve_with_det", False) else "intrinsic"
+    return (
+        "EDS-convolved"
+        if getattr(settings, "convolve_with_det", False)
+        else "intrinsic"
+    )
 
 
 def _line_brem(r, settings, convolve=None):
@@ -57,7 +70,9 @@ def _line_brem(r, settings, convolve=None):
     settings.convolve_with_det when given (True/False), so a caller can draw the
     intrinsic (convolve=False) and detector-convolved (convolve=True) spectra
     side by side."""
-    do_conv = getattr(settings, "convolve_with_det", False) if convolve is None else convolve
+    do_conv = (
+        getattr(settings, "convolve_with_det", False) if convolve is None else convolve
+    )
     qe = detector_efficiency(r["E_grid"]) if settings.apply_detector_qe else 1.0
     line_in = r["spec"] * qe
     line_det = (
@@ -79,11 +94,11 @@ def browse(results, settings, kind="by_energy", label="polar tilt", static=None,
     them all. Extra kwargs pass to the per-tilt drawer (include_brem, floor_frac,
     n_mc)."""
     drawers = {
-        "by_energy": (_draw_by_energy, (15.0, 5.2)),
-        "full": (_draw_full_spectrum, (16.0, 5.2)),
-        "chunk": (_draw_chunk, (14.0, 9.5)),
-        "timepix": (_draw_timepix_detected, (9.0, 5.2)),
-        "eaglexo": (_draw_eaglexo_detected, (9.0, 5.2)),
+        "by_energy": (_draw_by_energy, (10.0, 7.5)),
+        "full": (_draw_full_spectrum, (10.0, 7.5)),
+        "chunk": (_draw_chunk, (10.0, 7.5)),
+        "timepix": (_draw_timepix_detected, (10.0, 7.5)),
+        "eaglexo": (_draw_eaglexo_detected, (10.0, 7.5)),
     }
     if kind not in drawers:
         raise ValueError(f"kind must be one of {list(drawers)}")
@@ -92,15 +107,18 @@ def browse(results, settings, kind="by_energy", label="polar tilt", static=None,
     if kind == "full":
         recs = [r for r in recs if r.get("brem_wide") is not None]
     if not recs:
-        print("no results to browse" +
-              (" (need E_grid_brem for kind='full')" if kind == "full" else ""))
+        print(
+            "no results to browse"
+            + (" (need E_grid_brem for kind='full')" if kind == "full" else "")
+        )
         return None
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     by_tilt = {t: [r for r in recs if r["case"]["tilt_deg"] == t] for t in tilts}
 
-    if static is None:                       # auto: interactive if widgets exist
+    if static is None:  # auto: interactive if widgets exist
         try:
             import ipywidgets  # noqa: F401
+
             static = False
         except ImportError:
             static = True
@@ -125,9 +143,14 @@ def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
     from IPython.display import display
 
     out = widgets.Output()
-    slider = widgets.IntSlider(min=0, max=len(tilts) - 1, value=0, description=label,
-                               continuous_update=False,
-                               layout=widgets.Layout(width="60%"))
+    slider = widgets.IntSlider(
+        min=0,
+        max=len(tilts) - 1,
+        value=0,
+        description=label,
+        continuous_update=False,
+        layout=widgets.Layout(width="60%"),
+    )
     prev = widgets.Button(description="< Prev", layout=widgets.Layout(width="80px"))
     nxt = widgets.Button(description="Next >", layout=widgets.Layout(width="80px"))
 
@@ -137,10 +160,12 @@ def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
         with out:
             out.clear_output(wait=True)
             display(fig)
-        plt.close(fig)                       # shown; don't leak or double-display
+        plt.close(fig)  # shown; don't leak or double-display
 
     prev.on_click(lambda b: setattr(slider, "value", max(0, slider.value - 1)))
-    nxt.on_click(lambda b: setattr(slider, "value", min(len(tilts) - 1, slider.value + 1)))
+    nxt.on_click(
+        lambda b: setattr(slider, "value", min(len(tilts) - 1, slider.value + 1))
+    )
     slider.observe(lambda ch: render(ch["new"]), names="value")
     display(widgets.HBox([prev, slider, nxt]))
     display(out)
@@ -209,9 +234,11 @@ def _draw_by_energy(fig, trecs, settings, include_brem=True, collapse_azimuth=Tr
                     ax.plot(Ee, brem_det * r["scale"], color=c, ls="--", lw=0.6)
     case = trecs[0]["case"]
     tag = "best azimuth/energy" if collapse_azimuth else "all azimuths"
-    fig.suptitle(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
-                 rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ ({tag})",
-                 fontsize=13)
+    fig.suptitle(
+        rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
+        rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ ({tag})",
+        fontsize=13,
+    )
     for ax, sub in ((ax_raw, "intrinsic"), (ax_conv, "detector-convolved")):
         ax.set_title(sub, fontsize=11)
         ax.set_xlabel("Photon energy (eV)")
@@ -235,15 +262,20 @@ def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=True):
     figs = []
     for t in tilts:
         fig = plt.figure(figsize=(15.0, 5.2))
-        _draw_by_energy(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
-                        settings, include_brem=include_brem,
-                        collapse_azimuth=collapse_azimuth)
+        _draw_by_energy(
+            fig,
+            [r for r in recs if r["case"]["tilt_deg"] == t],
+            settings,
+            include_brem=include_brem,
+            collapse_azimuth=collapse_azimuth,
+        )
         figs.append(fig)
     return figs
 
 
-def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True, logx=True,
-                        floor_frac=1e-2):
+def _draw_full_spectrum(
+    fig, trecs, settings, collapse_azimuth=True, logy=True, logx=True, floor_frac=1e-2
+):
     """Render ONE polar tilt of the full measured-range view onto ``fig``: sharp
     lines + wide brem out to the beam energy, log y, LEFT intrinsic/RIGHT detector."""
     fig.clear()
@@ -252,8 +284,11 @@ def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True, 
     ymax = {"raw": 0.0, "conv": 0.0}
     xmax = 0.0
     for i, E0 in enumerate(energies):
-        grp = [r for r in trecs
-               if r["case"]["E0_keV"] == E0 and r.get("brem_wide") is not None]
+        grp = [
+            r
+            for r in trecs
+            if r["case"]["E0_keV"] == E0 and r.get("brem_wide") is not None
+        ]
         if not grp:
             continue
         if collapse_azimuth and len(grp) > 1:
@@ -266,20 +301,26 @@ def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True, 
         qe_b = detector_efficiency(Eb) if settings.apply_detector_qe else 1.0
         brem_wide_det = r["brem_wide"] * qe_b * r["scale"]
         xmin = float(Eb[0])
-        xmax = max(xmax, float(Eb[-1]))   # full brem grid -> beam energy
+        xmax = max(xmax, float(Eb[-1]))  # full brem grid -> beam energy
         for ax, conv, key in ((ax_raw, False, "raw"), (ax_conv, True, "conv")):
             line_det, brem_det = _line_brem(r, settings, convolve=conv)
             total_line = (line_det + brem_det) * r["scale"]
             ax.plot(Eb, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
             ax.plot(r["E_grid"], total_line, color=c, lw=1.2, label=lbl)
-            ymax[key] = max(ymax[key],
-                            float(np.nanmax(total_line)) if total_line.size else 0.0)
+            ymax[key] = max(
+                ymax[key], float(np.nanmax(total_line)) if total_line.size else 0.0
+            )
     case = trecs[0]["case"]
-    fig.suptitle(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
-                 rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — full "
-                 rf"measured range (dashed = brem)", fontsize=13)
-    for ax, sub, key in ((ax_raw, "intrinsic", "raw"),
-                         (ax_conv, "detector-convolved", "conv")):
+    fig.suptitle(
+        rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
+        rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — full "
+        rf"measured range (dashed = brem)",
+        fontsize=13,
+    )
+    for ax, sub, key in (
+        (ax_raw, "intrinsic", "raw"),
+        (ax_conv, "detector-convolved", "conv"),
+    ):
         if logy and ymax[key] > 0:
             ax.set_yscale("log")
             ax.set_ylim(ymax[key] * floor_frac, ymax[key] * 2)
@@ -291,7 +332,7 @@ def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True, 
         ax.set_xlabel("Photon energy (eV)")
         ax.set_ylabel("Intensity (Phs/eV/s/nA)")
         if xmax > 0:
-            ax.set_xlim(xmin, xmax)   # span the full brem grid (to the beam energy)
+            ax.set_xlim(xmin, xmax)  # span the full brem grid (to the beam energy)
         else:
             ax.margins(x=0)
         ax.grid(alpha=0.3, which="both")
@@ -299,8 +340,9 @@ def _draw_full_spectrum(fig, trecs, settings, collapse_azimuth=True, logy=True, 
     fig.tight_layout()
 
 
-def plot_full_spectrum(results, settings, collapse_azimuth=True, logy=True,
-                       floor_frac=1e-2):
+def plot_full_spectrum(
+    results, settings, collapse_azimuth=True, logy=True, floor_frac=1e-2
+):
     """Full measured-range view (sharp lines on the wide brem, log y), ONE figure
     per polar tilt. The x-axis spans the full brem grid (to the beam energy); the
     log floor is ``floor_frac`` x the peak (~4 decades). For click-through use
@@ -314,9 +356,14 @@ def plot_full_spectrum(results, settings, collapse_azimuth=True, logy=True,
     figs = []
     for t in tilts:
         fig = plt.figure(figsize=(16.0, 5.2))
-        _draw_full_spectrum(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
-                            settings, collapse_azimuth=collapse_azimuth, logy=logy,
-                            floor_frac=floor_frac)
+        _draw_full_spectrum(
+            fig,
+            [r for r in recs if r["case"]["tilt_deg"] == t],
+            settings,
+            collapse_azimuth=collapse_azimuth,
+            logy=logy,
+            floor_frac=floor_frac,
+        )
         figs.append(fig)
     return figs
 
@@ -361,23 +408,36 @@ def _draw_chunk(fig, trecs, settings):
         az, E0 = r["case"]["tilt_azim_deg"], r["case"]["E0_keV"]
         lbl = rf"{E0:g} keV ($\phi={az:g}\degree$)"
         E = r["E_grid"] / 1e3
-        line_raw, brem_raw = _line_brem(r, settings, convolve=False)   # intrinsic
+        line_raw, brem_raw = _line_brem(r, settings, convolve=False)  # intrinsic
         line_conv, brem_conv = _line_brem(r, settings, convolve=True)  # detector
         tot_raw.plot(E, (line_raw + brem_raw) * r["scale"], color=c, lw=1.2, label=lbl)
         tot_raw.plot(E, brem_raw * r["scale"], color=c, ls="--", lw=0.6)
-        tot_conv.plot(E, (line_conv + brem_conv) * r["scale"], color=c, lw=1.2, label=lbl)
+        tot_conv.plot(
+            E, (line_conv + brem_conv) * r["scale"], color=c, lw=1.2, label=lbl
+        )
         tot_conv.plot(E, brem_conv * r["scale"], color=c, ls="--", lw=0.6)
         cxr_raw.plot(E, line_raw * r["scale"], color=c, lw=1.2, label=lbl)
         cxr_conv.plot(E, line_conv * r["scale"], color=c, lw=1.2, label=lbl)
     case = best[0]["case"]
-    fig.suptitle(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
-                 rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:g}\degree$ — best azimuth per "
-                 rf"energy  (left: intrinsic   right: detector-convolved)", fontsize=14)
+    fig.suptitle(
+        rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
+        rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:g}\degree$ — best azimuth per "
+        rf"energy  (left: intrinsic   right: detector-convolved)",
+        fontsize=14,
+    )
     for ax, title, leg in (
-        (tot_raw,  'Total X-ray Spectrum (Coherent + Brem) — intrinsic', 'Dashed=Brem Bkgnd'),
-        (tot_conv, 'Total X-ray Spectrum (Coherent + Brem) — detector', 'Dashed=Brem Bkgnd'),
-        (cxr_raw,  'Brem-subtracted (CXR Only) — intrinsic', None),
-        (cxr_conv, 'Brem-subtracted (CXR Only) — detector', None),
+        (
+            tot_raw,
+            "Total X-ray Spectrum (Coherent + Brem) — intrinsic",
+            "Dashed=Brem Bkgnd",
+        ),
+        (
+            tot_conv,
+            "Total X-ray Spectrum (Coherent + Brem) — detector",
+            "Dashed=Brem Bkgnd",
+        ),
+        (cxr_raw, "Brem-subtracted (CXR Only) — intrinsic", None),
+        (cxr_conv, "Brem-subtracted (CXR Only) — detector", None),
     ):
         ax.set_title(title, fontsize=12)
         ax.set_xlabel("Photon energy (keV)")
@@ -430,33 +490,61 @@ def plot_timepix_efficiency(thickness_um=300.0, bias_v=100.0, n_mc=80000, seed=0
     resp = _EFF_CACHE.get(key)
     if resp is None:
         resp = tpx.build_response(
-            E_eff, np.arange(0.0, 60000.0, 100.0), n_mc=n_mc, seed=seed,
-            thickness_um=thickness_um, bias_v=bias_v,
+            E_eff,
+            np.arange(0.0, 60000.0, 100.0),
+            n_mc=n_mc,
+            seed=seed,
+            thickness_um=thickness_um,
+            bias_v=bias_v,
         )
         _EFF_CACHE[key] = resp
     E_thr = _thr_keV() * 1e3
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(13, 4.6))
-    axL.plot(E_eff, resp["eps_abs"], "k--", lw=1.2,
-             label=r"$\epsilon_\mathrm{abs}$ (Si absorption)")
-    axL.plot(E_eff, resp["P_det"], "b-", lw=1.8,
-             label=r"$P_\mathrm{det}$ (abs $\times$ counting)")
+    axL.plot(
+        E_eff,
+        resp["eps_abs"],
+        "k--",
+        lw=1.2,
+        label=r"$\epsilon_\mathrm{abs}$ (Si absorption)",
+    )
+    axL.plot(
+        E_eff,
+        resp["P_det"],
+        "b-",
+        lw=1.8,
+        label=r"$P_\mathrm{det}$ (abs $\times$ counting)",
+    )
     axL.axvline(E_thr, color="r", ls=":", label=f"threshold = {E_thr:.2f} eV")
-    axL.set(xlabel="Photon energy (eV)", ylabel="efficiency", ylim=(0, 1.05),
-            title=f"Detection efficiency ({thickness_um:g} $\\mu$m Si, {bias_v:g} V, "
-                  f"$\\sigma_\\mathrm{{diff}}$={resp['sigma_diff_um']:.1f} $\\mu$m)")
-    axL.set_xscale("log"); axL.set_xlim((min(E_eff), max(E_eff)))
-    axL.margins(x=0); axL.grid(alpha=0.3); axL.legend()
-    axR.plot(E_eff, tpx.energy_fwhm_eV(E_eff), "k-", lw=1.5,
-             label="analytic, single-pixel")
-    axR.plot(E_eff, resp["fwhm_rec"], "b.", ms=4,
-             label="MC effective (tail + multi-pixel)")
-    axR.set(xlabel="Photon energy (keV)", ylabel="energy FWHM (eV)",
-            title="Energy resolution & charge-loss bias")
-    axR.margins(x=0); axR.grid(alpha=0.3); axR.legend(loc="upper left")
+    axL.set(
+        xlabel="Photon energy (eV)",
+        ylabel="efficiency",
+        ylim=(0, 1.05),
+        title=f"Detection efficiency ({thickness_um:g} $\\mu$m Si, {bias_v:g} V, "
+        f"$\\sigma_\\mathrm{{diff}}$={resp['sigma_diff_um']:.1f} $\\mu$m)",
+    )
+    axL.set_xscale("log")
+    axL.set_xlim((min(E_eff), max(E_eff)))
+    axL.margins(x=0)
+    axL.grid(alpha=0.3)
+    axL.legend()
+    axR.plot(
+        E_eff, tpx.energy_fwhm_eV(E_eff), "k-", lw=1.5, label="analytic, single-pixel"
+    )
+    axR.plot(
+        E_eff, resp["fwhm_rec"], "b.", ms=4, label="MC effective (tail + multi-pixel)"
+    )
+    axR.set(
+        xlabel="Photon energy (keV)",
+        ylabel="energy FWHM (eV)",
+        title="Energy resolution & charge-loss bias",
+    )
+    axR.margins(x=0)
+    axR.grid(alpha=0.3)
+    axR.legend(loc="upper left")
     axR2 = axR.twinx()
     axR2.plot(E_eff, 100 * (1 - resp["mean_rec"] / E_eff), "g-", lw=1, alpha=0.5)
     axR2.set_ylabel("mean charge-loss deficit (%)", color="g")
-    axR2.tick_params(axis="y", colors="g"); # axR2.set_ylim(bottom=0)
+    axR2.tick_params(axis="y", colors="g")  # axR2.set_ylim(bottom=0)
     fig.tight_layout()
     return fig
 
@@ -465,13 +553,23 @@ def _tpx_detected(r, settings, thickness_um, bias_v, n_mc, seed):
     """Incident and Timepix3-detected (line + brem) [Phs/eV/s/nA] on r['E_grid'];
     the per-grid response is cached by tpx.get_response."""
     incident = (r["spec"] + r["brem"]) * r["scale"]
-    resp = tpx.get_response(r["E_grid"], n_mc=n_mc, seed=seed,
-                            thickness_um=thickness_um, bias_v=bias_v)
+    resp = tpx.get_response(
+        r["E_grid"], n_mc=n_mc, seed=seed, thickness_um=thickness_um, bias_v=bias_v
+    )
     return incident, resp.apply(incident)
 
 
-def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.0,
-                           collapse_azimuth=True, n_mc=80000, seed=0, floor_frac=1e-3):
+def _draw_timepix_detected(
+    fig,
+    trecs,
+    settings,
+    thickness_um=300.0,
+    bias_v=100.0,
+    collapse_azimuth=True,
+    n_mc=80000,
+    seed=0,
+    floor_frac=1e-3,
+):
     """Render ONE polar tilt of the Timepix detected/incident view onto ``fig``
     (cleared first): all energies overlaid, incident dotted / detected solid."""
     fig.clear()
@@ -493,16 +591,25 @@ def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.
                 ymax = max(ymax, float(fin.max()))
             az = r["case"]["tilt_azim_deg"]
             ax.plot(r["E_grid"], inc, color=c, ls=":", lw=1.0, alpha=0.7)
-            ax.plot(r["E_grid"], det, color=c, ls="-", lw=1.2,
-                    label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)")
+            ax.plot(
+                r["E_grid"],
+                det,
+                color=c,
+                ls="-",
+                lw=1.2,
+                label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)",
+            )
     case = trecs[0]["case"]
     ax.axvline(E_thr, color="0.4", ls=":", lw=0.8, label=f"threshold {E_thr:.2f} keV")
     if ymax > 0:
         ax.set_yscale("log")
         ax.set_ylim(ymax * floor_frac, ymax * 2)
-    ax.set_title(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
-                 rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — Timepix3 detected "
-                 rf"(solid) vs incident (dotted)", fontsize=12)
+    ax.set_title(
+        rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
+        rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — Timepix3 detected "
+        rf"(solid) vs incident (dotted)",
+        fontsize=12,
+    )
     ax.set_xlabel("Photon energy (eV)")
     ax.set_ylabel("Phs/eV/s/nA")
     ax.margins(x=0)
@@ -511,9 +618,17 @@ def _draw_timepix_detected(fig, trecs, settings, thickness_um=300.0, bias_v=100.
     fig.tight_layout()
 
 
-def plot_timepix_detected(results, settings, thickness_um=300.0, bias_v=100.0,
-                          collapse_azimuth=True, n_mc=80000, seed=0, ncols=5,
-                          floor_frac=1e-3):
+def plot_timepix_detected(
+    results,
+    settings,
+    thickness_um=300.0,
+    bias_v=100.0,
+    collapse_azimuth=True,
+    n_mc=80000,
+    seed=0,
+    ncols=5,
+    floor_frac=1e-3,
+):
     """Incident (dotted) vs Timepix3-detected (solid) spectra, log scale; ONE
     figure per polar tilt, all energies overlaid (best azimuth each). For
     click-through use ``browse(results, settings, kind="timepix")``. (``ncols``
@@ -526,16 +641,30 @@ def plot_timepix_detected(results, settings, thickness_um=300.0, bias_v=100.0,
     figs = []
     for t in tilts:
         fig = plt.figure(figsize=(9.0, 5.2))
-        _draw_timepix_detected(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
-                               settings, thickness_um=thickness_um, bias_v=bias_v,
-                               collapse_azimuth=collapse_azimuth, n_mc=n_mc, seed=seed,
-                               floor_frac=floor_frac)
+        _draw_timepix_detected(
+            fig,
+            [r for r in recs if r["case"]["tilt_deg"] == t],
+            settings,
+            thickness_um=thickness_um,
+            bias_v=bias_v,
+            collapse_azimuth=collapse_azimuth,
+            n_mc=n_mc,
+            seed=seed,
+            floor_frac=floor_frac,
+        )
         figs.append(fig)
     return figs
 
 
-def plot_timepix_poisson(results, settings, integration_s=600.0, thickness_um=300.0,
-                         bias_v=100.0, n_mc=80000, seed=0):
+def plot_timepix_poisson(
+    results,
+    settings,
+    integration_s=600.0,
+    thickness_um=300.0,
+    bias_v=100.0,
+    n_mc=80000,
+    seed=0,
+):
     """A Poisson 'measured' realization for the highest-rate config at each
     energy, over ``integration_s`` at the configured beam current."""
     recs = records(results)
@@ -545,8 +674,9 @@ def plot_timepix_poisson(results, settings, integration_s=600.0, thickness_um=30
     rng = np.random.default_rng(seed)
     E_thr = _thr_keV() * 1e3
     energies = sorted({r["case"]["E0_keV"] for r in recs})
-    fig, axes = plt.subplots(1, len(energies), figsize=(6 * len(energies), 4.6),
-                             squeeze=False)
+    fig, axes = plt.subplots(
+        1, len(energies), figsize=(6 * len(energies), 4.6), squeeze=False
+    )
     for ax, E0 in zip(axes.ravel(), energies):
         grp = [r for r in recs if r["case"]["E0_keV"] == E0]
         r = max(grp, key=lambda r: float(np.max(r["spec"])))
@@ -554,23 +684,38 @@ def plot_timepix_poisson(results, settings, integration_s=600.0, thickness_um=30
         counts, expected = tpx.poisson_counts(
             r["E_grid"], det * settings.beam_current_na, integration_s, rng
         )
-        ax.step(r["E_grid"], counts, where="mid", color="k", lw=0.7,
-                label=f"measured ({integration_s:g} s @ {settings.beam_current_na:g} nA)")
+        ax.step(
+            r["E_grid"],
+            counts,
+            where="mid",
+            color="k",
+            lw=0.7,
+            label=f"measured ({integration_s:g} s @ {settings.beam_current_na:g} nA)",
+        )
         ax.plot(r["E_grid"], expected, "r-", lw=1.3, label="expected mean")
         ax.axvline(E_thr, color="b", ls=":", lw=0.8, label="threshold")
-        ax.set_title(rf"{E0:g} keV, $\theta_\mathrm{{tilt}}={r['case']['tilt_deg']:g}\degree$, "
-                     rf"$\phi={r['case']['tilt_azim_deg']:g}\degree$  "
-                     rf"({counts.sum():.0f} cts)", fontsize=10)
-        ax.set_xlabel("Photon energy (eV)"); ax.set_ylabel("counts / bin")
-        ax.margins(x=0); ax.grid(alpha=0.3); ax.legend(fontsize=8)
-    fig.suptitle(f"Timepix3 Poisson 'measured' spectra "
-                 f"({thickness_um:g} $\\mu$m Si, {bias_v:g} V)", fontsize=14)
+        ax.set_title(
+            rf"{E0:g} keV, $\theta_\mathrm{{tilt}}={r['case']['tilt_deg']:g}\degree$, "
+            rf"$\phi={r['case']['tilt_azim_deg']:g}\degree$  "
+            rf"({counts.sum():.0f} cts)",
+            fontsize=10,
+        )
+        ax.set_xlabel("Photon energy (eV)")
+        ax.set_ylabel("counts / bin")
+        ax.margins(x=0)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
+    fig.suptitle(
+        f"Timepix3 Poisson 'measured' spectra "
+        f"({thickness_um:g} $\\mu$m Si, {bias_v:g} V)",
+        fontsize=14,
+    )
     fig.tight_layout()
     return fig
 
 
 # ---- Eagle XO detector view --------------------------------------------------
-SI_K_EDGE_EV = 1839.0   # silicon K absorption edge -> the QE notch the lines cross
+SI_K_EDGE_EV = 1839.0  # silicon K absorption edge -> the QE notch the lines cross
 
 
 def _domega_of(r):
@@ -595,25 +740,43 @@ def plot_eaglexo_efficiency(sensor="4240", distance_m=None, coating="BN"):
     axL.axvspan(3000.0, E[-1], color="r", alpha=0.05)
     axL.plot(E, eag.qe(E, "BN"), "b-", lw=1.8, label="QE (BN, no coating)")
     axL.plot(E, eag.qe(E, "BEN"), "g--", lw=1.4, label="QE (BEN, enhanced)")
-    axL.plot(E, eag.qe_absorption_model(E), "0.5", ls=":", lw=1.2,
-             label=rf"abs. model ({eag.ACTIVE_SI_UM:g} $\mu$m Si)")
+    axL.plot(
+        E,
+        eag.qe_absorption_model(E),
+        "0.5",
+        ls=":",
+        lw=1.2,
+        label=rf"abs. model ({eag.ACTIVE_SI_UM:g} $\mu$m Si)",
+    )
     axL.axvline(SI_K_EDGE_EV, color="0.4", ls="--", lw=0.8)
     axL.text(SI_K_EDGE_EV * 1.05, 0.05, "Si-K", color="0.3", fontsize=8)
-    axL.set_xscale("log"); axL.set_xlim(E[0], E[-1]); axL.set_ylim(0, 1.0)
-    axL.set(xlabel="Photon energy (eV)", ylabel="quantum efficiency",
-            title="QE: soft lines pass (green), hard brem crushed (red)")
-    axL.grid(alpha=0.3, which="both"); axL.legend(fontsize=8, loc="center left")
+    axL.set_xscale("log")
+    axL.set_xlim(E[0], E[-1])
+    axL.set_ylim(0, 1.0)
+    axL.set(
+        xlabel="Photon energy (eV)",
+        ylabel="quantum efficiency",
+        title="QE: soft lines pass (green), hard brem crushed (red)",
+    )
+    axL.grid(alpha=0.3, which="both")
+    axL.legend(fontsize=8, loc="center left")
     # -- photon-counting energy resolution --
     axR.plot(E, eag.energy_fwhm_eV(E), "b-", lw=1.6)
-    axR.set_xscale("log"); axR.set_xlim(E[0], E[-1])
-    axR.set(xlabel="Photon energy (eV)", ylabel="energy FWHM (eV)",
-            title=f"Photon-counting resolution (Fano + {eag.READ_NOISE_E:g} e- read)")
+    axR.set_xscale("log")
+    axR.set_xlim(E[0], E[-1])
+    axR.set(
+        xlabel="Photon energy (eV)",
+        ylabel="energy FWHM (eV)",
+        title=f"Photon-counting resolution (Fano + {eag.READ_NOISE_E:g} e- read)",
+    )
     axR.grid(alpha=0.3, which="both")
-    fig.suptitle(f"Eagle XO {geo['sensor']} @ {geo['distance_m']:g} m  —  "
-                 rf"$\Omega$ = {geo['domega_sr']:.3e} sr "
-                 rf"($\Delta\theta$ = {geo['dtheta_obs_deg']:.2f}$\degree$, "
-                 f"{geo['active_mm'][0]:g}$\\times${geo['active_mm'][1]:g} mm)",
-                 fontsize=13)
+    fig.suptitle(
+        f"Eagle XO {geo['sensor']} @ {geo['distance_m']:g} m  —  "
+        rf"$\Omega$ = {geo['domega_sr']:.3e} sr "
+        rf"($\Delta\theta$ = {geo['dtheta_obs_deg']:.2f}$\degree$, "
+        f"{geo['active_mm'][0]:g}$\\times${geo['active_mm'][1]:g} mm)",
+        fontsize=13,
+    )
     fig.tight_layout()
     return fig
 
@@ -626,8 +789,15 @@ def _eag_detected(r, settings, coating="BN", resolve_energy=False):
     return incident, resp.apply(incident)
 
 
-def _draw_eaglexo_detected(fig, trecs, settings, coating="BN", resolve_energy=False,
-                           collapse_azimuth=True, floor_frac=1e-3):
+def _draw_eaglexo_detected(
+    fig,
+    trecs,
+    settings,
+    coating="BN",
+    resolve_energy=False,
+    collapse_azimuth=True,
+    floor_frac=1e-3,
+):
     """Render ONE polar tilt of the Eagle XO detected/incident view onto ``fig``
     (cleared first): all energies overlaid, incident dotted / detected solid, on
     log-log axes so the soft lines and the hard-brem roll-off both show. The wide
@@ -651,12 +821,19 @@ def _draw_eaglexo_detected(fig, trecs, settings, coating="BN", resolve_energy=Fa
             fin = inc[np.isfinite(inc)]
             if fin.size:
                 ymax = max(ymax, float(fin.max()))
-            xlo = min(xlo, float(r["E_grid"][0])); xhi = max(xhi, float(r["E_grid"][-1]))
+            xlo = min(xlo, float(r["E_grid"][0]))
+            xhi = max(xhi, float(r["E_grid"][-1]))
             az = r["case"]["tilt_azim_deg"]
             ax.plot(r["E_grid"], inc, color=c, ls=":", lw=1.0, alpha=0.7)
-            ax.plot(r["E_grid"], det, color=c, ls="-", lw=1.2,
-                    label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)")
-            if r.get("brem_wide") is not None:    # full range -> the brem roll-off
+            ax.plot(
+                r["E_grid"],
+                det,
+                color=c,
+                ls="-",
+                lw=1.2,
+                label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)",
+            )
+            if r.get("brem_wide") is not None:  # full range -> the brem roll-off
                 Eb = np.asarray(r["E_grid_brem"], dtype=float)
                 inc_b = r["brem_wide"] * r["scale"]
                 det_b = inc_b * eag.qe(Eb, coating)
@@ -669,17 +846,22 @@ def _draw_eaglexo_detected(fig, trecs, settings, coating="BN", resolve_energy=Fa
     axq = ax.twinx()
     Eqe = np.geomspace(max(xlo, 1.0), xhi if xhi > 0 else 6e4, 400)
     axq.plot(Eqe, eag.qe(Eqe, coating), color="0.6", ls="-", lw=1.0, alpha=0.6)
-    axq.set_ylim(0, 1.05); axq.set_ylabel("QE", color="0.5")
+    axq.set_ylim(0, 1.05)
+    axq.set_ylabel("QE", color="0.5")
     axq.tick_params(axis="y", colors="0.5")
     if ymax > 0:
-        ax.set_yscale("log"); ax.set_ylim(ymax * floor_frac, ymax * 2)
+        ax.set_yscale("log")
+        ax.set_ylim(ymax * floor_frac, ymax * 2)
     ax.set_xscale("log")
     if xhi > 0:
         ax.set_xlim(xlo, xhi)
     blur = ", energy-resolved" if resolve_energy else ""
-    ax.set_title(rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
-                 rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — Eagle XO "
-                 rf"detected (solid) vs incident (dotted), {coating}{blur}", fontsize=11)
+    ax.set_title(
+        rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
+        rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — Eagle XO "
+        rf"detected (solid) vs incident (dotted), {coating}{blur}",
+        fontsize=11,
+    )
     ax.set_xlabel("Photon energy (eV)")
     ax.set_ylabel("Phs/eV/s/nA")
     ax.grid(alpha=0.3, which="both")
@@ -687,8 +869,14 @@ def _draw_eaglexo_detected(fig, trecs, settings, coating="BN", resolve_energy=Fa
     fig.tight_layout()
 
 
-def plot_eaglexo_detected(results, settings, coating="BN", resolve_energy=False,
-                          collapse_azimuth=True, floor_frac=1e-3):
+def plot_eaglexo_detected(
+    results,
+    settings,
+    coating="BN",
+    resolve_energy=False,
+    collapse_azimuth=True,
+    floor_frac=1e-3,
+):
     """Incident (dotted) vs Eagle-XO-detected (solid) spectra, log-log; ONE figure
     per polar tilt, all energies overlaid (best azimuth each), with a faint QE
     envelope. Shows the camera's signature: soft PXR lines survive at ~90% QE
@@ -705,15 +893,22 @@ def plot_eaglexo_detected(results, settings, coating="BN", resolve_energy=False,
     figs = []
     for t in tilts:
         fig = plt.figure(figsize=(9.0, 5.2))
-        _draw_eaglexo_detected(fig, [r for r in recs if r["case"]["tilt_deg"] == t],
-                               settings, coating=coating, resolve_energy=resolve_energy,
-                               collapse_azimuth=collapse_azimuth, floor_frac=floor_frac)
+        _draw_eaglexo_detected(
+            fig,
+            [r for r in recs if r["case"]["tilt_deg"] == t],
+            settings,
+            coating=coating,
+            resolve_energy=resolve_energy,
+            collapse_azimuth=collapse_azimuth,
+            floor_frac=floor_frac,
+        )
         figs.append(fig)
     return figs
 
 
-def plot_eaglexo_measured(results, settings, integration_s=600.0, coating="BN",
-                          resolve_energy=False, seed=0):
+def plot_eaglexo_measured(
+    results, settings, integration_s=600.0, coating="BN", resolve_energy=False, seed=0
+):
     """A Poisson 'measured' realization (photon-counting mode) for the highest-rate
     config at each energy, over ``integration_s`` at the configured beam current.
     The detected mean is incident x QE; counts are Poisson per bin. The title
@@ -724,8 +919,9 @@ def plot_eaglexo_measured(results, settings, integration_s=600.0, coating="BN",
         return None
     rng = np.random.default_rng(seed)
     energies = sorted({r["case"]["E0_keV"] for r in recs})
-    fig, axes = plt.subplots(1, len(energies), figsize=(6 * len(energies), 4.6),
-                             squeeze=False)
+    fig, axes = plt.subplots(
+        1, len(energies), figsize=(6 * len(energies), 4.6), squeeze=False
+    )
     for ax, E0 in zip(axes.ravel(), energies):
         grp = [r for r in recs if r["case"]["E0_keV"] == E0]
         r = max(grp, key=lambda r: float(np.max(r["spec"])))
@@ -733,18 +929,33 @@ def plot_eaglexo_measured(results, settings, integration_s=600.0, coating="BN",
         counts, expected = eag.poisson_counts(
             r["E_grid"], det * settings.beam_current_na, integration_s, rng=rng
         )
-        ax.step(r["E_grid"], counts, where="mid", color="k", lw=0.7,
-                label=f"measured ({integration_s:g} s @ {settings.beam_current_na:g} nA)")
+        ax.step(
+            r["E_grid"],
+            counts,
+            where="mid",
+            color="k",
+            lw=0.7,
+            label=f"measured ({integration_s:g} s @ {settings.beam_current_na:g} nA)",
+        )
         ax.plot(r["E_grid"], expected, "r-", lw=1.3, label="expected mean")
         ax.axvline(SI_K_EDGE_EV, color="b", ls=":", lw=0.8, label="Si-K edge")
-        ax.set_title(rf"{E0:g} keV, $\theta_\mathrm{{tilt}}={r['case']['tilt_deg']:g}\degree$, "
-                     rf"$\phi={r['case']['tilt_azim_deg']:g}\degree$  "
-                     rf"({counts.sum():.0f} cts)", fontsize=10)
-        ax.set_xlabel("Photon energy (eV)"); ax.set_ylabel("counts / bin")
-        ax.margins(x=0); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+        ax.set_title(
+            rf"{E0:g} keV, $\theta_\mathrm{{tilt}}={r['case']['tilt_deg']:g}\degree$, "
+            rf"$\phi={r['case']['tilt_azim_deg']:g}\degree$  "
+            rf"({counts.sum():.0f} cts)",
+            fontsize=10,
+        )
+        ax.set_xlabel("Photon energy (eV)")
+        ax.set_ylabel("counts / bin")
+        ax.margins(x=0)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
     dom = _domega_of(recs[0])
-    fig.suptitle(f"Eagle XO Poisson 'measured' spectra  "
-                 rf"($\Omega$ = {dom:.3e} sr, {coating})", fontsize=14)
+    fig.suptitle(
+        f"Eagle XO Poisson 'measured' spectra  "
+        rf"($\Omega$ = {dom:.3e} sr, {coating})",
+        fontsize=14,
+    )
     fig.tight_layout()
     return fig
 
@@ -828,15 +1039,19 @@ def plot_electron_trajectories(
 
     perp_xz = np.array([-beam_xz[1], beam_xz[0]])
 
-    start2 = np.column_stack([
-        start[:, [0, 2]] @ beam_xz,
-        -(start[:, [0, 2]] @ perp_xz),
-    ])
+    start2 = np.column_stack(
+        [
+            start[:, [0, 2]] @ beam_xz,
+            -(start[:, [0, 2]] @ perp_xz),
+        ]
+    )
 
-    end2 = np.column_stack([
-        end[:, [0, 2]] @ beam_xz,
-        -(end[:, [0, 2]] @ perp_xz),
-    ])
+    end2 = np.column_stack(
+        [
+            end[:, [0, 2]] @ beam_xz,
+            -(end[:, [0, 2]] @ perp_xz),
+        ]
+    )
 
     seg2d = np.stack([start2, end2], axis=1) / u
 
@@ -996,6 +1211,7 @@ def plot_electron_trajectories(
 
     return ax
 
+
 def plot_trajectories(results, *, tilt=None, Ne=200, seed=0, color_by="energy"):
     """Electron-penetration cross-sections for one polar tilt: a row of panels,
     one per beam energy (best azimuth each). ``tilt`` picks the polar tilt (nearest
@@ -1007,14 +1223,18 @@ def plot_trajectories(results, *, tilt=None, Ne=200, seed=0, color_by="energy"):
         return None
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     t = tilts[0] if tilt is None else min(tilts, key=lambda x: abs(x - tilt))
-    grp = sorted([r for r in recs if r["case"]["tilt_deg"] == t],
-                 key=lambda r: r["case"]["E0_keV"])
-    fig, axes = plt.subplots(1, len(grp), figsize=(5.6 * len(grp), 5.2),
-                             squeeze=False)
+    grp = sorted(
+        [r for r in recs if r["case"]["tilt_deg"] == t],
+        key=lambda r: r["case"]["E0_keV"],
+    )
+    fig, axes = plt.subplots(1, len(grp), figsize=(5.6 * len(grp), 5.2), squeeze=False)
     for ax, r in zip(axes.ravel(), grp):
         plot_electron_trajectories(r, Ne=Ne, seed=seed, color_by=color_by, ax=ax)
-    fig.suptitle(rf"Electron penetration, $\theta_\mathrm{{tilt}}$={t:g}$\degree$ "
-                 f"(crystal = shaded slab; beam-detector plane)", fontsize=13)
+    fig.suptitle(
+        rf"Electron penetration, $\theta_\mathrm{{tilt}}$={t:g}$\degree$ "
+        f"(crystal = shaded slab; beam-detector plane)",
+        fontsize=13,
+    )
     fig.tight_layout()
     return fig
 
@@ -1045,8 +1265,15 @@ _HEATMAP_QUANTITIES = [
 _FLUX_GATED = {"line_eV", "fwhm_eV", "line_frac"}
 
 
-def plot_heatmaps(results, settings, cases=None, quantities=None, rel_prominence=0.03,
-                  line_metric="sharpness", min_flux_frac=0.02):
+def plot_heatmaps(
+    results,
+    settings,
+    cases=None,
+    quantities=None,
+    rel_prominence=0.03,
+    line_metric="sharpness",
+    min_flux_frac=0.02,
+):
     """Parametric heatmaps over (polar tilt x azimuthal tilt), one panel per beam
     energy, one figure per quantity.
 
@@ -1077,8 +1304,10 @@ def plot_heatmaps(results, settings, cases=None, quantities=None, rel_prominence
         return []
     quantities = quantities or _HEATMAP_QUANTITIES
     energies = sorted({r["case"]["E0_keV"] for r in recs})
-    metrics = {id(r): line_metrics(r, settings, rel_prominence, metric=line_metric)
-               for r in recs}
+    metrics = {
+        id(r): line_metrics(r, settings, rel_prominence, metric=line_metric)
+        for r in recs
+    }
 
     figs = []
     for key, label, cmap in quantities:
@@ -1103,15 +1332,31 @@ def plot_heatmaps(results, settings, cases=None, quantities=None, rel_prominence
             y0, y1 = _axis_edges(tilts)
             panels.append((E0, Z, (x0, x1, y0, y1)))
         finite = [Z[np.isfinite(Z)] for _, Z, _ in panels]
-        finite = np.concatenate(finite) if any(a.size for a in finite) else np.array([0.0, 1.0])
+        finite = (
+            np.concatenate(finite)
+            if any(a.size for a in finite)
+            else np.array([0.0, 1.0])
+        )
         vmin, vmax = float(finite.min()), float(finite.max())
 
-        fig, axes = plt.subplots(1, len(panels), figsize=(5 * len(panels) + 1, 4.3),
-                                 squeeze=False, constrained_layout=True)
+        fig, axes = plt.subplots(
+            1,
+            len(panels),
+            figsize=(5 * len(panels) + 1, 4.3),
+            squeeze=False,
+            constrained_layout=True,
+        )
         im = None
         for ax, (E0, Z, ext) in zip(axes.ravel(), panels):
-            im = ax.imshow(Z, origin="lower", aspect="auto", cmap=cmap,
-                           extent=list(ext), vmin=vmin, vmax=vmax)
+            im = ax.imshow(
+                Z,
+                origin="lower",
+                aspect="auto",
+                cmap=cmap,
+                extent=list(ext),
+                vmin=vmin,
+                vmax=vmax,
+            )
             ax.set_title(f"{E0:g} keV")
             ax.set_xlabel("azimuthal tilt (deg)")
             ax.set_ylabel("polar tilt (deg)")

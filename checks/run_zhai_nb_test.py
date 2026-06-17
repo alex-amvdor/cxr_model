@@ -1,10 +1,12 @@
 """Headless execution of cxr_analysis_zhai.ipynb (temporary test harness).
 The __main__ guard is required: the notebook's run cell uses process-based
 parallelism, and spawned workers re-import this module."""
+
 import json
 import os
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 if __name__ == "__main__":

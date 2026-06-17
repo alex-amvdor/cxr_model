@@ -82,6 +82,7 @@ is W_Si = 3.65 eV/pair (each absorbed photon of energy E makes E/W_Si electrons)
 ### solid angle -- is experiment-specific. Set DEFAULT_DISTANCE_M (or pass
 ### distance_m=) to your geometry before trusting absolute rates.
 """
+
 from pathlib import Path
 
 import numpy as np
@@ -89,10 +90,10 @@ import numpy as np
 from cxr_feranchuk_spence import absorption_length_ang
 
 # ---- silicon sensor physics (fixed material constants) -----------------------
-W_EHP_EV = 3.65               # mean energy to make one electron-hole pair [eV]
-FANO_SI = 0.115               # Fano factor: Var(N) = F * N (sub-Poisson) for Si
+W_EHP_EV = 3.65  # mean energy to make one electron-hole pair [eV]
+FANO_SI = 0.115  # Fano factor: Var(N) = F * N (sub-Poisson) for Si
 SI_DENSITY_G_CM3 = 2.329
-SI_A = 28.085                 # Si molar mass [g/mol]
+SI_A = 28.085  # Si molar mass [g/mol]
 # number density n = rho/A * N_A, converted cm^-3 -> Ang^-3 (the unit
 # absorption_length_ang wants). 0.602214076 = N_A * 1e-24.
 SI_N_PER_ANG3 = SI_DENSITY_G_CM3 / SI_A * 0.602214076
@@ -101,25 +102,27 @@ SI_N_PER_ANG3 = SI_DENSITY_G_CM3 / SI_A * 0.602214076
 # Active area and pixel pitch for the two CCD options; the active area (with the
 # source distance) is what sets the solid angle.
 SENSORS = {
-    "4240": dict(sensor="E2V 42-40", n_pix=(2048, 2048),
-                 pixel_um=13.5, active_mm=(27.6, 27.6)),   # the larger sensor
-    "4710": dict(sensor="E2V 47-10", n_pix=(1024, 1024),
-                 pixel_um=13.0, active_mm=(13.3, 13.3)),
+    "4240": dict(
+        sensor="E2V 42-40", n_pix=(2048, 2048), pixel_um=13.5, active_mm=(27.6, 27.6)
+    ),  # the larger sensor
+    "4710": dict(
+        sensor="E2V 47-10", n_pix=(1024, 1024), pixel_um=13.0, active_mm=(13.3, 13.3)
+    ),
 }
 DEFAULT_SENSOR = "4240"
 
 # ---- operating point (### FILL IN with your geometry / readout) --------------
-DEFAULT_DISTANCE_M = 0.4      ### FILL IN -- source-to-sensor distance [m] (placeholder,
-                             #   matched to the Timepix default for a like-for-like
-                             #   comparison; this sets the solid angle, the key knob)
-ACTIVE_SI_UM = 16.0           ### FILL IN -- active (depleted) Si thickness [um]; only
-                             #   shapes the QE roll-off extrapolation ABOVE the 29 keV
-                             #   datasheet ceiling, fitted to that roll-off (~14-19 um)
+DEFAULT_DISTANCE_M = 0.4  ### FILL IN -- source-to-sensor distance [m] (placeholder,
+#   matched to the Timepix default for a like-for-like
+#   comparison; this sets the solid angle, the key knob)
+ACTIVE_SI_UM = 16.0  ### FILL IN -- active (depleted) Si thickness [um]; only
+#   shapes the QE roll-off extrapolation ABOVE the 29 keV
+#   datasheet ceiling, fitted to that roll-off (~14-19 um)
 
 # ---- readout / noise (datasheet; used only by the 'measured' realization) -----
-READ_NOISE_E = 2.3            # read noise [e- RMS], 75 kHz typical (9.0 e- @ 2 MHz)
-DARK_CURRENT_E_PER_S = 0.0005 # dark current [e-/pixel/s], deep-cooled (<0.0005)
-FULL_WELL_E = 100_000.0       # full-well capacity [e-] (100 ke- typical)
+READ_NOISE_E = 2.3  # read noise [e- RMS], 75 kHz typical (9.0 e- @ 2 MHz)
+DARK_CURRENT_E_PER_S = 0.0005  # dark current [e-/pixel/s], deep-cooled (<0.0005)
+FULL_WELL_E = 100_000.0  # full-well capacity [e-] (100 ke- typical)
 
 # QE table: digitized datasheet curve (energy_eV, QE_BN_%, QE_BEN_%)
 _QE_PATH = Path(__file__).parent.parent / "data" / "eaglexo_qe.csv"
@@ -232,8 +235,9 @@ def qe(E_eV, coating="BN"):
     E = np.asarray(E_eV, dtype=float)
     Et, bn, ben, sl_bn, sl_ben = load_qe_table()
     col, slope = (ben, sl_ben) if coating.upper() == "BEN" else (bn, sl_bn)
-    out = np.interp(np.log10(np.clip(E, 1e-3, None)), np.log10(Et), col,
-                    left=0.0, right=col[-1])           # clamp top; overwrite >Emax
+    out = np.interp(
+        np.log10(np.clip(E, 1e-3, None)), np.log10(Et), col, left=0.0, right=col[-1]
+    )  # clamp top; overwrite >Emax
     tail = col[-1] * (np.clip(E, Et[-1], None) / Et[-1]) ** slope
     out = np.where(E > Et[-1], tail, out)
     return np.clip(out, 0.0, 1.0)
@@ -252,7 +256,7 @@ def qe_absorption_model(E_eV, active_um=None, peak=0.93):
     t = ACTIVE_SI_UM if active_um is None else active_um
     E = np.asarray(E_eV, dtype=float)
     L_ang = absorption_length_ang("Si", np.clip(E, 1e-3, None), SI_N_PER_ANG3)
-    out = peak * (1.0 - np.exp(-(t * 1e4) / L_ang))    # t: um -> Angstrom
+    out = peak * (1.0 - np.exp(-(t * 1e4) / L_ang))  # t: um -> Angstrom
     return np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
 
 
@@ -267,8 +271,8 @@ def energy_fwhm_eV(E_eV, n_pix=4):
     Timepix ToT and roughly sqrt(E)-shaped. Irrelevant in plain integrating
     mode; used only when EagleResponse.apply(resolve_energy=True)."""
     E = np.asarray(E_eV, dtype=float)
-    var_e = FANO_SI * (E / W_EHP_EV) + n_pix * READ_NOISE_E**2     # [e-^2]
-    return 2.3548 * W_EHP_EV * np.sqrt(var_e)                       # [eV]
+    var_e = FANO_SI * (E / W_EHP_EV) + n_pix * READ_NOISE_E**2  # [e-^2]
+    return 2.3548 * W_EHP_EV * np.sqrt(var_e)  # [eV]
 
 
 class EagleResponse:
@@ -293,26 +297,29 @@ class EagleResponse:
         self.coating = coating
         self.resolve_energy = resolve_energy
         self.n_pix = n_pix
-        self.qe = qe(self.E, coating=coating)            # QE on the grid, in [0,1]
+        self.qe = qe(self.E, coating=coating)  # QE on the grid, in [0,1]
 
     def apply(self, spec):
         """Detected spectral density on the SAME grid and in the SAME flux units
         as the input (e.g. Phs/eV/s/nA): ``spec * QE(E)``, optionally blurred by
         the photon-counting energy resolution. NaN/inf samples (a bad-geometry
         case) are treated as zero flux rather than poisoning the result."""
-        spec = np.nan_to_num(np.asarray(spec, dtype=float),
-                             nan=0.0, posinf=0.0, neginf=0.0)
+        spec = np.nan_to_num(
+            np.asarray(spec, dtype=float), nan=0.0, posinf=0.0, neginf=0.0
+        )
         if spec.shape != self.E.shape:
             raise ValueError(
                 f"spec length {spec.shape} != response grid {self.E.shape}. "
                 f"Build a matching response with "
-                f"eaglexo_response.get_response(E_grid, ...).")
+                f"eaglexo_response.get_response(E_grid, ...)."
+            )
         det = spec * self.qe
         if self.resolve_energy:
             from cxr_montecarlo import convolve_detector
+
             dE = self.E[1] - self.E[0]
             fwhm = float(np.median(energy_fwhm_eV(self.E, self.n_pix)))
-            det = convolve_detector(self.E, det, fwhm)   # ~const, sqrt(E)-weak
+            det = convolve_detector(self.E, det, fwhm)  # ~const, sqrt(E)-weak
         return det
 
     def detection_efficiency(self, E_eV=None):
@@ -334,18 +341,26 @@ def get_response(E_grid_eV, *, coating="BN", resolve_energy=False, n_pix=4):
     signature and reused. Prefer this over constructing EagleResponse directly
     when looping over many spectra so each gets a response matching ITS grid."""
     E = np.asarray(E_grid_eV, dtype=float)
-    key = (E.size, round(float(E[0]), 6), round(float(E[-1]), 6),
-           coating.upper(), bool(resolve_energy), int(n_pix))
+    key = (
+        E.size,
+        round(float(E[0]), 6),
+        round(float(E[-1]), 6),
+        coating.upper(),
+        bool(resolve_energy),
+        int(n_pix),
+    )
     resp = _RESPONSE_CACHE.get(key)
     if resp is None:
-        resp = EagleResponse(E, coating=coating, resolve_energy=resolve_energy,
-                             n_pix=n_pix)
+        resp = EagleResponse(
+            E, coating=coating, resolve_energy=resolve_energy, n_pix=n_pix
+        )
         _RESPONSE_CACHE[key] = resp
     return resp
 
 
-def poisson_counts(E_grid_eV, detected_per_s, time_s, *, add_read_dark=False,
-                   n_pix_line=4, rng=None):
+def poisson_counts(
+    E_grid_eV, detected_per_s, time_s, *, add_read_dark=False, n_pix_line=4, rng=None
+):
     """Draw a Poisson realization of one acquisition -- what the camera records,
     statistical noise and all.
 
@@ -361,8 +376,7 @@ def poisson_counts(E_grid_eV, detected_per_s, time_s, *, add_read_dark=False,
     rng = np.random.default_rng() if rng is None else rng
     E = np.asarray(E_grid_eV, dtype=float)
     dE = E[1] - E[0]
-    expected = np.clip(np.asarray(detected_per_s, dtype=float) * dE * time_s,
-                       0.0, None)
+    expected = np.clip(np.asarray(detected_per_s, dtype=float) * dE * time_s, 0.0, None)
     counts = rng.poisson(expected).astype(float)
     if add_read_dark:
         # read noise in charge -> equivalent photon-count jitter per bin, plus

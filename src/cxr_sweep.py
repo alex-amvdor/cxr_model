@@ -19,6 +19,7 @@ energy grid) is looked up per material; the detector geometry defaults to the
 2x2 Timepix3 quad. Only ``cxr_feranchuk_spence`` is imported here (no GPU), so
 this module is cheap to import and test.
 """
+
 from dataclasses import dataclass
 from itertools import product
 from typing import Optional, Sequence, Union
@@ -132,7 +133,9 @@ def crystal_params(material, n_families=4):
         return dict(
             crystal="diamond",
             composition=[("C", n_of("diamond", "C"))],
-            hkl_list=dominant_reflections("diamond", n_families=n_families, B_ang2=0.21),
+            hkl_list=dominant_reflections(
+                "diamond", n_families=n_families, B_ang2=0.21
+            ),
             beam_uvw=(4, 0, 0),
             B_ang2=0.21,
             E_grid=np.arange(100.0, 5000.0, 2.0),
@@ -141,7 +144,9 @@ def crystal_params(material, n_families=4):
         return dict(
             crystal="silicon",
             composition=[("Si", n_of("silicon", "Si"))],
-            hkl_list=dominant_reflections("silicon", n_families=n_families, B_ang2=0.46),
+            hkl_list=dominant_reflections(
+                "silicon", n_families=n_families, B_ang2=0.46
+            ),
             beam_uvw=(4, 4, 0),
             B_ang2=0.46,
             E_grid=np.arange(100.0, 5000.0, 3.0),
@@ -219,9 +224,15 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
     if sweep.E_grid_brem is not None:
         brem_grid = np.asarray(sweep.E_grid_brem, float)
     else:
-        brem_grid = np.arange(float(line_grid[0]), float(energies.max()) * 1e3 + 50.0, 50.0)
+        brem_grid = np.arange(
+            float(line_grid[0]), float(energies.max()) * 1e3 + 50.0, 50.0
+        )
 
-    dtheta = TIMEPIX3_DTHETA_OBS_DEG if sweep.dtheta_obs_deg is None else sweep.dtheta_obs_deg
+    dtheta = (
+        TIMEPIX3_DTHETA_OBS_DEG
+        if sweep.dtheta_obs_deg is None
+        else sweep.dtheta_obs_deg
+    )
     domega = TIMEPIX3_DOMEGA_SR if sweep.domega_sr is None else sweep.domega_sr
     beam_uvw = cp["beam_uvw"] if sweep.beam_uvw is None else sweep.beam_uvw
     label = MATERIAL_LABELS.get(sweep.material, sweep.material)
@@ -230,11 +241,14 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
         """(start, stop, step) so np.arange(*triple) reproduces grid g."""
         step = float(g[1] - g[0])
         return (float(g[0]), float(g[-1]) + step, step)
+
     line_triple, brem_triple = _triple(line_grid), _triple(brem_grid)
 
     cases = []
     for i_c, (thickness, tilt, azim) in enumerate(
-        product(_seq(sweep.thickness_ang), _seq(sweep.tilt_deg), _seq(sweep.tilt_azim_deg))
+        product(
+            _seq(sweep.thickness_ang), _seq(sweep.tilt_deg), _seq(sweep.tilt_azim_deg)
+        )
     ):
         name = f"{label} {fmt_thickness(thickness)} pol={tilt:g} az={azim:g}"
         for i_e, E0 in enumerate(energies):
@@ -247,7 +261,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     B_ang2=cp["B_ang2"],
                     E0_keV=float(E0),
                     thickness_ang=float(thickness),
-                    E_grid=line_triple,         # legacy key (== line grid)
+                    E_grid=line_triple,  # legacy key (== line grid)
                     E_grid_line=line_triple,
                     E_grid_brem=brem_triple,
                     theta_obs_rad=np.deg2rad(sweep.theta_obs_deg),
@@ -258,7 +272,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     Ne=n_electrons,
                     Ne_brem=n_electrons_brem,
                     seed=1000 * i_c + 10 * i_e + 1,
-                    spec_chunk=sweep.spec_chunk,   # GPU rows/matmul (None -> run_case default)
+                    spec_chunk=sweep.spec_chunk,  # GPU rows/matmul (None -> run_case default)
                     brem_chunk=sweep.brem_chunk,
                     # used downstream (detector model / unit scaling); ignored by run_case:
                     dtheta_obs_rad=np.deg2rad(dtheta),
