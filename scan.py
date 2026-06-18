@@ -1,5 +1,5 @@
 """
-scan.py -- headless CXR scan runner (the .py twin of cxr_scan.ipynb).
+scan.py -- headless CXR scan runner (the .py twin of scan.ipynb).
 
 Runs the Monte-Carlo CXR parameter sweep for one material and writes the
 per-material checkpoint (checkpoints/<material>.pkl). Use this to run sweeps
@@ -7,7 +7,7 @@ non-interactively -- in particular over SSH on the GPU box; see remote.py, which
 drives this and pulls the checkpoint back so the (matplotlib / PDF) data-vis can
 stay on the laptop.
 
-    python scan.py mose2                # the full per-material grid (cxr_config)
+    python scan.py mose2                # the full per-material grid (config)
     python scan.py mose2 --quick        # tiny grid: smoke test / pipeline check
     python scan.py mose2 --workers 0    # serial (no transport worker pool)
 
@@ -29,9 +29,9 @@ sys.path.insert(0, "src")
 
 import numpy as np
 
-from cxr_config import default_settings, material_sweep
-from cxr_sweep import build_cases
-from cxr_run import run_sweep
+from config import default_settings, material_sweep
+from sweep import build_cases
+from run import run_sweep
 
 
 def main():

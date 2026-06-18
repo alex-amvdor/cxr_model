@@ -7,7 +7,7 @@ in identical units (Phs/eV/s/nA spectra and integrated detector counts):
      including the exact 1/(1 - beta n.v) delta-function Jacobian). The line
      is spread with the detector Gaussian for plotting.
   B. "Zhai" Monte Carlo model: scattered trajectories, finite-segment
-     lineshapes, per-segment escape absorption (cxr_montecarlo).
+     lineshapes, per-segment escape absorption (montecarlo).
 
 Setup: HOPG graphite (002), 25 keV electrons, beam || c-axis, detector at
 theta_obs = 119 deg into 0.066 sr (the Zhai experimental geometry). Compared
@@ -35,14 +35,14 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 )
 
-from cxr_feranchuk_spence import (
+from crystallography import (
     CRYSTALS,
     HBARC_EV_ANG,
-    photons_per_electron,
     absorption_length_ang,
     reciprocal_g_vector,
 )
-from cxr_montecarlo import (
+from feranchuk_spence import photons_per_electron
+from montecarlo import (
     simulate_trajectories,
     mc_spectrum,
     mc_brem_spectrum,

@@ -1,5 +1,5 @@
 """
-cxr_plots.py
+plots.py
 ============
 
 All plotting for the analysis notebook, kept out of the notebook itself.
@@ -24,19 +24,19 @@ Eagle XO detector view (forward model in ``eaglexo_response``)
     soft PXR lines pass at ~90% QE while the hard brem is crushed by the thin
     sensor. Browse per tilt with ``browse(results, settings, kind="eaglexo")``.
 
-Everything takes ``results`` + a :class:`cxr_results.Settings` explicitly.
+Everything takes ``results`` + a :class:`results.Settings` explicitly.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-from cxr_montecarlo import (
+from montecarlo import (
     convolve_detector,
     detector_efficiency,
     simulate_trajectories,
     tilted_geometry,
 )
-from cxr_results import (
+from results import (
     detected_background,
     records,
     best_azimuth,
@@ -113,7 +113,11 @@ def browse(results, settings, kind="by_energy", label="polar tilt", static=None,
     ipympl needed, and it behaves over SSH). ``static=True`` (or no ipywidgets,
     e.g. nbconvert -> PDF) instead draws every tilt stacked so the export holds
     them all. Extra kwargs pass to the per-tilt drawer (include_brem, floor_frac,
-    n_mc)."""
+    n_mc).
+
+    For a faster spectral click-through (``kind`` "by_energy"/"full"), see
+    :func:`browse_plotly` -- WebGL traces with client-side toggling, no redraw per
+    slider move; this matplotlib path remains the one for static/PDF export."""
     # figure sizes kept within an XPS-15 notebook width (~12") so nothing needs
     # horizontal scrolling; single-axis spectra are ~9.5x5.3, the 2-panel chunk
     # is wider but shorter.
@@ -164,15 +168,11 @@ def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
     works reliably on the inline backend and over SSH (ipympl's persistent-figure
     redraw is what tends to get stuck showing one frame).
 
-    TODO (a) -- interactive speed: this redraws a full matplotlib/Agg figure on
-    EVERY slider move (thousands of points x several curves), which is the slow
-    click-through. The fix is a Plotly-based spectral browser: build ONE figure
-    with each tilt/energy as a go.Scattergl (WebGL) trace and toggle visibility
-    from a client-side slider/dropdown -- no Python redraw per click, so paging is
-    instant and 10k+ points stay smooth. Keep this matplotlib path for static /
-    nbconvert-PDF export (where there is no client to run the JS); add a
-    `browse_plotly(...)` alongside it for interactive use. Adds a `plotly`
-    dependency (+ `kaleido` only if you also want Plotly static export)."""
+    This redraws a full matplotlib/Agg figure on EVERY slider move (thousands of
+    points x several curves), so the spectral click-through can lag. For a fast
+    interactive view of the spectra use :func:`browse_plotly` (WebGL, client-side
+    trace toggling -- no Python redraw per click); this matplotlib path stays the
+    one for static / nbconvert-PDF export, where there is no client to run JS."""
     import ipywidgets as widgets
     from IPython.display import display
 
@@ -204,6 +204,151 @@ def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
     display(widgets.HBox([prev, slider, nxt]))
     display(out)
     render(0)
+
+
+def browse_plotly(
+    results,
+    settings,
+    kind="by_energy",
+    *,
+    include_brem=True,
+    collapse_azimuth=True,
+    floor_frac=1e-5,
+):
+    """Fast WebGL spectral browser: ONE Plotly figure holding every (polar tilt,
+    beam energy) curve as a ``Scattergl`` trace, with a client-side tilt slider
+    that just toggles trace visibility -- no Python/matplotlib redraw per click,
+    so paging is instant and 10k-point spectra stay smooth. The interactive
+    counterpart to :func:`browse` for the spectral views; the matplotlib ``browse``
+    stays the path for static / nbconvert-PDF export (no client-side JS there).
+
+    ``kind``: ``"by_energy"`` (intrinsic lines + brem, linear axes) or ``"full"``
+    (sharp lines on the wide brem out to the beam energy, log-log; needs records
+    run with a separate ``E_grid_brem``). Beam energy -> colour matches every other
+    figure. Needs ``plotly`` installed. Returns the figure (Jupyter renders it; call
+    ``.show()`` elsewhere)."""
+    try:
+        import plotly.graph_objects as go
+    except ImportError as e:
+        raise ImportError(
+            "browse_plotly needs plotly (`uv add plotly` / `pip install plotly`); "
+            "use browse(..., kind=...) for the matplotlib path."
+        ) from e
+    if kind not in ("by_energy", "full"):
+        raise ValueError("browse_plotly kind must be 'by_energy' or 'full'")
+
+    recs = records(results)
+    if kind == "full":
+        recs = [r for r in recs if r.get("brem_wide") is not None]
+    if not recs:
+        print(
+            "no results to browse"
+            + (" (need E_grid_brem for kind='full')" if kind == "full" else "")
+        )
+        return None
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    energies = sorted({r["case"]["E0_keV"] for r in recs})
+
+    fig = go.Figure()
+    trace_tilt = []  # parallel to fig.data: which tilt index each trace belongs to
+    tilt_case0 = {}  # first record per tilt (for the per-step title)
+    # global axis extents for the log-log 'full' view (shared across tilt steps so
+    # the axes don't jump while paging); mirrors _draw_full_spectrum's floor logic.
+    ymax, ybrem_lo, xmin, xmax = 0.0, np.inf, np.inf, 0.0
+
+    def _collapse(grp):
+        if collapse_azimuth and len(grp) > 1:
+            return [max(grp, key=lambda r: float(np.max(r["spec"])))]
+        return grp
+
+    for ti, t in enumerate(tilts):
+        trecs = [r for r in recs if r["case"]["tilt_deg"] == t]
+        tilt_case0[ti] = trecs[0]["case"]
+        for E0 in energies:
+            grp = _collapse([r for r in trecs if r["case"]["E0_keV"] == E0])
+            for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
+                col = energy_color(E0, energies)
+                az = r["case"]["tilt_azim_deg"]
+                lbl = f"{E0:g} keV (φ={az:.1f}°)"
+                vis = ti == 0
+                line_det, brem_det = _line_brem(r, settings, convolve=False)
+                if kind == "by_energy":
+                    y = (line_det + brem_det) if include_brem else line_det
+                    fig.add_trace(go.Scattergl(
+                        x=r["E_grid"], y=y * r["scale"], name=lbl, mode="lines",
+                        line=dict(color=col, width=1.5), legendgroup=lbl, visible=vis,
+                    ))
+                    trace_tilt.append(ti)
+                    if include_brem:
+                        fig.add_trace(go.Scattergl(
+                            x=r["E_grid"], y=brem_det * r["scale"], name=lbl + " brem",
+                            mode="lines", line=dict(color=col, width=0.8, dash="dash"),
+                            legendgroup=lbl, showlegend=False, visible=vis,
+                        ))
+                        trace_tilt.append(ti)
+                else:  # full
+                    Eb = np.asarray(r["E_grid_brem"], dtype=float)
+                    qe_b = detector_efficiency(Eb) if settings.apply_detector_qe else 1.0
+                    brem_wide_det = r["brem_wide"] * qe_b * r["scale"]
+                    total_line = (line_det + brem_det) * r["scale"]
+                    fig.add_trace(go.Scattergl(
+                        x=Eb, y=brem_wide_det, name=lbl + " brem", mode="lines",
+                        line=dict(color=col, width=0.8, dash="dash"),
+                        legendgroup=lbl, showlegend=False, visible=vis,
+                    ))
+                    trace_tilt.append(ti)
+                    fig.add_trace(go.Scattergl(
+                        x=r["E_grid"], y=total_line, name=lbl, mode="lines",
+                        line=dict(color=col, width=1.5), legendgroup=lbl, visible=vis,
+                    ))
+                    trace_tilt.append(ti)
+                    xmin = min(xmin, float(Eb[0]))
+                    xmax = max(xmax, float(Eb[-1]))
+                    ymax = max(ymax, float(np.nanmax(total_line)) if total_line.size else 0.0)
+                    ymax = max(ymax, float(np.nanmax(brem_wide_det)) if brem_wide_det.size else 0.0)
+                    bpos = brem_wide_det[np.isfinite(brem_wide_det) & (brem_wide_det > 0)]
+                    if bpos.size:
+                        ybrem_lo = min(ybrem_lo, float(np.percentile(bpos, 1)))
+
+    tag = "best azimuth/energy" if collapse_azimuth else "all azimuths"
+
+    def _title(ti):
+        c = tilt_case0[ti]
+        head = f"{c['name'].split()[0]}, {c['thickness_ang'] / 1e4:.1f} µm, tilt={c['tilt_deg']:g}°"
+        if kind == "by_energy":
+            return f"{head} — intrinsic ({tag})"
+        return f"{head} — full measured range, intrinsic (dashed = brem)"
+
+    steps = [
+        dict(
+            method="update",
+            label=f"{t:g}°",
+            args=[{"visible": [tt == ti for tt in trace_tilt]}, {"title.text": _title(ti)}],
+        )
+        for ti, t in enumerate(tilts)
+    ]
+    fig.update_layout(
+        sliders=[dict(active=0, currentvalue={"prefix": "polar tilt: "}, steps=steps)],
+        title=_title(0),
+        xaxis_title="Photon energy (eV)",
+        yaxis_title="Intensity (Phs/eV/s/nA)",
+        template="plotly_white",
+        height=560,
+        legend=dict(title=("dashed: brem" if include_brem else None)),
+    )
+    if kind == "full":
+        fig.update_xaxes(type="log")
+        fig.update_yaxes(type="log")
+        if xmax > 0:
+            lo = max(xmin, 1.0)  # log x can't show 0 (brem grid -> 0)
+            fig.update_xaxes(range=[np.log10(lo), np.log10(xmax)])
+        if ymax > 0:
+            floor = max(ybrem_lo if np.isfinite(ybrem_lo) else 0.0, ymax * floor_frac)
+            if floor > 0:
+                fig.update_yaxes(range=[np.log10(floor), np.log10(ymax * 2)])
+    else:
+        fig.update_yaxes(rangemode="tozero")
+    return fig
 
 
 # ---- per-tilt figure helper --------------------------------------------------
@@ -1308,7 +1453,7 @@ def plot_trajectory_grid(
 def plot_penetration_profile(
     cases_or_results, *, Ne=500, seed=0, n_bins=40, tilt=None, depth_frac=True,
 ):
-    """TODO #1: mean electron ENERGY vs penetration depth -- the slowing-down /
+    """Mean electron ENERGY vs penetration depth -- the slowing-down /
     penetration profile -- with the mean electron AGE (lifetime, sum L/beta -> fs)
     vs depth alongside, one curve per beam energy.
 
@@ -1392,7 +1537,7 @@ _METRIC_LABELS = {key: label for key, label, _ in _HEATMAP_QUANTITIES}
 
 # Line-characterization maps are meaningless where the line is ill-defined --
 # either near-zero emission OR a broad ramp / a cluster of comparable peaks
-# (low line_quality, see cxr_results.line_quality). Gate these by BOTH peak flux
+# (low line_quality, see results.line_quality). Gate these by BOTH peak flux
 # and line_quality. The always-well-defined maps (peak_flux, coherent_flux,
 # total_flux) and the diagnostic line_quality map itself are never gated.
 _FLUX_GATED = {"line_eV", "fwhm_eV", "line_frac", "line_flux"}
@@ -1455,12 +1600,12 @@ def plot_heatmaps(
         plot_heatmaps(res, s, x="tilt_deg", y="E0_keV", panel="tilt_azim_deg")
 
     When the sweep varies dimensions OTHER than x/y/panel, several records land in
-    one cell; ``select`` (a cxr_results.selection_score mode, default
+    one cell; ``select`` (a results.selection_score mode, default
     "quality_peak" = peak flux x line quality) picks the BEST record and the cell
     shows ITS metric -- i.e. "the best achievable here". For the default axes each
     cell is a single case, so the reduction is a no-op (matches the old maps).
 
-    Quantities (see cxr_results.line_metrics): peak spectral flux, the integrated
+    Quantities (see results.line_metrics): peak spectral flux, the integrated
     coherent flux of ALL lines, the integrated flux under the single dominant
     line, that line's energy and FWHM, its share of the total flux, a
     line-definition quality map, and the total integrated flux. Maps that need NO
@@ -1558,7 +1703,7 @@ def plot_metric_vs(
 ):
     """1-D parameter scan: ``metric`` vs the swept parameter ``x``, one line per
     ``hue`` value, reducing every OTHER swept dimension to its best geometry
-    (cxr_results.selection_score ``select``). The line-plot companion to the
+    (results.selection_score ``select``). The line-plot companion to the
     heatmaps -- e.g. line flux vs thickness, or peak flux vs beam energy::
 
         plot_metric_vs(res, s, x="thickness_ang", metric="line_flux", logx=True)
@@ -1624,7 +1769,7 @@ def plot_best_spectra(
     line_metric="sharpness",
 ):
     """The top-``top_n`` geometries across the WHOLE sweep, ranked by
-    cxr_results.selection_score(``select``) -- one intrinsic spectrum panel each,
+    results.selection_score(``select``) -- one intrinsic spectrum panel each,
     titled with the geometry, the score components, and the line quality. The
     answer to "thousands of cases, which few do I look at": instead of paging
     every polar tilt, see the best dozen at a glance. ``select`` defaults to
@@ -1689,7 +1834,7 @@ def plot_material_comparison(
     line_metric="sharpness",
 ):
     """Cross-material headline: for each material's results store, find the single
-    BEST geometry/energy (cxr_results.selection_score ``select``) and plot its
+    BEST geometry/energy (results.selection_score ``select``) and plot its
     dominant coherent line ENERGY vs its integrated line FLUX -- one point per
     material, coloured by line-definition quality. Answers "which crystal gives
     the brightest well-defined line, and at what energy" for comparison against

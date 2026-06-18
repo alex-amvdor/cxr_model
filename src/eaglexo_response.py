@@ -3,7 +3,7 @@ eaglexo_response.py
 ===================
 
 Forward model of a Raptor Photonics **Eagle XO** camera *recording* an incident
-X-ray spectrum. Everything upstream (cxr_montecarlo / cxr_feranchuk_spence)
+X-ray spectrum. Everything upstream (montecarlo / crystallography)
 predicts the photons that LEAVE the sample; this module predicts what the Eagle
 XO collects, which is set -- as the datasheet makes plain and unlike the
 Timepix3 quad -- by just two things:
@@ -27,10 +27,10 @@ rectangular sensor of full size (w, h) at distance d,
     Omega = 4 * arctan( (w/2)(h/2) / (d * sqrt((w/2)^2 + (h/2)^2 + d^2)) ),
 which reduces to the familiar A/d^2 when the sensor is small vs the distance.
 :func:`geometry` packages this with the polar-angle span dtheta_obs (used by the
-line-broadening model in cxr_montecarlo.aperture_fwhm_eV) for either sensor
-variant, ready to splat into a ``cxr_sweep.Sweep``. The flux scaling itself is
+line-broadening model in montecarlo.aperture_fwhm_eV) for either sensor
+variant, ready to splat into a ``sweep.Sweep``. The flux scaling itself is
 applied UPSTREAM via ``case['domega_sr']`` -> ``r['scale']`` (see
-cxr_results.store_result), exactly as for the Timepix; this module only needs to
+results.store_result), exactly as for the Timepix; this module only needs to
 supply the number.
 
 **Quantum efficiency** -- :func:`qe` returns QE(E) for the chosen sensor
@@ -87,7 +87,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cxr_feranchuk_spence import absorption_length_ang
+from crystallography import absorption_length_ang
 
 # ---- silicon sensor physics (fixed material constants) -----------------------
 W_EHP_EV = 3.65  # mean energy to make one electron-hole pair [eV]
@@ -174,7 +174,7 @@ def geometry(sensor=DEFAULT_SENSOR, distance_m=None):
 
 
 def sweep_geometry(sensor=DEFAULT_SENSOR, distance_m=None):
-    """Just the two ``cxr_sweep.Sweep`` geometry overrides for this camera, ready
+    """Just the two ``sweep.Sweep`` geometry overrides for this camera, ready
     to splat -- this is how you point a sweep at the Eagle XO solid angle instead
     of the default Timepix quad::
 
@@ -315,7 +315,7 @@ class EagleResponse:
             )
         det = spec * self.qe
         if self.resolve_energy:
-            from cxr_montecarlo import convolve_detector
+            from montecarlo import convolve_detector
 
             dE = self.E[1] - self.E[0]
             fwhm = float(np.median(energy_fwhm_eV(self.E, self.n_pix)))

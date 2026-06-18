@@ -1,9 +1,9 @@
 """
-cxr_sweep.py
+sweep.py
 ============
 
 Define a parameter sweep and expand it into the per-case dicts that
-``cxr_montecarlo.run_case`` consumes.
+``montecarlo.run_case`` consumes.
 
 The driver notebook sets ONE :class:`Sweep`. Every physical parameter accepts
 **either a single value (fixed) or a sequence/array (swept)**; :func:`build_cases`
@@ -16,7 +16,7 @@ are both valid and need no other code changes.
 
 Crystallography (composition, dominant reflections, zone axis, B-factor, default
 energy grid) is looked up per material; the detector geometry defaults to the
-2x2 Timepix3 quad. Only ``cxr_feranchuk_spence`` is imported here (no GPU), so
+2x2 Timepix3 quad. Only ``crystallography`` is imported here (no GPU), so
 this module is cheap to import and test.
 """
 
@@ -26,7 +26,7 @@ from typing import Optional, Sequence, Union
 
 import numpy as np
 
-from cxr_feranchuk_spence import CRYSTALS, dominant_reflections
+from crystallography import CRYSTALS, dominant_reflections
 
 # ---- Timepix3 quad geometry (fixed hardware) --------------------------------
 TIMEPIX3_PIXEL_PITCH_M = 55e-6
@@ -95,7 +95,7 @@ def crystal_params(material, n_families=4):
         )
     if material == "wse2":
         # isostructural with MoSe2; W has no NIST Mott table so transport falls
-        # back to analytic screened-Rutherford screening for W (see cxr_montecarlo).
+        # back to analytic screened-Rutherford screening for W (see montecarlo).
         return dict(
             crystal="wse2",
             composition=[("W", n_of("wse2", "W")), ("Se", n_of("wse2", "Se"))],

@@ -16,6 +16,7 @@ dependencies = [
     "numpy>=2.4.6",
     "pandas>=3.0.3",
     "pandoc>=2.4",
+    "plotly>=6.0",
     "scipy>=1.17.1",
     "tabulate>=0.10.0",
     "tqdm>=4.68.2",

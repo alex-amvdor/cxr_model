@@ -1,5 +1,5 @@
 """
-cxr_results.py
+results.py
 ==============
 
 Turn finished Monte-Carlo cases into the ``results`` store, reduce an azimuth
@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, peak_widths
 
-from cxr_montecarlo import (
+from montecarlo import (
     beta_from_keV,
     eds_fwhm_eV,
     aperture_fwhm_eV,
@@ -32,7 +32,7 @@ from cxr_montecarlo import (
     detector_efficiency,
     load_external_brem,
 )
-from cxr_sweep import fmt_thickness, MATERIAL_LABELS
+from sweep import fmt_thickness, MATERIAL_LABELS
 
 PER_NA = 6.2415e9  # electrons/s at 1 nA
 
@@ -423,7 +423,7 @@ def top_geometries(
 ):
     """A compact, ranked table of the BEST geometries across a results store --
     the readable alternative to dumping every (tilt, azimuth, energy) row. Ranks
-    by cxr_results.selection_score(``select``) and returns the top ``top_n`` as a
+    by results.selection_score(``select``) and returns the top ``top_n`` as a
     best-first DataFrame: material, polar/azimuth tilt, beam energy, dominant line
     energy, line-definition quality, peak spectral flux, integrated coherent flux,
     and the dominant line's share of the total. ``names`` restricts to those

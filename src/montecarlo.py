@@ -1,5 +1,5 @@
 """
-cxr_montecarlo.py
+montecarlo.py
 
 Monte Carlo CXR (PXR + CBS) from scattered electrons in thick crystals,
 following Zhai et al., Nat. Commun. 16, 11218 (2025), SI Sections S1-S5:
@@ -18,7 +18,7 @@ following Zhai et al., Nat. Commun. 16, 11218 (2025), SI Sections S1-S5:
      across reciprocal vectors within a segment) with the finite-interaction-
      time factor |Q|^2 = t_L^2 sinc^2(P t_L), P = [w - v.(k+g)]/2, replacing
      the absorption-limited delta-function limit of Feranchuk Eq. (9).
-     Amplitudes are the same Eqs. (13)/(14) as cxr_feranchuk_spence, with
+     Amplitudes are the same Eqs. (13)/(14) as checks/feranchuk_spence.py, with
      arbitrary segment velocity direction.
   3. Self-absorption (SI S5): Beer-Lambert along the observation direction
      from each segment midpoint (slab geometry).
@@ -63,7 +63,7 @@ except ImportError:
 # fallback, where fp32 buys no speed, always stays double.
 REAL = xp.float32 if (_GPU and os.environ.get("CXR_FP64") != "1") else xp.float64
 
-from cxr_feranchuk_spence import (
+from crystallography import (
     ALPHA_FS,
     HBARC_EV_ANG,
     M_E_EV,
@@ -262,7 +262,7 @@ def _dEds_compound(comp, E_keV):
 def _mu_total_inv_ang(comp, E_eV):
     """Total linear attenuation 1/L_abs [1/Angstrom] summed over elements.
 
-    absorption_length_ang (from cxr_feranchuk_spence) is CPU-only, so the sum
+    absorption_length_ang (from crystallography) is CPU-only, so the sum
     is always computed on the CPU. The result is returned on the SAME device as
     E_eV: a GPU array if the caller passed one (mc_spectrum, mixing it with
     on-device factors), a numpy array otherwise (detector_efficiency, whose

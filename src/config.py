@@ -1,11 +1,11 @@
 """
-cxr_config.py
+config.py
 =============
 
 Shared run configuration for the CXR pipeline, imported by BOTH notebooks so the
-scan-runner (``cxr_scan.ipynb``) and the visualization driver
-(``cxr_analysis.ipynb``) can never drift apart: they build the SAME
-:class:`cxr_results.Settings` and the SAME per-material :class:`cxr_sweep.Sweep`,
+scan-runner (``scan.ipynb``) and the visualization driver
+(``analysis.ipynb``) can never drift apart: they build the SAME
+:class:`results.Settings` and the SAME per-material :class:`sweep.Sweep`,
 so the viz notebook is guaranteed to be looking at the checkpoint the runner
 wrote. Edit a material's grid (or the detector/analysis knobs) here ONCE and both
 notebooks pick it up.
@@ -20,8 +20,8 @@ notebooks pick it up.
 
 import numpy as np
 
-from cxr_sweep import Sweep
-from cxr_results import Settings
+from sweep import Sweep
+from results import Settings
 
 # When the azimuth is swept, collapse it: for each (polar tilt, energy) keep only
 # the azimuth with the highest spectral peak. False -> show every azimuth.
@@ -48,7 +48,7 @@ def default_settings():
 # ---- per-material parametric scan grids --------------------------------------
 # Each entry is the geometry + energy grids for one material's full sweep. Keep
 # the line grid fine + narrow (the expensive coherent lines top out at a few keV)
-# and the brem grid coarse + WIDE (out to the beam energy) -- see cxr_sweep.
+# and the brem grid coarse + WIDE (out to the beam energy) -- see sweep.
 _MATERIAL_GRIDS = {
     "hopg": dict(
         thickness_ang=17e4,
@@ -143,7 +143,7 @@ def material_grid(material):
 
 
 def material_sweep(material, *, theta_obs_deg=90.0, **overrides):
-    """The full parametric :class:`cxr_sweep.Sweep` for ``material`` (the geometry
+    """The full parametric :class:`sweep.Sweep` for ``material`` (the geometry
     the runner scans and the viz notebook reduces). ``overrides`` replace any grid
     field, e.g. ``material_sweep("ptse2", thickness_ang=2e4)``."""
     p = dict(material_grid(material))

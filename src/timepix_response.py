@@ -3,7 +3,7 @@ timepix_response.py
 ===================
 
 Forward model of a 2x2 Timepix3 quad (silicon sensor) *recording* an incident
-X-ray spectrum. Everything upstream (cxr_montecarlo / cxr_feranchuk_spence)
+X-ray spectrum. Everything upstream (montecarlo / crystallography)
 predicts the photons that LEAVE the sample and reach the detector solid angle;
 this module predicts what the detector actually COUNTS, which is a very
 different spectrum once the threshold, charge sharing, and energy noise are in.
@@ -19,7 +19,7 @@ The per-photon chain
   1. Photoabsorption     The photon is absorbed with probability
                          eps_abs(E) = 1 - exp(-t / L_abs(E)), t = sensor
                          thickness, L_abs from Henke f2 (we reuse
-                         cxr_feranchuk_spence.absorption_length_ang). Photons
+                         crystallography.absorption_length_ang). Photons
                          that pass through deposit nothing and are never counted.
   2. Charge generation   An absorbed photon makes N = E / W electron-hole pairs
                          (W = 3.65 eV in Si), with Fano broadening
@@ -85,7 +85,7 @@ quoted front-end figures convert as:
 import numpy as np
 from scipy.special import erf
 
-from cxr_feranchuk_spence import absorption_length_ang
+from crystallography import absorption_length_ang
 
 # ---- silicon sensor physics (fixed material constants) -----------------------
 W_EHP_EV = 3.65  # mean energy to make one electron-hole pair [eV]

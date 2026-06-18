@@ -90,11 +90,11 @@ notebooks are stripped by `nbstripout` via `.gitattributes`).
 ### Layout
 
 ```
-cxr_scan.ipynb         RUNNER: pick MATERIAL -> Sweep -> run_sweep -> checkpoints/<material>.pkl
-cxr_analysis.ipynb     VIZ: load that checkpoint -> all figures (no sweep runs here)
-scan.py                headless twin of cxr_scan.ipynb (guarded; run a sweep non-interactively)
+scan.ipynb         RUNNER: pick MATERIAL -> Sweep -> run_sweep -> checkpoints/<material>.pkl
+analysis.ipynb     VIZ: load that checkpoint -> all figures (no sweep runs here)
+scan.py                headless twin of scan.ipynb (guarded; run a sweep non-interactively)
 remote.py              orchestrator: run scan.py on the GPU box over ssh, pull the checkpoint back
-export_pdf.py          headless cxr_analysis.ipynb -> PDF export (run locally)
+export_pdf.py          headless analysis.ipynb -> PDF export (run locally)
 src/                   all importable modules (both notebooks do sys.path.insert(0,"src"))
 data/                  crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
 checks/                validation scripts + check notebooks (Feranchuk anchor, Fig 1c, kinematic audit)
@@ -107,13 +107,17 @@ so imports work from any cwd. `*.pkl` checkpoints and `*.png` are gitignored.
 
 ### Module responsibilities (`src/`)
 
-- **`cxr_feranchuk_spence.py`** — analytic core. Crystal DB loader (`CRYSTALS`
-  from TOML), `reciprocal_g_vector`, `structure_factor`/`chi_g`/`U_g`,
-  `debye_waller`, `absorption_length_ang`, the PXR+CBS amplitudes
-  (`amplitudes_PXR_CBS_both`, Feranchuk Eqs. 13/14 with relativistic braced CBS),
-  `cxr_lines_fixed`, and `dominant_reflections(material, n_families, B_ang2)`
-  (ranks reflections by |S|·e^(−W)/g², Zhai Table 5 methodology). No GPU.
-- **`cxr_montecarlo.py`** — the transport+radiation pipeline. CASINO-style
+- **`crystallography.py`** — general X-ray/crystallography primitives shared by
+  the pipeline (no Feranchuk specifics). Crystal DB loader (`CRYSTALS` from TOML),
+  `reciprocal_g_vector`, `structure_factor`/`chi_g`/`U_g`, `debye_waller`,
+  `absorption_length_ang`, `_rotation_between`, and
+  `dominant_reflections(material, n_families, B_ang2)` (ranks reflections by
+  |S|·e^(−W)/g², Zhai Table 5 methodology) — plus the physical constants. No GPU.
+  (The Feranchuk-Spence analytic amplitudes — `amplitudes_PXR_CBS_both` with
+  Eqs. 13/14, `cxr_lines_fixed`, `omega_n`, `delta_g`, flux helpers — now live in
+  `checks/feranchuk_spence.py`, a validation reference, not the results pipeline;
+  it imports its crystallography primitives from here.)
+- **`montecarlo.py`** — the transport+radiation pipeline. CASINO-style
   single-scattering MC (`simulate_trajectories` — also returns per-segment age
   `t_ang` = Σ L/β and `elec_id`, used by the penetration plots), per-segment
   spectrum (`mc_spectrum`), Born+Elwert brem (`mc_brem_spectrum`), detector
@@ -121,18 +125,18 @@ so imports work from any cwd. `*.pkl` checkpoints and `*.png` are gitignored.
   `detector_efficiency`), `tilted_geometry`, and the parallel drivers
   `run_case`/`run_cases`. **Optional CuPy GPU** (`xp = cp` if importable; prints
   "Using GPU"); spectra use fp32 on-device.
-- **`cxr_sweep.py`** — `Sweep` dataclass + `build_cases`. Every physical knob is
+- **`sweep.py`** — `Sweep` dataclass + `build_cases`. Every physical knob is
   scalar (fixed) or sequence (swept); cases = Cartesian product. Cheap to import.
-- **`cxr_config.py`** — shared run config imported by BOTH notebooks so they can't
+- **`config.py`** — shared run config imported by BOTH notebooks so they can't
   drift: `default_settings()`, the per-material sweep grids, and the builders
   `material_sweep(mat)` (full scan) / `trajectory_sweep(mat)` (penetration figures).
-- **`cxr_run.py`** — `run_sweep(...)`: checkpointed, streaming driver around
+- **`run.py`** — `run_sweep(...)`: checkpointed, streaming driver around
   `run_cases`. Resumes per material from `checkpoints/<material>.pkl` (skips
   cached cases), re-pickles at config granularity (crash-safe), fires `on_chunk`
   once a whole group (same material/thickness/tilt = full azimuth sweep) finishes.
   `load_checkpoint(material)` + `cases_from_results(results)` let the viz notebook
   load results (and rebuild the case list) without re-running.
-- **`cxr_results.py`** — `Settings` dataclass, `store_result` (case → `results`
+- **`results.py`** — `Settings` dataclass, `store_result` (case → `results`
   record), `best_azimuth` (collapse an azimuth sweep to the highest-**peak**
   spectrum), `show_summary` (full per-row table). Per-record scalar metrics for
   the maps/selection live in `line_metrics`: `peak_flux` (max coherent density,
@@ -143,7 +147,7 @@ so imports work from any cwd. `*.pkl` checkpoints and `*.png` are gitignored.
   `selection_score(m, mode)` ranks records (`quality_peak` default = bright AND
   clean) for every "best geometry" path; `top_geometries`/`show_top` print a
   compact ranked top-N table (the readable alternative to the full dump).
-- **`cxr_plots.py`** — all plotting. `browse(results, settings, kind=...)` pages
+- **`plots.py`** — all plotting. `browse(results, settings, kind=...)` pages
   one figure per polar tilt (inline backend, or `%matplotlib widget`/ipympl);
   kinds: `chunk`|`by_energy`|`full` (intrinsic spectra) and `eaglexo`|`timepix`
   (detector). `plot_heatmaps(..., x=, y=, panel=, select=)` is GENERAL — any two
@@ -170,13 +174,13 @@ and `Settings` explicitly — no module globals.
 
 ### Running
 
-Two notebooks sharing the per-material grids in `cxr_config.py` (edit a material's
+Two notebooks sharing the per-material grids in `config.py` (edit a material's
 thickness / energies / tilts / E-grids there; both notebooks pick it up):
 
-1. **`cxr_scan.ipynb`** (runner): pick `MATERIAL` → `material_sweep(MATERIAL)` →
+1. **`scan.ipynb`** (runner): pick `MATERIAL` → `material_sweep(MATERIAL)` →
    `build_cases` → `run_sweep` → writes `checkpoints/<material>.pkl` (streams the
    per-tilt stats tables live).
-2. **`cxr_analysis.ipynb`** (viz): same `MATERIAL` → `load_checkpoint` →
+2. **`analysis.ipynb`** (viz): same `MATERIAL` → `load_checkpoint` →
    `cases_from_results` → `browse` / heatmap / Eagle XO / penetration figures. No
    sweep runs here (only the cheap, CPU-only electron transport behind the
    penetration figures).
@@ -193,7 +197,7 @@ python remote.py scan mose2 --quick   # tiny grid smoke test (isolated <material
 python remote.py pull mose2           # just fetch an existing checkpoint
 ```
 
-then open `cxr_analysis.ipynb` (same `MATERIAL`) or `export_pdf.py` locally. The
+then open `analysis.ipynb` (same `MATERIAL`) or `export_pdf.py` locally. The
 box is ssh host `qlmc` (`~/.ssh/config`, cloudflared proxy); override with
 `CXR_REMOTE_{HOST,DIR,UV}`. `scan.py <material> [--quick] [--workers N]` is the
 guarded headless runner `remote.py` invokes (also runnable directly on the box).
@@ -241,10 +245,9 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
 - **`apply_detector_qe` defaults False**: the intrinsic spectra (`spec`) are now
   shown un-filtered. The Timepix3 / Eagle XO views apply their OWN QE downstream;
   the legacy SDD polymer-window QE (`detector_efficiency`) is opt-in only.
-- **`remote.py` line endings**: its tar-sync ships the laptop's CRLF files to the
-  Linux box, so `git status` there shows synced `.py` as modified (LF vs CRLF,
-  content identical) — harmless for running, but `git checkout -- .` on the box
-  before any `git pull`. See TODO (b) in `remote.py` for the git-based fix.
+- **`remote.py` line endings**: the tar-sync now normalizes CRLF→LF for text files
+  (`_add_to_tar`), so the box receives LF-clean content and `git status` there
+  stays clean — a later `git pull` is no longer blocked by cosmetic diffs.
 - **GPU ⇒ serial**: with CuPy present, `run_cases` runs serially (one CUDA
   context), not in a process pool. Multiprocessing speedups only apply CPU-side.
 - **Workers**: machine is an i7-13620H — 10 physical cores / 16 threads. Cap
@@ -262,8 +265,9 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
   known ~×2 source of disagreement vs the paper's normalization.
 - **Brem grid**: `E_grid_line` is fine+narrow (lines cap at a few keV, expensive
   sinc²); `E_grid_brem` is coarse+wide (cheap, extend to the beam energy). It
-  starts at 0 eV, so `absorption_length_ang` is called at E=0 → a benign
-  "divide by zero" RuntimeWarning (handled by `nan_to_num`); see TODO (c) there.
+  starts at 0 eV, so `absorption_length_ang` is called at E=0 (L_abs→∞, μ→0,
+  swallowed by `nan_to_num`); the now-benign "divide by zero" RuntimeWarning is
+  suppressed in-function via `np.errstate`, values unchanged.
 - **Trajectory colouring (datashader)**: aggregate tracks with `cvs.line(...,
   line_width=0)` so each pixel takes the true electron energy, then `tf.spread` to
   thicken. `line_width>0` coverage-weights the aggregated value and paints a bogus
@@ -274,6 +278,10 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
 
 ### Validation (`checks/`)
 
+- `feranchuk_spence.py` — the Feranchuk-Spence analytic core (PXR+CBS amplitudes,
+  `cxr_lines_fixed`, flux helpers). A reference, NOT in the results pipeline; it
+  imports the general primitives from `src/crystallography.py` (run checks with
+  `src/` on `sys.path`).
 - `feranchuk_check_script.py` — LiF analytic anchor.
 - `feranchuk_vs_zhai_check.py` — analytic vs MC pipeline agreement (film flux
   ratio → 1.00 after the δ-function Jacobian fix).

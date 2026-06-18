@@ -45,7 +45,7 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 )
 
-from cxr_feranchuk_spence import (
+from crystallography import (
     CRYSTALS,
     Z_TABLE,
     HBARC_EV_ANG,
@@ -55,7 +55,7 @@ from cxr_feranchuk_spence import (
     absorption_length_ang,
     reciprocal_g_vector,
 )
-from cxr_montecarlo import beta_from_keV, _sigma_browning_cm2
+from montecarlo import beta_from_keV, _sigma_browning_cm2
 
 THETA_OBS = np.deg2rad(119.0)
 CASES = [

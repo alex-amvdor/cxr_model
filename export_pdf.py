@@ -1,8 +1,8 @@
-"""Export cxr_analysis.ipynb to results/<material>_cxr_<date>.pdf via webpdf.
+"""Export analysis.ipynb to results/<material>_cxr_<date>.pdf via webpdf.
 
 The output is named after the ACTIVE Sweep's material (commented-out example
 sweeps in the parameters cell are skipped) plus today's date, so successive
-exports are self-describing instead of all landing on cxr_analysis.pdf. Pass an
+exports are self-describing instead of all landing on analysis.pdf. Pass an
 explicit stem to override:  python export_pdf.py my_custom_name
 """
 
@@ -12,7 +12,7 @@ import json
 import re
 import datetime
 
-NOTEBOOK = "cxr_analysis.ipynb"
+NOTEBOOK = "analysis.ipynb"
 
 
 def _material(nb_path):

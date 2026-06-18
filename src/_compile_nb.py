@@ -7,8 +7,8 @@ import os
 import sys
 
 nbs = [
-    "cxr_scan.ipynb",
-    "cxr_analysis.ipynb",
+    "scan.ipynb",
+    "analysis.ipynb",
     os.path.join("checks", "cxr_analysis_feranchuk.ipynb"),
     os.path.join("checks", "zhai_fig1c_check.ipynb"),
 ]

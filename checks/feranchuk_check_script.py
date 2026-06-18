@@ -14,15 +14,17 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
 )
 
-from cxr_feranchuk_spence import (
+from crystallography import (
     CRYSTALS,
     Z_TABLE,
-    amplitudes_PXR_CBS,
     beta_from_Ee,
     chi_g,
+    absorption_length_ang,
+)
+from feranchuk_spence import (
+    amplitudes_PXR_CBS,
     delta_g,
     flux_per_second,
-    absorption_length_ang,
 )
 
 for el in ("Li", "F"):

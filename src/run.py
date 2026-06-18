@@ -1,8 +1,8 @@
 """
-cxr_run.py
+run.py
 ==========
 
-Drive a sweep through ``cxr_montecarlo.run_cases`` with on-disk checkpointing
+Drive a sweep through ``montecarlo.run_cases`` with on-disk checkpointing
 and per-group streaming feedback.
 
 :func:`run_sweep` resumes from a per-material checkpoint
@@ -13,13 +13,13 @@ whole **group**
 has finished. By default a group is everything that shares
 (material, thickness, polar tilt) -- i.e. the full azimuth sweep at one tilt --
 so the streamed plot/table waits until every azimuth is in and can collapse to
-the best azimuth per energy (see cxr_plots.stream_chunk).
+the best azimuth per energy (see plots.stream_chunk).
 
 run_cases shows a tqdm bar over completed cases; it renders once at the top of
 the cell, so as streamed plots/tables pile up below it scrolls out of view --
 hence the explicit "tilt N/M" progress line printed with each chunk here, which
 stays next to the latest output. With a GPU present the run is serial (one CUDA
-context); see cxr_montecarlo.run_cases.
+context); see montecarlo.run_cases.
 """
 
 import os
@@ -27,8 +27,8 @@ import pickle
 import time
 from collections import defaultdict
 
-from cxr_montecarlo import run_cases
-from cxr_results import store_result
+from montecarlo import run_cases
+from results import store_result
 
 
 def checkpoint_path_for(material, checkpoint_dir="checkpoints"):
@@ -39,16 +39,16 @@ def checkpoint_path_for(material, checkpoint_dir="checkpoints"):
 def load_checkpoint(material, checkpoint_dir="checkpoints"):
     """Load a per-material results checkpoint (``checkpoints/<material>.pkl``)
     written by :func:`run_sweep`, WITHOUT re-running anything -- this is how the
-    visualization notebook (cxr_analysis.ipynb) gets its ``results`` after the
-    scan-runner notebook (cxr_scan.ipynb) has produced them. Returns the
+    visualization notebook (analysis.ipynb) gets its ``results`` after the
+    scan-runner notebook (scan.ipynb) has produced them. Returns the
     ``{name: {E0: record}}`` store (empty dict if the checkpoint is missing).
 
     Reconstruct the sweep's case list straight from it with
-    ``cases = [r["case"] for r in cxr_results.records(results)]`` -- the records
+    ``cases = [r["case"] for r in results.records(results)]`` -- the records
     carry their own cases, so the viz notebook needs no Sweep to filter/plot."""
     path = checkpoint_path_for(material, checkpoint_dir)
     if not os.path.exists(path):
-        print(f"no checkpoint at {path} -- run cxr_scan.ipynb for {material!r} first")
+        print(f"no checkpoint at {path} -- run scan.ipynb for {material!r} first")
         return {}
     with open(path, "rb") as f:
         results = pickle.load(f)
@@ -83,7 +83,7 @@ def run_sweep(
 ):
     """Run ``cases`` into ``results`` (mutated in place).
 
-    cases : list of case dicts from cxr_sweep.build_cases.
+    cases : list of case dicts from sweep.build_cases.
     results : the dict to fill ({name: {E0: record}}).
     checkpoint_dir : directory for the per-material checkpoints. A sweep is
         single-material, so each writes ``<checkpoint_dir>/<material>.pkl``
@@ -220,7 +220,7 @@ def repair_brem_wide(
     the checkpoint afterwards (or use :func:`repair_checkpoint`).
     """
     import numpy as np
-    from cxr_montecarlo import (
+    from montecarlo import (
         simulate_trajectories,
         mc_brem_spectrum,
         tilted_geometry,
