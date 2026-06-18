@@ -46,10 +46,17 @@ import numpy as np
 try:
     import cupy as cp
 
+    # cupy-cuda* imports cleanly even with no usable CUDA runtime (e.g. on the
+    # viz laptop, which has the wheel but no GPU/driver). Importing is therefore
+    # NOT proof the GPU path works -- a later cp.float32 / kernel call would blow
+    # up with AttributeError or a CUDARuntimeError. Probe for a real device and
+    # fall back to CPU on ANY failure, so the laptop runs the notebook on numpy.
+    if cp.cuda.runtime.getDeviceCount() < 1:
+        raise RuntimeError("no CUDA device")
     _GPU = True
     xp = cp
     print("Using GPU")
-except ImportError:
+except Exception:
     _GPU = False
     xp = np
     print("No GPU found, or cupy not installed!\nFalling back to CPU execution.")
