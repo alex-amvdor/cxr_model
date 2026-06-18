@@ -16,6 +16,7 @@ for each fixed (material, thickness, polar tilt, energy) it keeps only the
 azimuth whose spectrum has the highest PEAK value ``max(spectrum)`` (not the
 integrated flux), collapsing hundreds of azimuth runs to one row/curve each.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -65,7 +66,7 @@ def store_result(results, case, out):
         spec=out["spec"],
         brem=out["brem"],
         E_grid_brem=out.get("E_grid_brem"),  # wide coarse grid (full range)
-        brem_wide=out.get("brem_wide"),      # bremsstrahlung out to the beam energy
+        brem_wide=out.get("brem_wide"),  # bremsstrahlung out to the beam energy
         E_pk=E_pk,
         fwhm=fwhm,
         eta=out["eta"],
@@ -79,7 +80,9 @@ def detected_background(r, settings, convolve=None):
     honoring the brem source + QE flags in ``settings``. ``convolve`` overrides
     settings.convolve_with_det when given (True/False) -- lets a caller draw the
     intrinsic and detector-convolved background side by side."""
-    do_conv = getattr(settings, "convolve_with_det", False) if convolve is None else convolve
+    do_conv = (
+        getattr(settings, "convolve_with_det", False) if convolve is None else convolve
+    )
     E = r["E_grid"]
     if settings.brem_source == "none":
         return np.zeros_like(E)
@@ -189,7 +192,9 @@ def summary_table(recs, settings):
                 "Ee [keV]": c["E0_keV"],
                 "line [eV]": r["E_grid"][i_pk],
                 "peak [Phs/eV/s]": line_det[i_pk] * r["scale"] * cur,
-                "peak/bg": (line_det[i_pk] / brem_det[i_pk]) if brem_det[i_pk] else np.inf,
+                "peak/bg": (line_det[i_pk] / brem_det[i_pk])
+                if brem_det[i_pk]
+                else np.inf,
                 "line [cts/s]": line_cts,
                 "brem [cts/s]": brem_cts,
                 "total [cts/s]": line_cts + brem_cts,

@@ -1,0 +1,21 @@
+[project]
+name = "cxr-model"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "cupy-cuda13x>=14.1.1",
+    "datashader>=0.19.1",
+    "ipykernel>=7.3.0",
+    "ipympl>=0.10.0",
+    "jupyter-core>=5.9.1",
+    "matplotlib>=3.11.0",
+    "nbconvert>=7.17.1",
+    "nbstripout>=0.9.1",
+    "numpy>=2.4.6",
+    "pandas>=3.0.3",
+    "pandoc>=2.4",
+    "scipy>=1.17.1",
+    "tqdm>=4.68.2",
+]
