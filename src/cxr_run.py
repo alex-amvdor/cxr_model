@@ -31,6 +31,39 @@ from cxr_montecarlo import run_cases
 from cxr_results import store_result
 
 
+def checkpoint_path_for(material, checkpoint_dir="checkpoints"):
+    """Path to the per-material results checkpoint run_sweep writes."""
+    return os.path.join(checkpoint_dir, f"{material}.pkl")
+
+
+def load_checkpoint(material, checkpoint_dir="checkpoints"):
+    """Load a per-material results checkpoint (``checkpoints/<material>.pkl``)
+    written by :func:`run_sweep`, WITHOUT re-running anything -- this is how the
+    visualization notebook (cxr_analysis.ipynb) gets its ``results`` after the
+    scan-runner notebook (cxr_scan.ipynb) has produced them. Returns the
+    ``{name: {E0: record}}`` store (empty dict if the checkpoint is missing).
+
+    Reconstruct the sweep's case list straight from it with
+    ``cases = [r["case"] for r in cxr_results.records(results)]`` -- the records
+    carry their own cases, so the viz notebook needs no Sweep to filter/plot."""
+    path = checkpoint_path_for(material, checkpoint_dir)
+    if not os.path.exists(path):
+        print(f"no checkpoint at {path} -- run cxr_scan.ipynb for {material!r} first")
+        return {}
+    with open(path, "rb") as f:
+        results = pickle.load(f)
+    n = sum(len(v) for v in results.values())
+    print(f"loaded {n} {material} records from {path}")
+    return results
+
+
+def cases_from_results(results):
+    """The flat case list backing a loaded ``results`` store (each record carries
+    its own ``case``) -- pass to filter_results / plot_heatmaps / the trajectory
+    grid so the viz notebook never has to rebuild the Sweep."""
+    return [rec["case"] for recs in results.values() for rec in recs.values()]
+
+
 def _default_group_key(case):
     """Everything but the azimuth (and energy): the azimuth sweep at one tilt."""
     return (case["crystal"], case["thickness_ang"], case["tilt_deg"])
@@ -90,24 +123,6 @@ def run_sweep(
         subset = {n: results[n] for n in results if _crystal_of(results[n]) == material}
         with open(checkpoint_path, "wb") as f:
             pickle.dump(subset, f)
-
-    # one-time migration: seed a missing per-material pickle from the old single
-    # combined checkpoint (subset to this material), so an in-progress run's cache
-    # survives the switch to per-material files.
-    legacy = "cxr_run_checkpoint.pkl"
-    if resume and not os.path.exists(checkpoint_path) and os.path.exists(legacy):
-        try:
-            with open(legacy, "rb") as f:
-                old = pickle.load(f)
-            sub = {n: v for n, v in old.items() if _crystal_of(v) == material}
-            if sub:
-                with open(checkpoint_path, "wb") as f:
-                    pickle.dump(sub, f)
-                print(
-                    f"migrated {len(sub)} {material} configs from {legacy} -> {checkpoint_path}"
-                )
-        except Exception as e:  # corrupt/locked legacy pickle -> just skip it
-            print(f"(legacy checkpoint migration skipped: {e})")
 
     if resume and os.path.exists(checkpoint_path):
         with open(checkpoint_path, "rb") as f:

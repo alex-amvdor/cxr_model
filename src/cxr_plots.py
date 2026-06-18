@@ -93,12 +93,15 @@ def browse(results, settings, kind="by_energy", label="polar tilt", static=None,
     e.g. nbconvert -> PDF) instead draws every tilt stacked so the export holds
     them all. Extra kwargs pass to the per-tilt drawer (include_brem, floor_frac,
     n_mc)."""
+    # figure sizes kept within an XPS-15 notebook width (~12") so nothing needs
+    # horizontal scrolling; single-axis spectra are ~9.5x5.3, the 2-panel chunk
+    # is wider but shorter.
     drawers = {
-        "by_energy": (_draw_by_energy, (10.0, 7.5)),
-        "full": (_draw_full_spectrum, (10.0, 7.5)),
-        "chunk": (_draw_chunk, (10.0, 7.5)),
-        "timepix": (_draw_timepix_detected, (10.0, 7.5)),
-        "eaglexo": (_draw_eaglexo_detected, (10.0, 7.5)),
+        "by_energy": (_draw_by_energy, (9.5, 5.3)),
+        "full": (_draw_full_spectrum, (9.5, 5.3)),
+        "chunk": (_draw_chunk, (11.0, 4.8)),
+        "timepix": (_draw_timepix_detected, (9.5, 5.3)),
+        "eaglexo": (_draw_eaglexo_detected, (9.5, 5.3)),
     }
     if kind not in drawers:
         raise ValueError(f"kind must be one of {list(drawers)}")
@@ -211,9 +214,10 @@ def plot_tilt_panel(ax, group, settings, include_brem=True, collapse_azimuth=Fal
 
 def _draw_by_energy(fig, trecs, settings, include_brem=True, collapse_azimuth=True):
     """Render ONE polar tilt onto ``fig`` (cleared first): every beam energy
-    overlaid, LEFT intrinsic / RIGHT detector-convolved."""
+    overlaid, INTRINSIC spectra (the detector view is the separate Eagle XO
+    browser, kind='eaglexo'). Single axis -> fits the screen without scrolling."""
     fig.clear()
-    ax_raw, ax_conv = fig.subplots(1, 2, sharex=True)
+    ax = fig.subplots(1, 1)
     energies = sorted({r["case"]["E0_keV"] for r in trecs})
     for i, E0 in enumerate(energies):
         grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
@@ -225,35 +229,32 @@ def _draw_by_energy(fig, trecs, settings, include_brem=True, collapse_azimuth=Tr
         for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
             az = r["case"]["tilt_azim_deg"]
             lbl = rf"{E0:g} keV ($\phi={az:0.1f}\degree$)"
-            Ee = r["E_grid"]
-            for ax, conv in ((ax_raw, False), (ax_conv, True)):
-                line_det, brem_det = _line_brem(r, settings, convolve=conv)
-                y = (line_det + brem_det) if include_brem else line_det
-                ax.plot(Ee, y * r["scale"], color=c, lw=1.3, label=lbl)
-                if include_brem:
-                    ax.plot(Ee, brem_det * r["scale"], color=c, ls="--", lw=0.6)
+            line_det, brem_det = _line_brem(r, settings, convolve=False)
+            y = (line_det + brem_det) if include_brem else line_det
+            ax.plot(r["E_grid"], y * r["scale"], color=c, lw=1.3, label=lbl)
+            if include_brem:
+                ax.plot(r["E_grid"], brem_det * r["scale"], color=c, ls="--", lw=0.6)
     case = trecs[0]["case"]
     tag = "best azimuth/energy" if collapse_azimuth else "all azimuths"
-    fig.suptitle(
+    ax.set_title(
         rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
-        rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ ({tag})",
-        fontsize=13,
+        rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — intrinsic "
+        rf"({tag})",
+        fontsize=12,
     )
-    for ax, sub in ((ax_raw, "intrinsic"), (ax_conv, "detector-convolved")):
-        ax.set_title(sub, fontsize=11)
-        ax.set_xlabel("Photon energy (eV)")
-        ax.set_ylabel("Intensity (Phs/eV/s/nA)")
-        ax.set_ylim(bottom=0)
-        ax.margins(x=0)
-        ax.grid(alpha=0.3)
-        ax.legend(title=("dashed: brem" if include_brem else None), fontsize=9)
+    ax.set_xlabel("Photon energy (eV)")
+    ax.set_ylabel("Intensity (Phs/eV/s/nA)")
+    ax.set_ylim(bottom=0)
+    ax.margins(x=0)
+    ax.grid(alpha=0.3)
+    ax.legend(title=("dashed: brem" if include_brem else None), fontsize=9)
     fig.tight_layout()
 
 
 def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=True):
     """One figure PER POLAR TILT, every beam energy overlaid (best azimuth when
-    ``collapse_azimuth``); LEFT intrinsic, RIGHT detector-convolved. For
-    click-through use ``browse(results, settings, kind="by_energy")``."""
+    ``collapse_azimuth``); INTRINSIC spectra (detector view = the Eagle XO
+    browser). For click-through use ``browse(results, settings, kind="by_energy")``."""
     recs = records(results)
     if not recs:
         print("no results yet")
@@ -261,7 +262,7 @@ def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=True):
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     figs = []
     for t in tilts:
-        fig = plt.figure(figsize=(15.0, 5.2))
+        fig = plt.figure(figsize=(9.5, 5.3))
         _draw_by_energy(
             fig,
             [r for r in recs if r["case"]["tilt_deg"] == t],
@@ -277,12 +278,14 @@ def _draw_full_spectrum(
     fig, trecs, settings, collapse_azimuth=True, logy=True, logx=True, floor_frac=1e-2
 ):
     """Render ONE polar tilt of the full measured-range view onto ``fig``: sharp
-    lines + wide brem out to the beam energy, log y, LEFT intrinsic/RIGHT detector."""
+    lines + wide brem out to the beam energy, log-log, INTRINSIC (single axis; the
+    detector view is the Eagle XO browser)."""
     fig.clear()
-    ax_raw, ax_conv = fig.subplots(1, 2, sharex=True)
+    ax = fig.subplots(1, 1)
     energies = sorted({r["case"]["E0_keV"] for r in trecs})
-    ymax = {"raw": 0.0, "conv": 0.0}
+    ymax = 0.0
     xmax = 0.0
+    xmin = 0.0
     for i, E0 in enumerate(energies):
         grp = [
             r
@@ -302,41 +305,34 @@ def _draw_full_spectrum(
         brem_wide_det = r["brem_wide"] * qe_b * r["scale"]
         xmin = float(Eb[0])
         xmax = max(xmax, float(Eb[-1]))  # full brem grid -> beam energy
-        for ax, conv, key in ((ax_raw, False, "raw"), (ax_conv, True, "conv")):
-            line_det, brem_det = _line_brem(r, settings, convolve=conv)
-            total_line = (line_det + brem_det) * r["scale"]
-            ax.plot(Eb, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
-            ax.plot(r["E_grid"], total_line, color=c, lw=1.2, label=lbl)
-            ymax[key] = max(
-                ymax[key], float(np.nanmax(total_line)) if total_line.size else 0.0
-            )
+        line_det, brem_det = _line_brem(r, settings, convolve=False)
+        total_line = (line_det + brem_det) * r["scale"]
+        ax.plot(Eb, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
+        ax.plot(r["E_grid"], total_line, color=c, lw=1.2, label=lbl)
+        ymax = max(ymax, float(np.nanmax(total_line)) if total_line.size else 0.0)
     case = trecs[0]["case"]
-    fig.suptitle(
+    ax.set_title(
         rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
         rf"$\mu$m, $\theta_\mathrm{{tilt}}={case['tilt_deg']:0.1f}\degree$ — full "
-        rf"measured range (dashed = brem)",
-        fontsize=13,
+        rf"measured range, intrinsic (dashed = brem)",
+        fontsize=12,
     )
-    for ax, sub, key in (
-        (ax_raw, "intrinsic", "raw"),
-        (ax_conv, "detector-convolved", "conv"),
-    ):
-        if logy and ymax[key] > 0:
-            ax.set_yscale("log")
-            ax.set_ylim(ymax[key] * floor_frac, ymax[key] * 2)
-        else:
-            ax.set_ylim(bottom=0)
-        if logx:
-            ax.set_xscale("log")
-        ax.set_title(sub, fontsize=11)
-        ax.set_xlabel("Photon energy (eV)")
-        ax.set_ylabel("Intensity (Phs/eV/s/nA)")
-        if xmax > 0:
-            ax.set_xlim(xmin, xmax)  # span the full brem grid (to the beam energy)
-        else:
-            ax.margins(x=0)
-        ax.grid(alpha=0.3, which="both")
-        ax.legend(fontsize=8)
+    if logy and ymax > 0:
+        ax.set_yscale("log")
+        ax.set_ylim(ymax * floor_frac, ymax * 2)
+    else:
+        ax.set_ylim(bottom=0)
+    if logx:
+        ax.set_xscale("log")
+    ax.set_xlabel("Photon energy (eV)")
+    ax.set_ylabel("Intensity (Phs/eV/s/nA)")
+    if xmax > 0:
+        lo = max(xmin, 1.0) if logx else xmin  # log x can't show 0 (brem grid -> 0)
+        ax.set_xlim(lo, xmax)  # span the full brem grid (to the beam energy)
+    else:
+        ax.margins(x=0)
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8)
     fig.tight_layout()
 
 
@@ -355,7 +351,7 @@ def plot_full_spectrum(
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     figs = []
     for t in tilts:
-        fig = plt.figure(figsize=(16.0, 5.2))
+        fig = plt.figure(figsize=(9.5, 5.3))
         _draw_full_spectrum(
             fig,
             [r for r in recs if r["case"]["tilt_deg"] == t],
@@ -396,50 +392,35 @@ def plot_peak_vs_tilt(results, settings):
 
 
 def _draw_chunk(fig, trecs, settings):
-    """Render ONE polar tilt's best-azimuth 2x2 (total | CXR-only x intrinsic |
-    detector-convolved) onto ``fig`` (cleared first)."""
+    """Render ONE polar tilt's best-azimuth INTRINSIC spectra onto ``fig`` (cleared
+    first): LEFT total (coherent + brem), RIGHT brem-subtracted CXR only. The
+    detector view is the separate Eagle XO browser (kind='eaglexo')."""
     fig.clear()
     best = sorted(best_azimuth(trecs), key=lambda r: r["case"]["E0_keV"])
     if not best:
         return
-    (tot_raw, tot_conv), (cxr_raw, cxr_conv) = fig.subplots(2, 2, sharex=True)
+    ax_tot, ax_cxr = fig.subplots(1, 2, sharex=True)
     for i, r in enumerate(best):
         c = COLORS[i % len(COLORS)]
         az, E0 = r["case"]["tilt_azim_deg"], r["case"]["E0_keV"]
         lbl = rf"{E0:g} keV ($\phi={az:g}\degree$)"
         E = r["E_grid"] / 1e3
         line_raw, brem_raw = _line_brem(r, settings, convolve=False)  # intrinsic
-        line_conv, brem_conv = _line_brem(r, settings, convolve=True)  # detector
-        tot_raw.plot(E, (line_raw + brem_raw) * r["scale"], color=c, lw=1.2, label=lbl)
-        tot_raw.plot(E, brem_raw * r["scale"], color=c, ls="--", lw=0.6)
-        tot_conv.plot(
-            E, (line_conv + brem_conv) * r["scale"], color=c, lw=1.2, label=lbl
-        )
-        tot_conv.plot(E, brem_conv * r["scale"], color=c, ls="--", lw=0.6)
-        cxr_raw.plot(E, line_raw * r["scale"], color=c, lw=1.2, label=lbl)
-        cxr_conv.plot(E, line_conv * r["scale"], color=c, lw=1.2, label=lbl)
+        ax_tot.plot(E, (line_raw + brem_raw) * r["scale"], color=c, lw=1.2, label=lbl)
+        ax_tot.plot(E, brem_raw * r["scale"], color=c, ls="--", lw=0.6)
+        ax_cxr.plot(E, line_raw * r["scale"], color=c, lw=1.2, label=lbl)
     case = best[0]["case"]
     fig.suptitle(
         rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
         rf"$\theta_\mathrm{{tilt}}={case['tilt_deg']:g}\degree$ — best azimuth per "
-        rf"energy  (left: intrinsic   right: detector-convolved)",
-        fontsize=14,
+        rf"energy (intrinsic)",
+        fontsize=13,
     )
     for ax, title, leg in (
-        (
-            tot_raw,
-            "Total X-ray Spectrum (Coherent + Brem) — intrinsic",
-            "Dashed=Brem Bkgnd",
-        ),
-        (
-            tot_conv,
-            "Total X-ray Spectrum (Coherent + Brem) — detector",
-            "Dashed=Brem Bkgnd",
-        ),
-        (cxr_raw, "Brem-subtracted (CXR Only) — intrinsic", None),
-        (cxr_conv, "Brem-subtracted (CXR Only) — detector", None),
+        (ax_tot, "Total X-ray spectrum (coherent + brem)", "dashed = brem bkgnd"),
+        (ax_cxr, "Brem-subtracted (CXR only)", None),
     ):
-        ax.set_title(title, fontsize=12)
+        ax.set_title(title, fontsize=11)
         ax.set_xlabel("Photon energy (keV)")
         ax.set_ylabel("Intensity (Phs/eV/s/nA)")
         ax.set_ylim(bottom=0)
@@ -450,9 +431,8 @@ def _draw_chunk(fig, trecs, settings):
 
 
 def plot_chunk(results, settings):
-    """The best-azimuth 2x2 spectra (total | CXR-only x intrinsic | detector),
-    ONE figure per polar tilt. For click-through use
-    ``browse(results, settings, kind="chunk")``."""
+    """The best-azimuth intrinsic spectra (total | CXR-only), ONE figure per polar
+    tilt. For click-through use ``browse(results, settings, kind="chunk")``."""
     recs = records(results)
     if not recs:
         print("no results yet")
@@ -460,7 +440,7 @@ def plot_chunk(results, settings):
     tilts = sorted({r["case"]["tilt_deg"] for r in recs})
     figs = []
     for t in tilts:
-        fig = plt.figure(figsize=(14.0, 9.5))
+        fig = plt.figure(figsize=(11.0, 4.8))
         _draw_chunk(fig, [r for r in recs if r["case"]["tilt_deg"] == t], settings)
         figs.append(fig)
     return figs
@@ -499,7 +479,7 @@ def plot_timepix_efficiency(thickness_um=300.0, bias_v=100.0, n_mc=80000, seed=0
         )
         _EFF_CACHE[key] = resp
     E_thr = _thr_keV() * 1e3
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(13, 4.6))
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.0, 4.3))
     axL.plot(
         E_eff,
         resp["eps_abs"],
@@ -675,7 +655,7 @@ def plot_timepix_poisson(
     E_thr = _thr_keV() * 1e3
     energies = sorted({r["case"]["E0_keV"] for r in recs})
     fig, axes = plt.subplots(
-        1, len(energies), figsize=(6 * len(energies), 4.6), squeeze=False
+        1, len(energies), figsize=(min(3.7 * len(energies), 11.5), 4.4), squeeze=False
     )
     for ax, E0 in zip(axes.ravel(), energies):
         grp = [r for r in recs if r["case"]["E0_keV"] == E0]
@@ -734,7 +714,7 @@ def plot_eaglexo_efficiency(sensor="4240", distance_m=None, coating="BN"):
     (knob 1) for the chosen sensor + working distance."""
     geo = eag.geometry(sensor, distance_m)
     E = np.geomspace(100.0, 60000.0, 600)
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(13, 4.6))
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.0, 4.3))
     # -- QE (knob 2) --
     axL.axvspan(E[0], 3000.0, color="g", alpha=0.05)
     axL.axvspan(3000.0, E[-1], color="r", alpha=0.05)
@@ -920,7 +900,7 @@ def plot_eaglexo_measured(
     rng = np.random.default_rng(seed)
     energies = sorted({r["case"]["E0_keV"] for r in recs})
     fig, axes = plt.subplots(
-        1, len(energies), figsize=(6 * len(energies), 4.6), squeeze=False
+        1, len(energies), figsize=(min(3.7 * len(energies), 11.5), 4.4), squeeze=False
     )
     for ax, E0 in zip(axes.ravel(), energies):
         grp = [r for r in recs if r["case"]["E0_keV"] == E0]
@@ -1096,12 +1076,19 @@ def _trajectory_frame(pts_list, pct=99.0, pad=0.12, beam_frac=0.16):
 
 
 def _draw_trajectory_panel(
-    ax, data, frame, E0, *, E_cut=5.0, px=720, line_width=1.6, cmap=None, label=True,
+    ax, data, frame, E0, *, E_cut=5.0, px=820, spread_px=1, cmap=None, label=True,
     label_fs=8.5,
 ):
     """Render ONE penetration cross-section into ``ax`` over the shared ``frame``:
     grey slab, datashader-rasterized energy-coloured tracks, red beam + green
-    detector arrows."""
+    detector arrows.
+
+    The tracks are aggregated with ``line_width=0`` so each pixel takes the true
+    electron energy of the track through it -- antialiased (line_width>0) lines
+    instead coverage-weight that value, which paints a bogus radial gradient
+    ACROSS the line thickness (hot centre -> cool edges) rather than along the
+    path. ``tf.spread`` then thickens the crisp 1-px lines back to visibility
+    WITHOUT reintroducing that artifact (it copies each pixel's colour outward)."""
     import pandas as pd
     import datashader as ds
     import datashader.transfer_functions as tf
@@ -1125,8 +1112,10 @@ def _draw_trajectory_panel(
         plot_width=px, plot_height=max(int(px * asp), 60),
         x_range=(xlo, xhi), y_range=(ylo, yhi),
     )
-    agg = cvs.line(df, "x", "y", agg=ds.max("E"), line_width=line_width)
+    agg = cvs.line(df, "x", "y", agg=ds.max("E"), line_width=0)  # crisp: true E/pixel
     img = tf.shade(agg, cmap=cmap or _turbo_hex(), span=(E_cut, E0), how="linear")
+    if spread_px:
+        img = tf.spread(img, px=spread_px, shape="circle")  # thicken, colour kept
     ax.imshow(
         np.asarray(img.to_pil()), extent=(xlo, xhi, ylo, yhi),
         origin="upper", aspect="equal", interpolation="none", zorder=2,
@@ -1170,7 +1159,7 @@ def _traj_colorbar(ax, E_cut, E0, label="electron energy (keV)"):
 
 def plot_electron_trajectories(
     rec_or_case, *, Ne=200, seed=0, frame=None, E_cut=5.0, colorbar=True,
-    line_width=1.6, label=True, ax=None,
+    spread_px=1, label=True, ax=None,
 ):
     """One electron-penetration cross-section in the beam-detector plane: the beam
     enters horizontally at the origin (red), the crystal is the grey slab (which
@@ -1187,10 +1176,16 @@ def plot_electron_trajectories(
     if ax is None:
         xlo, xhi, ylo, yhi = frame
         asp = (yhi - ylo) / (xhi - xlo)
-        w = 6.2
-        _, ax = plt.subplots(figsize=(w, float(np.clip(w * asp + 1.0, 3.2, 7.5))))
+        # size the FIGURE to the data aspect so the equal-aspect axes fills it
+        # (no floating-title letterbox): reserve ~1.7" width for ylabel+colorbar
+        # and ~1.1" height for title+xlabel, then constrained_layout packs it.
+        axw = 4.7
+        _, ax = plt.subplots(
+            figsize=(axw + 1.7, float(np.clip(axw * asp + 1.1, 3.0, 7.6))),
+            constrained_layout=True,
+        )
     _draw_trajectory_panel(
-        ax, data, frame, case["E0_keV"], E_cut=E_cut, line_width=line_width, label=label
+        ax, data, frame, case["E0_keV"], E_cut=E_cut, spread_px=spread_px, label=label
     )
     ax.set_xlabel(f"distance along beam ({data['ulab']})")
     ax.set_ylabel(f"transverse distance ({data['ulab']})")
@@ -1207,7 +1202,7 @@ def plot_electron_trajectories(
 
 
 def plot_trajectory_grid(
-    cases_or_results, energy=None, *, Ne=150, seed=0, E_cut=5.0, line_width=1.4,
+    cases_or_results, energy=None, *, Ne=150, seed=0, E_cut=5.0, spread_px=1,
     max_panels=20, ncols=None, max_width_in=12.0, max_height_in=8.5,
 ):
     """Electron-penetration cross-sections at ONE beam energy, a panel per
@@ -1256,17 +1251,19 @@ def plot_trajectory_grid(
             for r in range(nrows)
         ]
 
+    # Size each panel to the shared data aspect so the equal-aspect axes fill
+    # their cells (no per-panel letterbox), reserving ~1.1" for the colorbar and
+    # ~0.7" for the suptitle; constrained_layout then packs it with no big gaps.
     xlo, xhi, ylo, yhi = frame
     asp = (yhi - ylo) / (xhi - xlo)
-    pw = min(max_width_in / ncols, 3.2)
+    pw = min((max_width_in - 1.1) / ncols, 2.7)
     ph = pw * asp
-    fig_h = nrows * ph + 1.3
-    if fig_h > max_height_in:  # shrink panels so the whole grid fits the screen
-        pw *= (max_height_in - 1.3) / (nrows * ph)
+    if nrows * ph + 0.7 > max_height_in:  # shrink panels so the grid fits on-screen
+        pw *= (max_height_in - 0.7) / (nrows * ph)
         ph = pw * asp
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=(ncols * pw, nrows * ph + 1.3), squeeze=False,
-        sharex=True, sharey=True,
+        nrows, ncols, figsize=(ncols * pw + 1.1, nrows * ph + 0.7), squeeze=False,
+        sharex=True, sharey=True, constrained_layout=True,
     )
     for r in range(nrows):
         for col in range(ncols):
@@ -1277,7 +1274,7 @@ def plot_trajectory_grid(
                 continue
             d = data[combo]
             _draw_trajectory_panel(
-                ax, d, frame, energy, E_cut=E_cut, line_width=line_width, label=False
+                ax, d, frame, energy, E_cut=E_cut, spread_px=spread_px, label=False
             )
             ax.set_title(
                 rf"$\theta$={combo[0]:g}$\degree$, $\phi$={combo[1]:g}$\degree$",
@@ -1292,14 +1289,14 @@ def plot_trajectory_grid(
     from matplotlib.colors import Normalize
 
     mappable = cm.ScalarMappable(norm=Normalize(E_cut, energy), cmap=_TRAJ_CMAP)
-    cb = fig.colorbar(mappable, ax=axes.ravel().tolist(), fraction=0.025, pad=0.01)
+    cb = fig.colorbar(mappable, ax=axes, shrink=0.8, aspect=30, pad=0.01)
     cb.set_label("electron energy (keV)")
     case0 = bycombo[combos[0]]
     fig.suptitle(
         rf"{case0['name'].split()[0]}, {case0['thickness_ang'] / 1e4:.1f} $\mu$m, "
-        rf"{energy:g} keV — electron penetration "
-        rf"(red: beam   green: detector   only the slab rotates)",
-        fontsize=12,
+        rf"{energy:g} keV — electron penetration (red beam, green detector; "
+        rf"only the slab rotates)",
+        fontsize=11,
     )
     return fig
 
@@ -1468,7 +1465,7 @@ def plot_heatmaps(
         fig, axes = plt.subplots(
             1,
             len(panels),
-            figsize=(5 * len(panels) + 1, 4.3),
+            figsize=(min(3.6 * len(panels) + 1.2, 12.0), 4.2),
             squeeze=False,
             constrained_layout=True,
         )
