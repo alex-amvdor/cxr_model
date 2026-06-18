@@ -1,0 +1,246 @@
+# CLAUDE.md
+
+## Behavioral Guidelines
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merged with project-specific information.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+## Project Information
+
+Physics simulation of **coherent X-ray radiation (PXR + coherent bremsstrahlung)**
+from table-top electron beams in crystals. Replicates and extends Zhai et al.,
+*Nat. Commun.* **16**, 11218 (2025) ("Enhanced tunable X-rays from bulk crystals
+driven by table-top free-electron energies"), with the analytic core validated
+against Feranchuk et al., *Phys. Rev. E* **62**, 4225 (2000).
+
+Goal of the active work: predict measurable line flux/enhancement for a real
+lab setup — a home-built **2×2 Timepix3 quad** (and an alternative **Raptor
+Eagle XO** CCD) at θ_obs = 90°, ~30–60 keV beam, to be compared against the
+paper's TEM/SEM measurements.
+
+Repo: `https://github.com/alex-amvdor/cxr_model.git` (history was force-slimmed;
+notebooks are stripped by `nbstripout` via `.gitattributes`).
+
+### Layout
+
+```
+cxr_scan.ipynb         RUNNER: pick MATERIAL -> Sweep -> run_sweep -> checkpoints/<material>.pkl
+cxr_analysis.ipynb     VIZ: load that checkpoint -> all figures (no sweep runs here)
+export_pdf.py          headless cxr_analysis.ipynb -> PDF export
+src/                   all importable modules (both notebooks do sys.path.insert(0,"src"))
+data/                  crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
+checks/                validation scripts + check notebooks (Feranchuk anchor, Fig 1c, kinematic audit)
+checkpoints/           per-material results pickles (gitignored)
+results/               exported figures/PDFs (PNGs gitignored)
+```
+
+Data paths resolve **relative to `src/`** (`Path(__file__).parent.parent/"data"`),
+so imports work from any cwd. `*.pkl` checkpoints and `*.png` are gitignored.
+
+### Module responsibilities (`src/`)
+
+- **`cxr_feranchuk_spence.py`** — analytic core. Crystal DB loader (`CRYSTALS`
+  from TOML), `reciprocal_g_vector`, `structure_factor`/`chi_g`/`U_g`,
+  `debye_waller`, `absorption_length_ang`, the PXR+CBS amplitudes
+  (`amplitudes_PXR_CBS_both`, Feranchuk Eqs. 13/14 with relativistic braced CBS),
+  `cxr_lines_fixed`, and `dominant_reflections(material, n_families, B_ang2)`
+  (ranks reflections by |S|·e^(−W)/g², Zhai Table 5 methodology). No GPU.
+- **`cxr_montecarlo.py`** — the transport+radiation pipeline. CASINO-style
+  single-scattering MC (`simulate_trajectories` — also returns per-segment age
+  `t_ang` = Σ L/β and `elec_id`, used by the penetration plots), per-segment
+  spectrum (`mc_spectrum`), Born+Elwert brem (`mc_brem_spectrum`), detector
+  helpers (`eds_fwhm_eV`, `aperture_fwhm_eV`, `convolve_detector`,
+  `detector_efficiency`), `tilted_geometry`, and the parallel drivers
+  `run_case`/`run_cases`. **Optional CuPy GPU** (`xp = cp` if importable; prints
+  "Using GPU"); spectra use fp32 on-device.
+- **`cxr_sweep.py`** — `Sweep` dataclass + `build_cases`. Every physical knob is
+  scalar (fixed) or sequence (swept); cases = Cartesian product. Cheap to import.
+- **`cxr_config.py`** — shared run config imported by BOTH notebooks so they can't
+  drift: `default_settings()`, the per-material sweep grids, and the builders
+  `material_sweep(mat)` (full scan) / `trajectory_sweep(mat)` (penetration figures).
+- **`cxr_run.py`** — `run_sweep(...)`: checkpointed, streaming driver around
+  `run_cases`. Resumes per material from `checkpoints/<material>.pkl` (skips
+  cached cases), re-pickles at config granularity (crash-safe), fires `on_chunk`
+  once a whole group (same material/thickness/tilt = full azimuth sweep) finishes.
+  `load_checkpoint(material)` + `cases_from_results(results)` let the viz notebook
+  load results (and rebuild the case list) without re-running.
+- **`cxr_results.py`** — `Settings` dataclass, `store_result` (case → `results`
+  record), `best_azimuth` (collapse an azimuth sweep to the highest-**peak**
+  spectrum per material/thickness/tilt/energy), `show_summary`.
+- **`cxr_plots.py`** — all plotting. `browse(results, settings, kind=...)` pages
+  one figure per polar tilt (inline backend, or `%matplotlib widget`/ipympl);
+  kinds: `chunk`|`by_energy`|`full` (intrinsic spectra) and `eaglexo`|`timepix`
+  (detector). Also `plot_heatmaps` (parametric tilt×azimuth maps),
+  `plot_electron_trajectories`/`plot_trajectory_grid` (datashader-rasterized
+  cascade cross-sections), `plot_penetration_profile` (mean energy + lifetime vs
+  depth). Intrinsic spectra are single-axis — the EDS detector-convolution view
+  was removed; Eagle XO is the detector view.
+- **`timepix_response.py`** — per-photon forward model of the Timepix3 (Si
+  sensor): photoabsorption, e-h pairs (W=3.65 eV, Fano), charge sharing, and the
+  **~1.9 keV counting threshold** (the headline effect — it eats sub-2 keV line
+  flux, not just blurs it).
+- **`eaglexo_response.py`** — Raptor Eagle XO CCD: a clean `solid_angle × QE(E)`
+  operator (windowless direct-detection CCD, no threshold/charge-sharing).
+
+`results` is always `{config_name: {E0_keV: record}}`. Functions take `results`
+and `Settings` explicitly — no module globals.
+
+### Running
+
+Two notebooks sharing the per-material grids in `cxr_config.py` (edit a material's
+thickness / energies / tilts / E-grids there; both notebooks pick it up):
+
+1. **`cxr_scan.ipynb`** (runner): pick `MATERIAL` → `material_sweep(MATERIAL)` →
+   `build_cases` → `run_sweep` → writes `checkpoints/<material>.pkl` (streams the
+   per-tilt stats tables live).
+2. **`cxr_analysis.ipynb`** (viz): same `MATERIAL` → `load_checkpoint` →
+   `cases_from_results` → `browse` / heatmap / Eagle XO / penetration figures. No
+   sweep runs here (only the cheap, CPU-only electron transport behind the
+   penetration figures).
+
+`COLLAPSE_AZIMUTH=True` keeps only the best azimuth per (tilt, energy).
+
+Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
+`mos2`, `ws2`, `ptse2`, `hfse2`, `zrse2`. (Note: the graphite entry is keyed
+`hopg`.)
+
+### Physics conventions — read before touching geometry or amplitudes
+
+- **Frame**: incident beam along **+z**; detector at azimuth φ=0 in the x–z
+  plane at polar angle θ_obs. At θ_obs=90° the detector is along +x.
+- **Tilt sign (critical)**: `tilt_deg` is the sample-normal polar tilt;
+  `tilt_azim_deg` is its azimuth (0 = pitch in the beam–detector plane, 90 = yaw).
+  **Negative tilt = entrance face toward the detector = HIGH flux** (radiation is
+  born near the entrance and escapes a short path). Positive tilt points the PXR
+  lobe away → ~10× weaker. Verified via `tilted_geometry`: negative tilt gives
+  n̂·ẑ < 0 (detector seen through the entrance face). At θ_obs=90°, tilt must be
+  nonzero (an untilted slab self-absorbs photons travelling along its faces; yaw
+  alone gives identically zero).
+- **Coherence**: the measured line is `|A_PXR + A_CBS|²` — never separable. CBS is
+  weak only when F≈Z (low-g). Segments add incoherently; reflections within a
+  segment add coherently.
+- **HOPG fiber texture**: only (00l) reflections are coherent (random in-plane
+  grain azimuths). Do **not** use `dominant_reflections` for `hopg` — pass (00l)
+  only, beam along c-axis [001].
+- **Units**: Ångström, eV (electron energies in keV where noted).
+  `E2_EV_ANG = α·ħc = 14.3996 eV·Å`. χ_g = −r_e λ² S(g) e^(−W)/(πV).
+  Resonance ω = v·g/(1−v·n̂). Segment lineshape |Q|² = t_L² sinc²(P·t_L).
+- **Relativistic CBS** (matters ≳100 keV): braced {a;b} = a·b − (a·v)(b·v) with a
+  1/γ prefactor; present at all amplitude sites.
+
+### Gotchas
+
+- **Windows spawn**: `run_cases` uses `ProcessPoolExecutor`; the worker
+  (`run_case`) is module-level so it pickles. Any standalone test script that
+  calls it **must** be a real file with an `if __name__ == "__main__":` guard —
+  `python - <<EOF` fails (workers try to import `<stdin>`). See
+  `checks/run_zhai_nb_test.py`.
+- **GPU ⇒ serial**: with CuPy present, `run_cases` runs serially (one CUDA
+  context), not in a process pool. Multiprocessing speedups only apply CPU-side.
+- **Workers**: machine is an i7-13620H — 10 physical cores / 16 threads. Cap
+  `max_workers` at ~10 (CPU path); the extra 6 are P-core hyperthreads (~15% more,
+  but the laptop gets sluggish). Workers run BELOW_NORMAL priority with BLAS
+  pinned to 1 thread.
+- **Detector geometry is per-instrument** — do not transfer numbers. Zhai SEM
+  (JEOL 7800): θ_obs=119°, Δθ=16.6°, Ω=0.066 sr. TEM (JEOL 2010HR, the MoSe₂/WSe₂
+  data): θ_obs≈112.5°, Δθ≈12°, Ω≈0.0344 sr (Δθ from Huang et al. 2022; Ω = the
+  same cone convention). Our Timepix3: θ_obs=90°, Δθ≈1.76°, Ω≈9.5e-4 sr (28 mm
+  quad at 0.4 m). Applying SEM numbers to TEM data was the cause of "far broader
+  peaks."
+- **MoSe₂ structure**: Se z-fractional δ=0.129 (not 0.121 — a Wyckoff misread),
+  verified by the 2.53 Å Mo–Se bond. This changed |S(002)|² by ×0.53 and is a
+  known ~×2 source of disagreement vs the paper's normalization.
+- **Brem grid**: `E_grid_line` is fine+narrow (lines cap at a few keV, expensive
+  sinc²); `E_grid_brem` is coarse+wide (cheap, extend to the beam energy).
+- **Trajectory colouring (datashader)**: aggregate tracks with `cvs.line(...,
+  line_width=0)` so each pixel takes the true electron energy, then `tf.spread` to
+  thicken. `line_width>0` coverage-weights the aggregated value and paints a bogus
+  radial gradient ACROSS the line (hot centre → cool edges) instead of along the
+  path. Tracks are continuous per-electron polylines (sort segments by
+  `(elec_id, t_ang)`), and every panel in a grid shares one frame so only the slab
+  rotates.
+
+### Validation (`checks/`)
+
+- `feranchuk_check_script.py` — LiF analytic anchor.
+- `feranchuk_vs_zhai_check.py` — analytic vs MC pipeline agreement (film flux
+  ratio → 1.00 after the δ-function Jacobian fix).
+- `kinematic_validity_check.py` — DYN/recoil/ξ_e audit + vdW merit table.
+- `zhai_fig1c_check.ipynb`, `cxr_analysis_feranchuk.ipynb` — figure reproductions.
+- `run_zhai_nb_test.py` — headless guarded harness for the main notebook.
+
+### Data provenance
+
+- Atomic scattering: Cromer-Mann f0 + Henke/CXRO f′,f″ (`data/atomic_scattering_factors/*.csv`, `.nff` format).
+- Elastic transport: NIST SRD 64 relativistic Mott **transport** cross sections
+  (`data/mott_transport_cross_sections/`), used to calibrate the screened-Rutherford
+  α(E) per element; free paths from the Browning fit (valid ≤30 keV — extrapolated
+  beyond, a caveat at 200 keV).
+- Crystal structures: `data/crystal_structures.toml` (lattice + basis + B-factors).
+- Detector QE: `data/eaglexo_qe.csv`; Timepix Si response computed from Henke f2.
