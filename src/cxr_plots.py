@@ -42,12 +42,33 @@ from cxr_results import (
     best_azimuth,
     show_summary,
     line_metrics,
+    selection_score,
     PER_NA,
 )
 import timepix_response as tpx
 import eaglexo_response as eag
 
 COLORS = ["r", "y", "g", "b", "m", "c", "k", "orange", "purple", "brown"]
+
+# Beam energy -> colour, CONSISTENT across every figure: a given E0 always gets
+# the same colour (keyed to its rank in the sorted energy set, so e.g. 30/45/60
+# keV map to the same three colours everywhere), and the palette stays readable
+# on white (no low-contrast yellow). Pass the FULL set of energies present in
+# the figure so the rank -- hence the colour -- is stable panel to panel.
+_ENERGY_PALETTE = [
+    "#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e",
+    "#17becf", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22",
+]
+
+
+def energy_color(E0, energies):
+    """Stable colour for beam energy ``E0`` given the figure's set of energies."""
+    order = sorted({float(e) for e in energies})
+    try:
+        i = order.index(float(E0))
+    except ValueError:
+        i = 0
+    return _ENERGY_PALETTE[i % len(_ENERGY_PALETTE)]
 
 # cache of the (expensive) Timepix efficiency-curve response, keyed by hardware +
 # MC settings, so re-running the detector cell with unchanged settings doesn't
@@ -141,7 +162,17 @@ def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
     """Polar-tilt slider + Prev/Next that renders a FRESH figure per tilt into an
     Output widget (clear + redraw). No dependence on live-canvas redraw, so it
     works reliably on the inline backend and over SSH (ipympl's persistent-figure
-    redraw is what tends to get stuck showing one frame)."""
+    redraw is what tends to get stuck showing one frame).
+
+    TODO (a) -- interactive speed: this redraws a full matplotlib/Agg figure on
+    EVERY slider move (thousands of points x several curves), which is the slow
+    click-through. The fix is a Plotly-based spectral browser: build ONE figure
+    with each tilt/energy as a go.Scattergl (WebGL) trace and toggle visibility
+    from a client-side slider/dropdown -- no Python redraw per click, so paging is
+    instant and 10k+ points stay smooth. Keep this matplotlib path for static /
+    nbconvert-PDF export (where there is no client to run the JS); add a
+    `browse_plotly(...)` alongside it for interactive use. Adds a `plotly`
+    dependency (+ `kaleido` only if you also want Plotly static export)."""
     import ipywidgets as widgets
     from IPython.display import display
 
@@ -173,6 +204,25 @@ def _tilt_browser(by_tilt, tilts, settings, draw, figsize, label, **kw):
     display(widgets.HBox([prev, slider, nxt]))
     display(out)
     render(0)
+
+
+# ---- per-tilt figure helper --------------------------------------------------
+def _per_tilt_figs(recs, settings, draw, figsize, *, empty_msg="no results yet", **kw):
+    """Shared body of every ``plot_*`` wrapper: one freshly-drawn figure PER POLAR
+    TILT. ``draw(fig, tilt_recs, settings, **kw)`` renders a single tilt onto a
+    cleared figure (the same ``_draw_*`` the interactive ``browse`` uses), so the
+    wrappers and the slider stay in lockstep. Handles the empty-records check, the
+    per-tilt grouping, and collecting the figure list."""
+    if not recs:
+        print(empty_msg)
+        return []
+    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
+    figs = []
+    for t in tilts:
+        fig = plt.figure(figsize=figsize)
+        draw(fig, [r for r in recs if r["case"]["tilt_deg"] == t], settings, **kw)
+        figs.append(fig)
+    return figs
 
 
 # ---- intrinsic spectra -------------------------------------------------------
@@ -225,7 +275,7 @@ def _draw_by_energy(fig, trecs, settings, include_brem=True, collapse_azimuth=Tr
             continue
         if collapse_azimuth and len(grp) > 1:
             grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
-        c = COLORS[i % len(COLORS)]
+        c = energy_color(E0, energies)
         for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
             az = r["case"]["tilt_azim_deg"]
             lbl = rf"{E0:g} keV ($\phi={az:0.1f}\degree$)"
@@ -255,35 +305,29 @@ def plot_by_energy(results, settings, include_brem=True, collapse_azimuth=True):
     """One figure PER POLAR TILT, every beam energy overlaid (best azimuth when
     ``collapse_azimuth``); INTRINSIC spectra (detector view = the Eagle XO
     browser). For click-through use ``browse(results, settings, kind="by_energy")``."""
-    recs = records(results)
-    if not recs:
-        print("no results yet")
-        return []
-    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
-    figs = []
-    for t in tilts:
-        fig = plt.figure(figsize=(9.5, 5.3))
-        _draw_by_energy(
-            fig,
-            [r for r in recs if r["case"]["tilt_deg"] == t],
-            settings,
-            include_brem=include_brem,
-            collapse_azimuth=collapse_azimuth,
-        )
-        figs.append(fig)
-    return figs
+    return _per_tilt_figs(
+        records(results), settings, _draw_by_energy, (9.5, 5.3),
+        include_brem=include_brem, collapse_azimuth=collapse_azimuth,
+    )
 
 
 def _draw_full_spectrum(
-    fig, trecs, settings, collapse_azimuth=True, logy=True, logx=True, floor_frac=1e-2
+    fig, trecs, settings, collapse_azimuth=True, logy=True, logx=True, floor_frac=1e-5
 ):
     """Render ONE polar tilt of the full measured-range view onto ``fig``: sharp
     lines + wide brem out to the beam energy, log-log, INTRINSIC (single axis; the
-    detector view is the Eagle XO browser)."""
+    detector view is the Eagle XO browser).
+
+    Broad-spectrum view: the y-floor is set from the brem CONTINUUM (its ~1st
+    percentile across the full range), not a fixed fraction of the line peak, so
+    the whole bremsstrahlung shoulder out to the beam energy stays on-screen
+    instead of being clipped under a tall, narrow line. ``floor_frac`` only caps
+    the dynamic range (deepest allowed = floor_frac x the peak)."""
     fig.clear()
     ax = fig.subplots(1, 1)
     energies = sorted({r["case"]["E0_keV"] for r in trecs})
     ymax = 0.0
+    ybrem_lo = np.inf  # smallest positive brem value shown -> the broad-spectrum floor
     xmax = 0.0
     xmin = 0.0
     for i, E0 in enumerate(energies):
@@ -297,7 +341,7 @@ def _draw_full_spectrum(
         if collapse_azimuth and len(grp) > 1:
             grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
         r = grp[0]
-        c = COLORS[i % len(COLORS)]
+        c = energy_color(E0, energies)
         az = r["case"]["tilt_azim_deg"]
         lbl = rf"{E0:g} keV ($\phi$={az:.1f}$\degree$)"
         Eb = r["E_grid_brem"]
@@ -310,6 +354,10 @@ def _draw_full_spectrum(
         ax.plot(Eb, brem_wide_det, color=c, ls="--", lw=0.7, alpha=0.85)
         ax.plot(r["E_grid"], total_line, color=c, lw=1.2, label=lbl)
         ymax = max(ymax, float(np.nanmax(total_line)) if total_line.size else 0.0)
+        ymax = max(ymax, float(np.nanmax(brem_wide_det)) if brem_wide_det.size else 0.0)
+        bpos = brem_wide_det[np.isfinite(brem_wide_det) & (brem_wide_det > 0)]
+        if bpos.size:
+            ybrem_lo = min(ybrem_lo, float(np.percentile(bpos, 1)))
     case = trecs[0]["case"]
     ax.set_title(
         rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} "
@@ -319,7 +367,10 @@ def _draw_full_spectrum(
     )
     if logy and ymax > 0:
         ax.set_yscale("log")
-        ax.set_ylim(ymax * floor_frac, ymax * 2)
+        # floor driven by the brem continuum so the broad spectrum stays visible,
+        # but never deeper than floor_frac x the peak (guards a near-zero edge)
+        floor = max(ybrem_lo if np.isfinite(ybrem_lo) else 0.0, ymax * floor_frac)
+        ax.set_ylim(floor, ymax * 2)
     else:
         ax.set_ylim(bottom=0)
     if logx:
@@ -337,31 +388,21 @@ def _draw_full_spectrum(
 
 
 def plot_full_spectrum(
-    results, settings, collapse_azimuth=True, logy=True, floor_frac=1e-2
+    results, settings, collapse_azimuth=True, logy=True, floor_frac=1e-5
 ):
-    """Full measured-range view (sharp lines on the wide brem, log y), ONE figure
-    per polar tilt. The x-axis spans the full brem grid (to the beam energy); the
-    log floor is ``floor_frac`` x the peak (~4 decades). For click-through use
+    """Full measured-range view (sharp lines on the wide brem, log-log), ONE figure
+    per polar tilt. The x-axis spans the full brem grid (to the beam energy) and
+    the y-floor follows the brem continuum, so the broad bremsstrahlung shoulder
+    is on-screen instead of clipped under the lines (``floor_frac`` caps the depth
+    at floor_frac x the peak). For click-through use
     ``browse(results, settings, kind="full")``. Needs records run with a separate
     ``E_grid_brem`` (``brem_wide`` present)."""
     recs = [r for r in records(results) if r.get("brem_wide") is not None]
-    if not recs:
-        print("no wide-brem records -- set E_grid_brem in the Sweep and re-run")
-        return []
-    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
-    figs = []
-    for t in tilts:
-        fig = plt.figure(figsize=(9.5, 5.3))
-        _draw_full_spectrum(
-            fig,
-            [r for r in recs if r["case"]["tilt_deg"] == t],
-            settings,
-            collapse_azimuth=collapse_azimuth,
-            logy=logy,
-            floor_frac=floor_frac,
-        )
-        figs.append(fig)
-    return figs
+    return _per_tilt_figs(
+        recs, settings, _draw_full_spectrum, (9.5, 5.3),
+        empty_msg="no wide-brem records -- set E_grid_brem in the Sweep and re-run",
+        collapse_azimuth=collapse_azimuth, logy=logy, floor_frac=floor_frac,
+    )
 
 
 def plot_peak_vs_tilt(results, settings):
@@ -381,7 +422,7 @@ def plot_peak_vs_tilt(results, settings):
         peak = [
             float(np.max(r["spec"])) * r["scale"] * settings.beam_current_na for r in rs
         ]
-        ax.plot(tilts, peak, "o-", color=COLORS[i % len(COLORS)], label=f"{E0:g} keV")
+        ax.plot(tilts, peak, "o-", color=energy_color(E0, by_E), label=f"{E0:g} keV")
     ax.set_xlabel(r"polar tilt $\theta_\mathrm{tilt}$ (deg)")
     ax.set_ylabel("best-azimuth peak (Phs/eV/s)")
     ax.set_title("Peak spectral flux vs polar tilt (best azimuth per point)")
@@ -400,9 +441,10 @@ def _draw_chunk(fig, trecs, settings):
     if not best:
         return
     ax_tot, ax_cxr = fig.subplots(1, 2, sharex=True)
-    for i, r in enumerate(best):
-        c = COLORS[i % len(COLORS)]
+    energies = [r["case"]["E0_keV"] for r in best]
+    for r in best:
         az, E0 = r["case"]["tilt_azim_deg"], r["case"]["E0_keV"]
+        c = energy_color(E0, energies)
         lbl = rf"{E0:g} keV ($\phi={az:g}\degree$)"
         E = r["E_grid"] / 1e3
         line_raw, brem_raw = _line_brem(r, settings, convolve=False)  # intrinsic
@@ -433,17 +475,7 @@ def _draw_chunk(fig, trecs, settings):
 def plot_chunk(results, settings):
     """The best-azimuth intrinsic spectra (total | CXR-only), ONE figure per polar
     tilt. For click-through use ``browse(results, settings, kind="chunk")``."""
-    recs = records(results)
-    if not recs:
-        print("no results yet")
-        return []
-    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
-    figs = []
-    for t in tilts:
-        fig = plt.figure(figsize=(11.0, 4.8))
-        _draw_chunk(fig, [r for r in recs if r["case"]["tilt_deg"] == t], settings)
-        figs.append(fig)
-    return figs
+    return _per_tilt_figs(records(results), settings, _draw_chunk, (11.0, 4.8))
 
 
 def stream_chunk(results, names, settings, collapse_azimuth=True, **_):
@@ -563,7 +595,7 @@ def _draw_timepix_detected(
             continue
         if collapse_azimuth and len(grp) > 1:
             grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
-        c = COLORS[i % len(COLORS)]
+        c = energy_color(E0, energies)
         for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
             inc, det = _tpx_detected(r, settings, thickness_um, bias_v, n_mc, seed)
             fin = inc[np.isfinite(inc)]
@@ -613,27 +645,11 @@ def plot_timepix_detected(
     figure per polar tilt, all energies overlaid (best azimuth each). For
     click-through use ``browse(results, settings, kind="timepix")``. (``ncols``
     is accepted for backward compatibility and ignored.)"""
-    recs = records(results)
-    if not recs:
-        print("no results yet")
-        return []
-    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
-    figs = []
-    for t in tilts:
-        fig = plt.figure(figsize=(9.0, 5.2))
-        _draw_timepix_detected(
-            fig,
-            [r for r in recs if r["case"]["tilt_deg"] == t],
-            settings,
-            thickness_um=thickness_um,
-            bias_v=bias_v,
-            collapse_azimuth=collapse_azimuth,
-            n_mc=n_mc,
-            seed=seed,
-            floor_frac=floor_frac,
-        )
-        figs.append(fig)
-    return figs
+    return _per_tilt_figs(
+        records(results), settings, _draw_timepix_detected, (9.0, 5.2),
+        thickness_um=thickness_um, bias_v=bias_v, collapse_azimuth=collapse_azimuth,
+        n_mc=n_mc, seed=seed, floor_frac=floor_frac,
+    )
 
 
 def plot_timepix_poisson(
@@ -776,7 +792,7 @@ def _draw_eaglexo_detected(
     coating="BN",
     resolve_energy=False,
     collapse_azimuth=True,
-    floor_frac=1e-3,
+    floor_frac=1e-4,
 ):
     """Render ONE polar tilt of the Eagle XO detected/incident view onto ``fig``
     (cleared first): all energies overlaid, incident dotted / detected solid, on
@@ -795,7 +811,7 @@ def _draw_eaglexo_detected(
             continue
         if collapse_azimuth and len(grp) > 1:
             grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
-        c = COLORS[i % len(COLORS)]
+        c = energy_color(E0, energies)
         for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
             inc, det = _eag_detected(r, settings, coating, resolve_energy)
             fin = inc[np.isfinite(inc)]
@@ -818,6 +834,8 @@ def _draw_eaglexo_detected(
                 inc_b = r["brem_wide"] * r["scale"]
                 det_b = inc_b * eag.qe(Eb, coating)
                 xhi = max(xhi, float(Eb[-1]))
+                if inc_b.size:  # keep the broad brem in the y-range, not clipped
+                    ymax = max(ymax, float(np.nanmax(inc_b)))
                 ax.plot(Eb, inc_b, color=c, ls=":", lw=0.8, alpha=0.5)
                 ax.plot(Eb, det_b, color=c, ls="-", lw=0.8, alpha=0.9)
     case = trecs[0]["case"]
@@ -855,7 +873,7 @@ def plot_eaglexo_detected(
     coating="BN",
     resolve_energy=False,
     collapse_azimuth=True,
-    floor_frac=1e-3,
+    floor_frac=1e-4,
 ):
     """Incident (dotted) vs Eagle-XO-detected (solid) spectra, log-log; ONE figure
     per polar tilt, all energies overlaid (best azimuth each), with a faint QE
@@ -865,25 +883,11 @@ def plot_eaglexo_detected(
     solid angle is whatever the sweep was run with -- point it at the Eagle with
     ``Sweep(..., **eaglexo_response.sweep_geometry(...))``. For click-through use
     ``browse(results, settings, kind="eaglexo")``."""
-    recs = records(results)
-    if not recs:
-        print("no results yet")
-        return []
-    tilts = sorted({r["case"]["tilt_deg"] for r in recs})
-    figs = []
-    for t in tilts:
-        fig = plt.figure(figsize=(9.0, 5.2))
-        _draw_eaglexo_detected(
-            fig,
-            [r for r in recs if r["case"]["tilt_deg"] == t],
-            settings,
-            coating=coating,
-            resolve_energy=resolve_energy,
-            collapse_azimuth=collapse_azimuth,
-            floor_frac=floor_frac,
-        )
-        figs.append(fig)
-    return figs
+    return _per_tilt_figs(
+        records(results), settings, _draw_eaglexo_detected, (9.0, 5.2),
+        coating=coating, resolve_energy=resolve_energy,
+        collapse_azimuth=collapse_azimuth, floor_frac=floor_frac,
+    )
 
 
 def plot_eaglexo_measured(
@@ -1341,7 +1345,7 @@ def plot_penetration_profile(
         swd = np.where(good, sw, 1.0)
         meanE = np.bincount(idx, w * d["E"], minlength=n_bins) / swd
         meanT = np.bincount(idx, w * d["t_fs"], minlength=n_bins) / swd
-        col = COLORS[i % len(COLORS)]
+        col = energy_color(E0, energies)
         axE.plot(ctr[good], meanE[good], "-", color=col, lw=1.9, label=f"{E0:g} keV")
         axT.plot(ctr[good], meanT[good], "-", color=col, lw=1.9, label=f"{E0:g} keV")
     case0 = next(c for c in cases if c["tilt_deg"] == t)
@@ -1362,30 +1366,67 @@ def plot_penetration_profile(
     return fig
 
 
-# ---- parametric heatmaps -----------------------------------------------------
-def _axis_edges(vals):
-    """Cell edges for imshow so the swept values sit at pixel centres (assumes a
-    uniform step, as for np.linspace sweeps)."""
-    vals = sorted(vals)
-    if len(vals) < 2:
-        return vals[0] - 0.5, vals[0] + 0.5
-    step = vals[1] - vals[0]
-    return vals[0] - step / 2, vals[-1] + step / 2
+# ---- parametric heatmaps + parameter scans -----------------------------------
+# Per case field: (axis label, divide-to-display, display unit, value format).
+# Lets ANY swept knob be a heatmap/scan axis with sensible labels and units.
+_AXIS_SPECS = {
+    "tilt_deg": ("polar tilt", 1.0, "deg", "{:g}"),
+    "tilt_azim_deg": ("azimuthal tilt", 1.0, "deg", "{:g}"),
+    "E0_keV": ("beam energy", 1.0, "keV", "{:g}"),
+    "thickness_ang": ("thickness", 1e4, r"$\mu$m", "{:g}"),
+    "B_ang2": ("B-factor", 1.0, r"$\AA^2$", "{:g}"),
+}
 
-
-# (metric key, panel-group label + units, colormap)
+# (metric key, label + units, colormap)
 _HEATMAP_QUANTITIES = [
     ("peak_flux", "peak spectral flux  (Phs/eV/s)", "viridis"),
-    ("line_eV", "coherent line energy  (eV)", "plasma"),
-    ("fwhm_eV", "line FWHM  (eV)", "magma"),
-    ("line_frac", "integrated line / total spectral flux", "cividis"),
-    ("line_flux", "integrated coherent line flux  (Phs/s)", "viridis"),
-    ("total_flux", "total integrated flux  (Phs/s)", "viridis"),
+    ("coherent_flux", "integrated coherent flux, all lines  (Phs/s)", "viridis"),
+    ("line_flux", "integrated flux under the dominant line  (Phs/s)", "viridis"),
+    ("line_eV", "dominant coherent line energy  (eV)", "plasma"),
+    ("fwhm_eV", "dominant line FWHM  (eV)", "magma"),
+    ("line_frac", "dominant line / total spectral flux", "cividis"),
+    ("line_quality", "line-definition quality  (0-1)", "Greens"),
+    ("total_flux", "total integrated flux, lines+brem  (Phs/s)", "viridis"),
 ]
+_METRIC_LABELS = {key: label for key, label, _ in _HEATMAP_QUANTITIES}
 
-# line-characterization maps are meaningless where there's essentially no
-# emission; gate these by peak flux. peak_flux / total_flux are always shown.
-_FLUX_GATED = {"line_eV", "fwhm_eV", "line_frac"}
+# Line-characterization maps are meaningless where the line is ill-defined --
+# either near-zero emission OR a broad ramp / a cluster of comparable peaks
+# (low line_quality, see cxr_results.line_quality). Gate these by BOTH peak flux
+# and line_quality. The always-well-defined maps (peak_flux, coherent_flux,
+# total_flux) and the diagnostic line_quality map itself are never gated.
+_FLUX_GATED = {"line_eV", "fwhm_eV", "line_frac", "line_flux"}
+
+
+def _axis_label(key):
+    spec = _AXIS_SPECS.get(key)
+    return key if spec is None else f"{spec[0]} ({spec[2]})"
+
+
+def _axis_disp(key, vals):
+    """Swept raw values -> display units (e.g. thickness Angstrom -> microns)."""
+    div = _AXIS_SPECS.get(key, (None, 1.0))[1]
+    return [float(v) / div for v in vals]
+
+
+def _value_label(key, v):
+    """'30 keV' / '17 um' style label for one swept value."""
+    lbl, div, unit, fmt = _AXIS_SPECS.get(key, (key, 1.0, "", "{:g}"))
+    return f"{fmt.format(float(v) / div)} {unit}".strip()
+
+
+def _cell_edges(disp_vals):
+    """Cell EDGES for pcolormesh from sorted display values: midpoints between
+    neighbours (extrapolated at the ends), so NON-uniform axes (a handful of
+    thicknesses or energies) get correct boundaries -- not just linspace tilts."""
+    v = np.asarray(sorted(disp_vals), dtype=float)
+    if v.size == 1:
+        d = abs(v[0]) * 0.1 or 0.5
+        return np.array([v[0] - d, v[0] + d])
+    mids = 0.5 * (v[:-1] + v[1:])
+    return np.concatenate(
+        [[v[0] - (mids[0] - v[0])], mids, [v[-1] + (v[-1] - mids[-1])]]
+    )
 
 
 def plot_heatmaps(
@@ -1393,32 +1434,45 @@ def plot_heatmaps(
     settings,
     cases=None,
     quantities=None,
+    x="tilt_azim_deg",
+    y="tilt_deg",
+    panel="E0_keV",
+    select="quality_peak",
     rel_prominence=0.03,
     line_metric="sharpness",
     min_flux_frac=0.02,
+    min_line_quality=0.2,
 ):
-    """Parametric heatmaps over (polar tilt x azimuthal tilt), one panel per beam
-    energy, one figure per quantity.
+    """Parametric heatmaps over ANY two swept parameters ``x`` x ``y``, one panel
+    per value of ``panel``, one figure per quantity.
 
-    Quantities (see cxr_results.line_metrics): peak spectral flux, coherent line
-    energy, line FWHM, the integrated-line / total-flux ratio, and the total
-    absolute integrated flux.
+    ``x`` / ``y`` / ``panel`` are case-dict keys -- any of "tilt_deg",
+    "tilt_azim_deg", "E0_keV", "thickness_ang", "B_ang2", ... The defaults
+    reproduce the original map (azimuth x polar tilt, one panel per beam energy).
+    Other critical scans are now one call::
 
-    line_metric : how line_index picks the line -- "sharpness" (default; narrowest
-        prominent peak), "prominence" (the dominant/tallest line; use this if the
-        line-energy map jumps onto sharp secondary lines), or "max" (global argmax).
-    rel_prominence : line-finder prominence floor.
-    min_flux_frac : blank the line-characterization maps (line energy, FWHM,
-        line/total) wherever a cell's peak flux is below this fraction of that
-        energy's max -- those near-zero-emission geometries have no well-defined
-        line (peak_widths blows up there). Set 0 to disable. peak/total flux maps
-        are never gated.
+        plot_heatmaps(res, s, x="thickness_ang", y="E0_keV", panel="tilt_deg")
+        plot_heatmaps(res, s, x="tilt_deg", y="E0_keV", panel="tilt_azim_deg")
 
-    Pass ``cases`` (the current sweep from build_cases) to restrict the map to
-    THIS sweep's configs -- otherwise a checkpoint that has accumulated several
-    sweeps yields the UNION of their grids, which is sparse: blank cells are
-    (tilt, azimuth) pairs no single sweep ran together. Needs both tilt and
-    azimuth swept to be a 2-D map. Returns the list of figs.
+    When the sweep varies dimensions OTHER than x/y/panel, several records land in
+    one cell; ``select`` (a cxr_results.selection_score mode, default
+    "quality_peak" = peak flux x line quality) picks the BEST record and the cell
+    shows ITS metric -- i.e. "the best achievable here". For the default axes each
+    cell is a single case, so the reduction is a no-op (matches the old maps).
+
+    Quantities (see cxr_results.line_metrics): peak spectral flux, the integrated
+    coherent flux of ALL lines, the integrated flux under the single dominant
+    line, that line's energy and FWHM, its share of the total flux, a
+    line-definition quality map, and the total integrated flux. Maps that need NO
+    peak (peak_flux, coherent_flux, total_flux) and the quality map are valid
+    everywhere; the dominant-line maps are gated by BOTH ``min_flux_frac`` (cell
+    peak flux below this fraction of the panel max -> no emission) AND
+    ``min_line_quality`` (line_quality below this [0,1] -> no well-defined line:
+    a broad ramp or a cluster of comparable peaks). Set either to 0 to disable.
+
+    Pass ``cases`` (the current sweep from build_cases) to restrict to THIS
+    sweep's configs -- otherwise a checkpoint accumulating several sweeps yields a
+    sparse UNION of grids. Returns the list of figs.
     """
     names = None if cases is None else {c["name"] for c in cases}
     recs = records(results, names)
@@ -1426,35 +1480,43 @@ def plot_heatmaps(
         print("no results yet")
         return []
     quantities = quantities or _HEATMAP_QUANTITIES
-    energies = sorted({r["case"]["E0_keV"] for r in recs})
     metrics = {
         id(r): line_metrics(r, settings, rel_prominence, metric=line_metric)
         for r in recs
     }
+    panel_vals = sorted({r["case"][panel] for r in recs})
 
     figs = []
     for key, label, cmap in quantities:
-        # build each energy's grid first, so all panels can share ONE color scale
-        # (spanning every energy's values -> the highest energy sets the top)
-        panels = []  # (E0, Z, extent)
-        for E0 in energies:
-            er = [r for r in recs if r["case"]["E0_keV"] == E0]
-            tilts = sorted({r["case"]["tilt_deg"] for r in er})
-            azims = sorted({r["case"]["tilt_azim_deg"] for r in er})
-            ti = {t: i for i, t in enumerate(tilts)}
-            ai = {a: j for j, a in enumerate(azims)}
+        gated = key in _FLUX_GATED
+        panels = []  # (panel_value, Z, x_edges, y_edges)
+        for pv in panel_vals:
+            er = [r for r in recs if r["case"][panel] == pv]
+            xs = sorted({r["case"][x] for r in er})
+            ys = sorted({r["case"][y] for r in er})
+            xi = {v: i for i, v in enumerate(xs)}
+            yi = {v: j for j, v in enumerate(ys)}
             fmax = max((metrics[id(r)]["peak_flux"] for r in er), default=0.0)
             floor = min_flux_frac * fmax
-            Z = np.full((len(tilts), len(azims)), np.nan)
+            # reduce every (x, y) cell to its single best record (selection_score)
+            best = {}  # (xv, yv) -> (score, rec)
             for r in er:
+                ck = (r["case"][x], r["case"][y])
+                s = selection_score(metrics[id(r)], select)
+                if ck not in best or s > best[ck][0]:
+                    best[ck] = (s, r)
+            Z = np.full((len(ys), len(xs)), np.nan)
+            for (xv, yv), (_, r) in best.items():
                 m = metrics[id(r)]
-                if key in _FLUX_GATED and m["peak_flux"] < floor:
-                    continue  # near-zero emission -> no well-defined line here
-                Z[ti[r["case"]["tilt_deg"]], ai[r["case"]["tilt_azim_deg"]]] = m[key]
-            x0, x1 = _axis_edges(azims)
-            y0, y1 = _axis_edges(tilts)
-            panels.append((E0, Z, (x0, x1, y0, y1)))
-        finite = [Z[np.isfinite(Z)] for _, Z, _ in panels]
+                if gated and (
+                    m["peak_flux"] < floor or m["line_quality"] < min_line_quality
+                ):
+                    continue  # near-zero emission / ill-defined line -> blank
+                Z[yi[yv], xi[xv]] = m[key]
+            panels.append(
+                (pv, Z, _cell_edges(_axis_disp(x, xs)), _cell_edges(_axis_disp(y, ys)))
+            )
+        finite = [Z[np.isfinite(Z)] for _, Z, _, _ in panels]
         finite = (
             np.concatenate(finite)
             if any(a.size for a in finite)
@@ -1470,20 +1532,203 @@ def plot_heatmaps(
             constrained_layout=True,
         )
         im = None
-        for ax, (E0, Z, ext) in zip(axes.ravel(), panels):
-            im = ax.imshow(
-                Z,
-                origin="lower",
-                aspect="auto",
-                cmap=cmap,
-                extent=list(ext),
-                vmin=vmin,
-                vmax=vmax,
-            )
-            ax.set_title(f"{E0:g} keV")
-            ax.set_xlabel("azimuthal tilt (deg)")
-            ax.set_ylabel("polar tilt (deg)")
+        for ax, (pv, Z, xe, ye) in zip(axes.ravel(), panels):
+            im = ax.pcolormesh(xe, ye, Z, cmap=cmap, vmin=vmin, vmax=vmax)
+            ax.set_title(f"{_AXIS_SPECS.get(panel, (panel,))[0]} = {_value_label(panel, pv)}")
+            ax.set_xlabel(_axis_label(x))
+            ax.set_ylabel(_axis_label(y))
         fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85)  # one shared scale
-        fig.suptitle(label, fontsize=14)
+        fig.suptitle(f"{label}    (best per cell: {select})", fontsize=13)
         figs.append(fig)
     return figs
+
+
+def plot_metric_vs(
+    results,
+    settings,
+    x="thickness_ang",
+    metric="line_flux",
+    hue="E0_keV",
+    select="quality_peak",
+    cases=None,
+    rel_prominence=0.03,
+    line_metric="sharpness",
+    logx=False,
+    logy=False,
+):
+    """1-D parameter scan: ``metric`` vs the swept parameter ``x``, one line per
+    ``hue`` value, reducing every OTHER swept dimension to its best geometry
+    (cxr_results.selection_score ``select``). The line-plot companion to the
+    heatmaps -- e.g. line flux vs thickness, or peak flux vs beam energy::
+
+        plot_metric_vs(res, s, x="thickness_ang", metric="line_flux", logx=True)
+        plot_metric_vs(res, s, x="E0_keV", metric="peak_flux", hue="tilt_deg")
+
+    ``metric`` is any line_metrics key. Generalizes plot_peak_vs_tilt
+    (x="tilt_deg", metric="peak_flux", hue="E0_keV")."""
+    names = None if cases is None else {c["name"] for c in cases}
+    recs = records(results, names)
+    if not recs:
+        print("no results yet")
+        return None
+    metrics = {
+        id(r): line_metrics(r, settings, rel_prominence, metric=line_metric)
+        for r in recs
+    }
+    hue_vals = sorted({r["case"][hue] for r in recs})
+    div_x = _AXIS_SPECS.get(x, (None, 1.0))[1]
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for j, hv in enumerate(hue_vals):
+        hr = [r for r in recs if r["case"][hue] == hv]
+        xs = sorted({r["case"][x] for r in hr})
+        ys = []
+        for xv in xs:
+            cell = [r for r in hr if r["case"][x] == xv]
+            best = max(cell, key=lambda r: selection_score(metrics[id(r)], select))
+            ys.append(metrics[id(best)][metric])
+        col = (
+            energy_color(hv, hue_vals)
+            if hue == "E0_keV"
+            else COLORS[j % len(COLORS)]
+        )
+        ax.plot(
+            [v / div_x for v in xs], ys, "o-", color=col, lw=1.8,
+            label=_value_label(hue, hv),
+        )
+    if logx:
+        ax.set_xscale("log")
+    if logy:
+        ax.set_yscale("log")
+    ax.set_xlabel(_axis_label(x))
+    ax.set_ylabel(_METRIC_LABELS.get(metric, metric))
+    ax.set_title(
+        f"{_METRIC_LABELS.get(metric, metric)} vs {_axis_label(x)}  "
+        f"(best per point: {select})",
+        fontsize=11,
+    )
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(title=_AXIS_SPECS.get(hue, (hue,))[0], fontsize=9)
+    fig.tight_layout()
+    return fig
+
+
+def plot_best_spectra(
+    results,
+    settings,
+    top_n=12,
+    select="quality_peak",
+    include_brem=True,
+    cases=None,
+    ncols=4,
+    rel_prominence=0.03,
+    line_metric="sharpness",
+):
+    """The top-``top_n`` geometries across the WHOLE sweep, ranked by
+    cxr_results.selection_score(``select``) -- one intrinsic spectrum panel each,
+    titled with the geometry, the score components, and the line quality. The
+    answer to "thousands of cases, which few do I look at": instead of paging
+    every polar tilt, see the best dozen at a glance. ``select`` defaults to
+    peak_flux x line_quality (bright AND well-defined), not the raw peak the
+    per-tilt browser collapses on -- so spurious tall spikes don't win."""
+    names = None if cases is None else {c["name"] for c in cases}
+    recs = records(results, names)
+    if not recs:
+        print("no results yet")
+        return None
+    metrics = {
+        id(r): line_metrics(r, settings, rel_prominence, metric=line_metric)
+        for r in recs
+    }
+    ranked = sorted(
+        recs, key=lambda r: selection_score(metrics[id(r)], select), reverse=True
+    )[:top_n]
+    all_E = {r["case"]["E0_keV"] for r in recs}
+    n = len(ranked)
+    ncols = min(ncols, n)
+    nrows = int(np.ceil(n / ncols))
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(3.3 * ncols, 2.6 * nrows), squeeze=False
+    )
+    for k, r in enumerate(ranked):
+        ax = axes[k // ncols][k % ncols]
+        c, m = r["case"], metrics[id(r)]
+        line_det, brem_det = _line_brem(r, settings, convolve=False)
+        E = r["E_grid"] / 1e3
+        col = energy_color(c["E0_keV"], all_E)
+        ax.plot(
+            E, (line_det + brem_det if include_brem else line_det) * r["scale"],
+            color=col, lw=1.1,
+        )
+        if include_brem:
+            ax.plot(E, brem_det * r["scale"], color=col, ls="--", lw=0.5)
+        ax.set_title(
+            rf"#{k + 1} {c['name'].split()[0]} {c['E0_keV']:g}keV"
+            "\n"
+            rf"$\theta$={c['tilt_deg']:g}$\degree$ $\phi$={c['tilt_azim_deg']:g}$\degree$  "
+            rf"q={m['line_quality']:.2f}, {m['line_eV']:.0f}eV",
+            fontsize=7.5,
+        )
+        ax.tick_params(labelsize=6)
+        ax.set_ylim(bottom=0)
+        ax.margins(x=0)
+        ax.grid(alpha=0.3)
+    for k in range(n, nrows * ncols):
+        axes[k // ncols][k % ncols].axis("off")
+    fig.supxlabel("Photon energy (keV)", fontsize=9)
+    fig.supylabel("Intensity (Phs/eV/s/nA)", fontsize=9)
+    fig.suptitle(f"Top {n} geometries by {select} (dashed = brem)", fontsize=12)
+    fig.tight_layout()
+    return fig
+
+
+def plot_material_comparison(
+    results_by_material,
+    settings,
+    select="quality_peak",
+    rel_prominence=0.03,
+    line_metric="sharpness",
+):
+    """Cross-material headline: for each material's results store, find the single
+    BEST geometry/energy (cxr_results.selection_score ``select``) and plot its
+    dominant coherent line ENERGY vs its integrated line FLUX -- one point per
+    material, coloured by line-definition quality. Answers "which crystal gives
+    the brightest well-defined line, and at what energy" for comparison against
+    the paper's catalogue.
+
+    ``results_by_material`` : ``{label: results_store}``, e.g. built in the
+    notebook with ``{m: load_checkpoint(m) for m in MATERIALS}`` (skip empties)."""
+    pts = []  # (label, line_eV, line_flux, quality, case)
+    for label, results in results_by_material.items():
+        recs = records(results)
+        if not recs:
+            continue
+        metrics = {
+            id(r): line_metrics(r, settings, rel_prominence, metric=line_metric)
+            for r in recs
+        }
+        best = max(recs, key=lambda r: selection_score(metrics[id(r)], select))
+        m = metrics[id(best)]
+        pts.append((label, m["line_eV"], m["line_flux"], m["line_quality"], best["case"]))
+    if not pts:
+        print("no results in any material")
+        return None
+    fig, ax = plt.subplots(figsize=(9.5, 5.6))
+    sc = ax.scatter(
+        [p[1] / 1e3 for p in pts], [p[2] for p in pts], c=[p[3] for p in pts],
+        cmap="viridis", vmin=0.0, vmax=1.0, s=110, edgecolor="k", zorder=3,
+    )
+    for label, eV, flux, q, case in pts:
+        ax.annotate(
+            f"  {label} ({case['E0_keV']:g} keV)", (eV / 1e3, flux),
+            fontsize=8, va="center",
+        )
+    ax.set_yscale("log")
+    ax.set_xlabel("dominant coherent line energy (keV)")
+    ax.set_ylabel("integrated line flux at best geometry (Phs/s)")
+    ax.set_title(f"Best coherent line per material  (select: {select})", fontsize=12)
+    ax.grid(alpha=0.3, which="both")
+    ax.margins(x=0.12)
+    cb = fig.colorbar(sc, ax=ax)
+    cb.set_label("line-definition quality")
+    fig.tight_layout()
+    return fig

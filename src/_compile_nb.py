@@ -1,12 +1,16 @@
-"""Compile every code cell of the edited notebooks to catch syntax errors."""
+"""Compile every code cell of the project notebooks to catch syntax errors.
+
+Run from the repo root: ``python src/_compile_nb.py``."""
 
 import json
+import os
 import sys
 
 nbs = [
-    "cxr_analysis_zhai.ipynb",
-    "cxr_analysis_feranchuk.ipynb",
-    "zhai_fig1c_check.ipynb",
+    "cxr_scan.ipynb",
+    "cxr_analysis.ipynb",
+    os.path.join("checks", "cxr_analysis_feranchuk.ipynb"),
+    os.path.join("checks", "zhai_fig1c_check.ipynb"),
 ]
 bad = 0
 for path in nbs:
@@ -16,8 +20,15 @@ for path in nbs:
         if c["cell_type"] != "code":
             continue
         n_code += 1
-        # strip IPython magics / shell escapes the way the headless runner does
-        src = "".join(l for l in c["source"] if not l.lstrip().startswith(("%", "!")))
+        # nbformat allows source as a list of lines OR a single string; normalize
+        # to text, then strip IPython magics / shell escapes line-by-line the way
+        # the headless runner does (a per-character pass would mangle a "%magic").
+        raw = c["source"]
+        text = "".join(raw) if isinstance(raw, list) else raw
+        src = "".join(
+            ln for ln in text.splitlines(keepends=True)
+            if not ln.lstrip().startswith(("%", "!"))
+        )
         cid = c.get("id", str(i))
         try:
             compile(src, f"{path}:cell[{i}]({cid})", "exec")

@@ -92,7 +92,9 @@ notebooks are stripped by `nbstripout` via `.gitattributes`).
 ```
 cxr_scan.ipynb         RUNNER: pick MATERIAL -> Sweep -> run_sweep -> checkpoints/<material>.pkl
 cxr_analysis.ipynb     VIZ: load that checkpoint -> all figures (no sweep runs here)
-export_pdf.py          headless cxr_analysis.ipynb -> PDF export
+scan.py                headless twin of cxr_scan.ipynb (guarded; run a sweep non-interactively)
+remote.py              orchestrator: run scan.py on the GPU box over ssh, pull the checkpoint back
+export_pdf.py          headless cxr_analysis.ipynb -> PDF export (run locally)
 src/                   all importable modules (both notebooks do sys.path.insert(0,"src"))
 data/                  crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
 checks/                validation scripts + check notebooks (Feranchuk anchor, Fig 1c, kinematic audit)
@@ -132,15 +134,30 @@ so imports work from any cwd. `*.pkl` checkpoints and `*.png` are gitignored.
   load results (and rebuild the case list) without re-running.
 - **`cxr_results.py`** — `Settings` dataclass, `store_result` (case → `results`
   record), `best_azimuth` (collapse an azimuth sweep to the highest-**peak**
-  spectrum per material/thickness/tilt/energy), `show_summary`.
+  spectrum), `show_summary` (full per-row table). Per-record scalar metrics for
+  the maps/selection live in `line_metrics`: `peak_flux` (max coherent density,
+  no peak-finding), `coherent_flux` (∫ of ALL lines), `line_flux` (∫ under the
+  single dominant found line only), `line_eV`/`fwhm_eV`, `line_frac`, and
+  `line_quality` ∈ [0,1] — a definition score that flags geometries with NO clean
+  line (broad ramp, or many comparable peaks; dominance·contrast·narrowness).
+  `selection_score(m, mode)` ranks records (`quality_peak` default = bright AND
+  clean) for every "best geometry" path; `top_geometries`/`show_top` print a
+  compact ranked top-N table (the readable alternative to the full dump).
 - **`cxr_plots.py`** — all plotting. `browse(results, settings, kind=...)` pages
   one figure per polar tilt (inline backend, or `%matplotlib widget`/ipympl);
   kinds: `chunk`|`by_energy`|`full` (intrinsic spectra) and `eaglexo`|`timepix`
-  (detector). Also `plot_heatmaps` (parametric tilt×azimuth maps),
-  `plot_electron_trajectories`/`plot_trajectory_grid` (datashader-rasterized
-  cascade cross-sections), `plot_penetration_profile` (mean energy + lifetime vs
-  depth). Intrinsic spectra are single-axis — the EDS detector-convolution view
-  was removed; Eagle XO is the detector view.
+  (detector). `plot_heatmaps(..., x=, y=, panel=, select=)` is GENERAL — any two
+  swept knobs as axes (default azimuth×tilt, panel per energy; pass
+  `x="E0_keV", y="tilt_deg"` etc.), with best-per-cell reduction via
+  `selection_score` and dominant-line maps gated by `min_line_quality`.
+  `plot_metric_vs` (1-D scans of any metric vs any swept param), `plot_best_spectra`
+  (top-N geometries across the whole sweep — the answer to "thousands of cases"),
+  `plot_material_comparison` (cross-material best line energy vs flux),
+  `plot_trajectory_grid`/`plot_penetration_profile` (datashader cascades + depth
+  profiles). Beam energy → colour is consistent across every figure
+  (`energy_color`); `_per_tilt_figs` is the shared wrapper body. Intrinsic spectra
+  are single-axis — the EDS view was removed; Eagle XO is the detector view, and
+  `apply_detector_qe` now defaults **False** so "intrinsic" means intrinsic.
 - **`timepix_response.py`** — per-photon forward model of the Timepix3 (Si
   sensor): photoabsorption, e-h pairs (W=3.65 eV, Fano), charge sharing, and the
   **~1.9 keV counting threshold** (the headline effect — it eats sub-2 keV line
@@ -166,9 +183,25 @@ thickness / energies / tilts / E-grids there; both notebooks pick it up):
 
 `COLLAPSE_AZIMUTH=True` keeps only the best azimuth per (tilt, energy).
 
+**Remote compute, local viz** (the lab box has an RTX 5080; this laptop has the
+matplotlib + PDF toolchain). The GPU sweep runs on the box, everything visual
+stays local — no manual ssh, no hand-copying files:
+
+```
+python remote.py scan mose2          # sync code up -> run scan.py on the box -> pull checkpoint back
+python remote.py scan mose2 --quick   # tiny grid smoke test (isolated <material>_quick.pkl)
+python remote.py pull mose2           # just fetch an existing checkpoint
+```
+
+then open `cxr_analysis.ipynb` (same `MATERIAL`) or `export_pdf.py` locally. The
+box is ssh host `qlmc` (`~/.ssh/config`, cloudflared proxy); override with
+`CXR_REMOTE_{HOST,DIR,UV}`. `scan.py <material> [--quick] [--workers N]` is the
+guarded headless runner `remote.py` invokes (also runnable directly on the box).
+Don't run PDF export on the box — pull the checkpoint and render here.
+
 Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
 `mos2`, `ws2`, `ptse2`, `hfse2`, `zrse2`. (Note: the graphite entry is keyed
-`hopg`.)
+`hopg` — there is no `graphite` key, and nothing may pass one.)
 
 ### Physics conventions — read before touching geometry or amplitudes
 
@@ -196,11 +229,22 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
 
 ### Gotchas
 
-- **Windows spawn**: `run_cases` uses `ProcessPoolExecutor`; the worker
-  (`run_case`) is module-level so it pickles. Any standalone test script that
-  calls it **must** be a real file with an `if __name__ == "__main__":` guard —
-  `python - <<EOF` fails (workers try to import `<stdin>`). See
-  `checks/run_zhai_nb_test.py`.
+- **Worker re-import guard (spawn / forkserver)**: `run_cases` uses
+  `ProcessPoolExecutor`; the worker (`run_case`/`_transport_case`) is module-level
+  so it pickles. The start method is `spawn` on Windows and — **as of Python 3.14**
+  — `forkserver` on Linux (was `fork`), and BOTH re-import the entry module in each
+  worker. So any script that drives a sweep **must** have an
+  `if __name__ == "__main__":` guard (`scan.py` does), or it relaunches itself
+  recursively — surfacing as a `forkserver ConnectionResetError`. `python - <<EOF`
+  fails the same way (workers import `<stdin>`). Unguarded scripts "worked" pre-3.14
+  only because `fork` didn't re-import; notebooks are guarded-equivalent.
+- **`apply_detector_qe` defaults False**: the intrinsic spectra (`spec`) are now
+  shown un-filtered. The Timepix3 / Eagle XO views apply their OWN QE downstream;
+  the legacy SDD polymer-window QE (`detector_efficiency`) is opt-in only.
+- **`remote.py` line endings**: its tar-sync ships the laptop's CRLF files to the
+  Linux box, so `git status` there shows synced `.py` as modified (LF vs CRLF,
+  content identical) — harmless for running, but `git checkout -- .` on the box
+  before any `git pull`. See TODO (b) in `remote.py` for the git-based fix.
 - **GPU ⇒ serial**: with CuPy present, `run_cases` runs serially (one CUDA
   context), not in a process pool. Multiprocessing speedups only apply CPU-side.
 - **Workers**: machine is an i7-13620H — 10 physical cores / 16 threads. Cap
@@ -217,7 +261,9 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
   verified by the 2.53 Å Mo–Se bond. This changed |S(002)|² by ×0.53 and is a
   known ~×2 source of disagreement vs the paper's normalization.
 - **Brem grid**: `E_grid_line` is fine+narrow (lines cap at a few keV, expensive
-  sinc²); `E_grid_brem` is coarse+wide (cheap, extend to the beam energy).
+  sinc²); `E_grid_brem` is coarse+wide (cheap, extend to the beam energy). It
+  starts at 0 eV, so `absorption_length_ang` is called at E=0 → a benign
+  "divide by zero" RuntimeWarning (handled by `nan_to_num`); see TODO (c) there.
 - **Trajectory colouring (datashader)**: aggregate tracks with `cvs.line(...,
   line_width=0)` so each pixel takes the true electron energy, then `tf.spread` to
   thicken. `line_width>0` coverage-weights the aggregated value and paints a bogus
@@ -233,7 +279,7 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
   ratio → 1.00 after the δ-function Jacobian fix).
 - `kinematic_validity_check.py` — DYN/recoil/ξ_e audit + vdW merit table.
 - `zhai_fig1c_check.ipynb`, `cxr_analysis_feranchuk.ipynb` — figure reproductions.
-- `run_zhai_nb_test.py` — headless guarded harness for the main notebook.
+- `src/_compile_nb.py` — compiles every notebook's code cells (syntax smoke test).
 
 ### Data provenance
 

@@ -334,6 +334,15 @@ def absorption_length_ang(element, photon_E_eV, number_density_per_ang3):
     L_abs [Angstrom] from Henke f2:  mu = 2 (omega/c) * (n_atoms r_e lambda^2 f2 / ... )
     Practical form: 1/L_abs = 2 k beta_index, beta_index = (r_e lambda^2 / 2pi) n f2.
     Returns L_abs in Angstrom. (For compounds, sum n_i f2_i.)
+
+    TODO (c) -- benign RuntimeWarning "divide by zero ... lam = HC_EV_ANG /
+    photon_E_eV": the wide brem grid starts at 0 eV (cxr_config E_grid_brem =
+    np.arange(0.0, ...)), so this is called with E=0; lam->inf, mu->0, L_abs->inf,
+    which the brem path already swallows via nan_to_num. Just noise. To silence it,
+    EITHER start the brem grid at a small positive eV (e.g. arange(10.0, ...) in
+    cxr_config / the build_cases default) OR guard here, e.g.
+    `with np.errstate(divide="ignore"): ...` and return inf at E<=0. Left as-is to
+    keep this physics-core function untouched.
     """
     _, f2 = henke_dispersion(element, photon_E_eV)
     lam = HC_EV_ANG / photon_E_eV

@@ -59,7 +59,7 @@ from cxr_montecarlo import beta_from_keV, _sigma_browning_cm2
 
 THETA_OBS = np.deg2rad(119.0)
 CASES = [
-    ("graphite", (0, 0, 2)),
+    ("hopg", (0, 0, 2)),
     ("mose2", (0, 0, 2)),
     ("diamond", (1, 1, 1)),
     ("diamond", (4, 0, 0)),

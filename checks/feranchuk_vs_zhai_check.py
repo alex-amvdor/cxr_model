@@ -64,7 +64,7 @@ HKL = (0, 0, 2)
 B_002 = 0.8
 NE = 800
 
-info = CRYSTALS["graphite"]
+info = CRYSTALS["hopg"]
 n_atoms = len(info["basis"]) / info["V_cell"]
 beta = beta_from_keV(E0_KEV)
 _, g = reciprocal_g_vector(HKL, info["lattice"])
@@ -116,7 +116,7 @@ for thickness, label in ((290.0, "29 nm film"), (1e7, "1 mm bulk")):
     # Eq. (6) audit shows this extrapolation is OUTSIDE kinematic validity.
     N_line_A = (
         photons_per_electron(
-            "graphite",
+            "hopg",
             HKL,
             E_line,
             THETA_OBS,
@@ -148,7 +148,12 @@ for thickness, label in ((290.0, "29 nm film"), (1e7, "1 mm bulk")):
         seed=5,
     )
     spec_line = mc_spectrum(
-        segs, E_GRID, hkl_list=(HKL, (0, 0, -2)), theta_obs_rad=THETA_OBS, B_ang2=B_002
+        segs,
+        E_GRID,
+        crystal="hopg",
+        hkl_list=(HKL, (0, 0, -2)),
+        theta_obs_rad=THETA_OBS,
+        B_ang2=B_002,
     )
     segs_b = simulate_trajectories(
         E0_KEV,

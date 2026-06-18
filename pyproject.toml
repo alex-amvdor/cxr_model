@@ -1,7 +1,7 @@
 [project]
 name = "cxr-model"
 version = "0.1.0"
-description = "Add your description here"
+description = "Coherent X-ray radiation (PXR + coherent bremsstrahlung) from table-top electron beams in crystals"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -17,5 +17,6 @@ dependencies = [
     "pandas>=3.0.3",
     "pandoc>=2.4",
     "scipy>=1.17.1",
+    "tabulate>=0.10.0",
     "tqdm>=4.68.2",
 ]

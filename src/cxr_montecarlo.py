@@ -523,7 +523,7 @@ def _polarization_pair(k_hat, g_vec):
 def mc_spectrum(
     segments,
     E_grid_eV,
-    crystal="graphite",
+    crystal="hopg",
     hkl_list=((0, 0, 2), (0, 0, -2)),
     theta_obs_rad=np.deg2rad(119.0),
     B_ang2=0.8,
