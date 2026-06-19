@@ -335,6 +335,9 @@ def line_metrics(r, settings, rel_prominence=0.03, n_fwhm=3.0, metric="sharpness
       total_flux    : trapz(spec + brem) over the line grid * scale * current
                       [Phs/s]. (brem here is the line-grid brem, not the wide
                       grid -- this is the total IN the line window, not to E0.)
+      coherent_brem_ratio : trapz(spec) / trapz(brem) over the line grid -- ALL
+                      coherent (CXR) flux relative to the incoherent brem beneath
+                      it (a ratio, so scale/current cancel). NaN if there's no brem.
       line_quality  : [0, 1] definition score of the dominant line (line_quality);
                       the heatmaps gate the line-characterization maps on it.
 
@@ -365,7 +368,8 @@ def line_metrics(r, settings, rel_prominence=0.03, n_fwhm=3.0, metric="sharpness
     lo, hi = max(idx - half, 0), min(idx + half + 1, spec.size)
     line_int = float(np.trapezoid(spec[lo:hi], E[lo:hi])) if hi > lo else 0.0
     coh_int = float(np.trapezoid(spec, E)) if spec.size else 0.0
-    total_int = float(np.trapezoid(spec + brem, E))
+    brem_int = float(np.trapezoid(brem, E))
+    total_int = coh_int + brem_int
     return {
         "peak_flux": smax * sc * cur,
         "coherent_flux": coh_int * sc * cur,
@@ -374,6 +378,7 @@ def line_metrics(r, settings, rel_prominence=0.03, n_fwhm=3.0, metric="sharpness
         "line_flux": line_int * sc * cur,
         "line_frac": (line_int / total_int) if total_int > 0 else float("nan"),
         "total_flux": total_int * sc * cur,
+        "coherent_brem_ratio": (coh_int / brem_int) if brem_int > 0 else float("nan"),
         "line_quality": line_quality(spec, rel_prominence),
     }
 
