@@ -35,7 +35,7 @@ def default_settings():
     match what was simulated."""
     return Settings(
         beam_current_na=5.0,
-        n_electrons=600,  # transport electrons per line spectrum
+        n_electrons=300,  # transport electrons per line spectrum
         n_electrons_brem=150,  # transport electrons per background
         # OFF: the intrinsic spectra stay intrinsic (no legacy SDD polymer-window
         # QE). The Timepix3 / Eagle XO views apply their own QE downstream.
@@ -50,11 +50,16 @@ def default_settings():
 # the line grid fine + narrow (the expensive coherent lines top out at a few keV)
 # and the brem grid coarse + WIDE (out to the beam energy) -- see sweep.
 _MATERIAL_GRIDS = {
+    # Thickness study: total flux + CXR/brem ratio vs thickness at a few key
+    # tilts (negative = entrance-toward-detector = high flux). Single azimuth
+    # (pitch plane) and single energy so plot_metric_vs(x="thickness_ang",
+    # hue="tilt_deg") has nothing to silently collapse -- one clean curve per tilt.
+    # For an energy comparison instead, add 40 to energy_keV and use hue="E0_keV".
     "hopg": dict(
-        thickness_ang=17e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 40, endpoint=True),
-        tilt_azim_deg=np.linspace(-89, -0.1, 20, endpoint=True),
+        thickness_ang=np.logspace(np.log10(0.1e4), np.log10(30e4), 30),  # 0.1-30 um
+        energy_keV=[30],
+        tilt_deg=[-15.0, -45.0, -80.0],
+        tilt_azim_deg=0.0,
         E_grid_line=np.arange(50.0, 4500.0, 1.0),
         E_grid_brem=np.arange(0.0, 60000.0, 30.0),
     ),
@@ -87,6 +92,14 @@ _MATERIAL_GRIDS = {
         energy_keV=[30, 45, 60],
         tilt_deg=np.linspace(-89, 89, 30, endpoint=True),
         tilt_azim_deg=np.linspace(-85, -0.1, 15),
+        E_grid_line=np.arange(50.0, 4500.0, 1.0),
+        E_grid_brem=np.arange(0.0, 60000.0, 25.0),
+    ),
+    "mote2": dict(
+        thickness_ang=1e4,
+        energy_keV=[30, 45, 60],
+        tilt_deg=np.linspace(-89, 89, 40, endpoint=True),
+        tilt_azim_deg=np.linspace(-89, -0.1, 15, endpoint=True),
         E_grid_line=np.arange(50.0, 4500.0, 1.0),
         E_grid_brem=np.arange(0.0, 60000.0, 25.0),
     ),
