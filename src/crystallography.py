@@ -46,7 +46,8 @@ E2_EV_ANG = (
 )  # e^2 (Gaussian) = alpha hbar c = 14.3996 [eV*Angstrom]
 
 # elements whose edges fall in the soft-x-ray band -> force Henke correction
-_EDGE_PRONE = {"Si", "Ge", "Mo", "Se"}
+# (Te L3/L2/L1 = 4.34/4.61/4.94 keV land inside the line grid).
+_EDGE_PRONE = {"Si", "Ge", "Mo", "Se", "Te"}
 
 
 # ---- lattice geometry --------------------------------------------------------

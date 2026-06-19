@@ -106,6 +106,7 @@ TRANSPORT_ELEMENTS = {
     "Si": {"Z": 14, "A": 28.085, "J_keV": 0.173},
     "Ge": {"Z": 32, "A": 72.630, "J_keV": 0.350},
     "Se": {"Z": 34, "A": 78.971, "J_keV": 0.348},
+    "Te": {"Z": 52, "A": 127.60, "J_keV": 0.485},
     "S": {"Z": 16, "A": 32.06, "J_keV": 0.180},
     "Mo": {"Z": 42, "A": 95.95, "J_keV": 0.424},
     "W": {"Z": 74, "A": 183.84, "J_keV": 0.727},
@@ -246,6 +247,12 @@ def _normalize_composition(element, n_atoms_per_ang3, composition):
     """
     if composition is not None:
         return [(el, float(n)) for el, n in composition]
+    if element is None or n_atoms_per_ang3 is None:
+        raise ValueError(
+            "specify the material: pass composition=[(element, n_per_Ang3), ...] "
+            "(or both element= and n_atoms_per_ang3=). Refusing to fall back to a "
+            "default element so a material can't be silently mis-loaded."
+        )
     return [(element, float(n_atoms_per_ang3))]
 
 
@@ -333,7 +340,7 @@ def simulate_trajectories(
     E0_keV,
     Ne,
     thickness_ang,
-    element="C",
+    element=None,
     n_atoms_per_ang3=None,
     E_cut_keV=5.0,
     seed=0,
@@ -530,10 +537,10 @@ def _polarization_pair(k_hat, g_vec):
 def mc_spectrum(
     segments,
     E_grid_eV,
-    crystal="hopg",
-    hkl_list=((0, 0, 2), (0, 0, -2)),
+    crystal,
+    hkl_list,
     theta_obs_rad=np.deg2rad(119.0),
-    B_ang2=0.8,
+    B_ang2=None,
     use_henke=True,
     absorber_element="C",
     chunk=40000,
@@ -580,6 +587,11 @@ def mc_spectrum(
     integral (0.3% at C = 100); peak heights are unaffected. Requires a
     UNIFORM E_grid.
     """
+    if B_ang2 is None:
+        raise ValueError(
+            "mc_spectrum: B_ang2 (Debye-Waller B-factor [Ang^2]) is required; "
+            "pass the material's value (no silent default)."
+        )
     info = CRYSTALS[crystal]
     n_atoms = len(info["basis"]) / info["V_cell"]
     abs_comp = _normalize_composition(absorber_element, n_atoms, composition)
@@ -846,7 +858,7 @@ def _brem_dsigma_dk(Z, T_keV, k_eV):
 def mc_brem_spectrum(
     segments,
     E_grid_eV,
-    element="C",
+    element=None,
     n_atoms_per_ang3=None,
     theta_obs_rad=np.deg2rad(119.0),
     n_hat=None,

@@ -221,9 +221,51 @@ Don't run PDF export on the box — pull the checkpoint and render here. Materia
 keys passed to `start`/`scan` are validated against the crystal-key alphabet
 (they're embedded in a remote shell command).
 
+**Local tooling (read before running anything by hand):**
+- The deps live in the project venv managed by **uv**. The bare `python` on PATH
+  has **no numpy** — always run scripts/one-liners with `uv run python ...`, never
+  plain `python` (a bare `python -c "import numpy"` fails and is a misleading
+  "the code is broken" signal when it's just the wrong interpreter).
+- On Windows the **Bash tool mangles `C:\...` paths and `&&` chains** (the
+  backslashes get eaten, so `ls "C:\path" && echo x` fails). Use **forward
+  slashes** (`C:/Users/alexa/...`) in Bash, or prefer the dedicated Glob / Read /
+  Grep tools, which take native paths cleanly.
+- A benign `RuntimeWarning: divide by zero` from `chi_g`/`absorption_length_ang`
+  fires because the wide brem grid starts at 0 eV (λ→∞ at E=0); values are
+  `nan_to_num`-clamped downstream. Not a bug — don't "fix" it.
+
 Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
-`mos2`, `ws2`, `ptse2`, `hfse2`, `zrse2`. (Note: the graphite entry is keyed
+`mote2`, `mos2`, `ws2`, `ptse2`, `hfse2`, `zrse2`. (Note: the graphite entry is keyed
 `hopg` — there is no `graphite` key, and nothing may pass one.)
+
+**Adding a material (or a new element) — every registry that must be touched.**
+These are NOT colocated; miss one and it fails *late* (a `KeyError` deep in a
+worker), not at import. For a material that reuses already-present elements, only
+the (*) sites; a NEW ELEMENT needs all of them:
+
+1. (*) `data/crystal_structures.toml` — the `[material]` block (system, lattice,
+   basis). 2H TMDs are isostructural with MoSe₂ (metal on 2c (1/3,2/3,1/4),
+   chalcogen on 4f z=0.621 → δ=0.129 from the metal plane); sanity-check the M–X
+   bond `sqrt((a/√3)² + (δc)²)` against the literature value.
+2. (*) `src/config.py` — add to `_MATERIAL_GRIDS` (`MATERIALS` auto-derives).
+3. (*) `src/sweep.py` — `MATERIAL_LABELS` **and** a `crystal_params()` branch
+   (composition, `hkl_list`, `beam_uvw`, `B_ang2`).
+4. `src/atomic_form_factors.py` — `Z_TABLE` **and** `CROMER_MANN` (9-coeff f0,
+   ITC Vol C Table 6.1.1.4; check Σaᵢ+c ≈ Z).
+5. `src/crystallography.py` — add to `_EDGE_PRONE` if any absorption edge lands
+   in the ≤4.5 keV line grid (forces the complex Henke f).
+6. `src/montecarlo.py` — `TRANSPORT_ELEMENTS` (Z, A, `J_keV` = the ICRU/NIST mean
+   excitation energy in keV — NOT a fudge factor; e.g. Te = 0.485).
+7. `data/atomic_scattering_factors/<El>.csv` — Henke f1/f2. Download the raw table
+   from CXRO `https://henke.lbl.gov/optical_constants/sf/<el>.nff` (same format,
+   10 eV–30 keV, `-9999.` sentinel below valid f1 — no conversion). Use `curl`,
+   NOT WebFetch (WebFetch summarizes and will not reproduce the ~500 numeric rows).
+8. this file — append the key to the "Crystals (TOML keys)" line above.
+
+NIST Mott transport tables (`data/mott_transport_cross_sections/`) are OPTIONAL:
+a missing element (W, S, Pt, Hf, Zr, Te…) falls back to analytic
+screened-Rutherford screening with a one-time warning. Verify the whole chain
+with a single `run_case` at tiny `Ne` — it exercises every registry above.
 
 ### Physics conventions — read before touching geometry or amplitudes
 
@@ -318,5 +360,11 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
 
 ## TODOs
 
-* ~~Feature: queue multiple separate scans/materials~~ — done: `remote.py start <materials...>`.
-* ~~Feature: send tasks/scans to the remote lab box w/ 5080, then allow for disconnect of ssh session and later reconnection.~~ — done: `remote.py start` launches detached (`nohup setsid`); reconnect via `jobs`/`status`/`logs`/`stop` (see the Remote compute section).
+* Feature: film-on-substrate multi-layer materials — a vdW film
+  (MoSe₂/MoS₂/WS₂/MoTe₂) on its real substrate (SiO₂/Si or sapphire), with
+  per-crystalline-layer radiation and full-stack self-absorption. Design + the 2H
+  groundwork live on the `mote2-multilayer-materials` branch; blocked on a
+  reliable 1T′-MoTe₂ CIF for exact coordinates.
+* Verify the detached remote queue (`remote.py start`) end-to-end against the box
+  once — confirm the `nohup setsid` launch returns promptly and the job survives
+  an ssh disconnect on the real ssh/cloudflared setup.

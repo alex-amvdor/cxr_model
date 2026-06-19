@@ -101,6 +101,24 @@ basis = [
     { element = "Se", pos = [0.3333333333333333, 0.6666666666666667, 0.621] },
 ]
 
+# 2H-MoTe2 (alpha-MoTe2, semiconducting; P6_3/mmc) -- isostructural with MoSe2:
+# Mo on Wyckoff 2c (1/3,2/3,1/4), Te on 4f with z = 0.621 (delta = |0.75 - 0.621|
+# = 0.129 from its Mo plane). Lattice a = 3.519, c = 13.964 A (Puotinen & Newnham,
+# Acta Cryst. 14, 691 (1961); Materials Project mp-602). The Mo-Te bond
+# sqrt((a/sqrt(3))^2 + (0.129 c)^2) = 2.72 A matches the refined ~2.73 A.
+[mote2]
+system = "hexagonal"
+a = 3.519
+c = 13.964
+basis = [
+    { element = "Mo", pos = [0.3333333333333333, 0.6666666666666667, 0.25] },
+    { element = "Te", pos = [0.6666666666666667, 0.3333333333333333, 0.379] },
+    { element = "Te", pos = [0.6666666666666667, 0.3333333333333333, 0.121] },
+    { element = "Mo", pos = [0.6666666666666667, 0.3333333333333333, 0.75] },
+    { element = "Te", pos = [0.3333333333333333, 0.6666666666666667, 0.879] },
+    { element = "Te", pos = [0.3333333333333333, 0.6666666666666667, 0.621] },
+]
+
 # 1T (CdI2-type, P-3m1) metal dichalcogenides: heavy metal on Wyckoff 1a (0,0,0)
 # -- AT THE ORIGIN, so every (00l) stays strong (unlike the 2H TMDs where the
 # metal at z=1/4,3/4 makes them oscillate) -- and chalcogen on 2d (1/3,2/3,z),

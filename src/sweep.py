@@ -41,6 +41,7 @@ TIMEPIX3_DOMEGA_SR = float(TIMEPIX3_CHIP_WIDTH_M**2 / TIMEPIX3_DISTANCE_M**2)
 MATERIAL_LABELS = {
     "mose2": "MoSe2",
     "wse2": "WSe2",
+    "mote2": "MoTe2",
     "mos2": "MoS2",
     "ws2": "WS2",
     "ptse2": "PtSe2",
@@ -100,6 +101,18 @@ def crystal_params(material, n_families=4):
             crystal="wse2",
             composition=[("W", n_of("wse2", "W")), ("Se", n_of("wse2", "Se"))],
             hkl_list=dominant_reflections("wse2", n_families=n_families, B_ang2=0.6),
+            beam_uvw=(0, 0, 2),
+            B_ang2=0.6,
+            E_grid=np.arange(350.0, 2500.0, 3.0),
+        )
+    if material == "mote2":
+        # 2H-MoTe2 (alpha), isostructural with MoSe2. Te has no NIST Mott table
+        # -> transport falls back to analytic screened-Rutherford screening for Te
+        # (see montecarlo), as for W/S/Pt/Hf/Zr.
+        return dict(
+            crystal="mote2",
+            composition=[("Mo", n_of("mote2", "Mo")), ("Te", n_of("mote2", "Te"))],
+            hkl_list=dominant_reflections("mote2", n_families=n_families, B_ang2=0.6),
             beam_uvw=(0, 0, 2),
             B_ang2=0.6,
             E_grid=np.arange(350.0, 2500.0, 3.0),
@@ -174,7 +187,7 @@ class Sweep:
     setup that rarely changes per run.
     """
 
-    material: str = "mose2"
+    material: str  # required: no default, so a Sweep can't silently load MoSe2
     thickness_ang: ScalarOrSeq = 2e4
     energy_keV: ScalarOrSeq = (30.0, 45.0, 60.0)
     tilt_deg: ScalarOrSeq = -30.0
