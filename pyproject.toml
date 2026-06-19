@@ -23,3 +23,16 @@ dependencies = [
     "tabulate>=0.10.0",
     "tqdm>=4.68.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]
+
+[tool.pytest.ini_options]
+# src/ holds the importable modules (notebooks do sys.path.insert(0,"src")); "."
+# lets the suite import the root scripts (remote.py). Tests stay CPU-only/fast --
+# the heavy MC physics validation lives in checks/, not here.
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+addopts = "-q"
