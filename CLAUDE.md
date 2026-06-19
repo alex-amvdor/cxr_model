@@ -201,12 +201,18 @@ python remote.py pull mose2 wse2       # just fetch one or more existing checkpo
 away, reconnect): `start` ships the code, writes a runner under
 `<remote>/jobs/<jobid>/` (gitignored), and `nohup setsid`-launches it so it keeps
 running after you disconnect; the runner calls `scan.py` once per material in
-sequence (pid/meta/state/log per job). Reconnect with `status`/`logs`, `pull`
-when the state reads `done`.
+sequence (pid/meta/state/log per job). The job is detached on the box from the
+start, so the ssh link is only ever a **viewer** — `--follow`/`attach` stream the
+log live and exit when the job finishes, and **disconnecting is just Ctrl-C**
+(or closing the terminal / a dropped link): it tears down the viewer only, the
+job runs to completion. Reconnect with `attach`/`status`/`logs`, `pull` when the
+state reads `done`.
 
 ```
 python remote.py start mose2 wse2 mos2   # queue, run detached, return immediately
+python remote.py start mose2 --follow     # launch, then track it live
 python remote.py start mose2 --quick      # detached quick smoke test
+python remote.py attach [JOBID]            # (re)connect + track live (default: latest)
 python remote.py jobs                      # list jobs + their state
 python remote.py status [JOBID]            # meta + state + alive? + log tail (default: latest)
 python remote.py logs [JOBID] --follow     # live tail
@@ -222,6 +228,7 @@ keys passed to `start`/`scan` are validated against the crystal-key alphabet
 (they're embedded in a remote shell command).
 
 **Local tooling (read before running anything by hand):**
+
 - The deps live in the project venv managed by **uv**. The bare `python` on PATH
   has **no numpy** — always run scripts/one-liners with `uv run python ...`, never
   plain `python` (a bare `python -c "import numpy"` fails and is a misleading
@@ -365,6 +372,17 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
   per-crystalline-layer radiation and full-stack self-absorption. Design + the 2H
   groundwork live on the `mote2-multilayer-materials` branch; blocked on a
   reliable 1T′-MoTe₂ CIF for exact coordinates.
-* Verify the detached remote queue (`remote.py start`) end-to-end against the box
-  once — confirm the `nohup setsid` launch returns promptly and the job survives
-  an ssh disconnect on the real ssh/cloudflared setup.
+* Patch: Improve checkpointing -- current method leads to gigabyte-sized file transfers for material pickles that have had many cases run and contain much stale (or old but still useful) data. Some form of multiple pickles per material, or at least filtering of the remote pickled data for only the required information prior to plotting. Whichever is cleaner and more robust.
+* Patch: Similar to above, improve data selection when plotting. Currently, when trying to plot a circumspect thickness sweep on HOPG for a few select polar tilt angles, when the hopg.pkl is pulled from the remote, we get the massive dataset of all hopg parameter sets ever calculated, and they are all plotted against one-another.
+* Patch: Reflect upon the EagleXO detection scheme: while the spectral response is likely correct, it is simply a QE metric. The EagleXO is a CCD which only detects pixel brightness. This should be reflected in some sort of plot or heatmap of detected flux or charge, whatever the EagleXO actually reports.
+* Feature: Related to above: consider modeling a grazing-incidence soft x-ray diffraction grating (in combination with an EagleXO or an Alex detector), like those from Ultrafast Innovations.
+* Patch: All electron trajectory plots are *tiny*, it's impossible to make out any detail. Rescaling needs to be done (in a smart way) -- clearly this is not exactly simple to get perfectly right.
+* Patch: In the case that only one (or a few) azimuthal tilt angle(s) is (are) provided, render a plot with multiple lines corresponding to azimuthal tilt angles, rather than the heatmaps which just end up having horizontal bands on them.
+* Feature: Related to above patch, when running custom sweeps with large parameter spaces rather than just a few lines
+* Patch: Suppress warning when running analysis.ipynb on laptop without NVIDIA GPU:
+
+```
+C:\Users\alexa\code\ucla\research\cxr_model\.venv\Lib\site-packages\cupy\_environment.py:284: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
+  warnings.warn(No GPU found, or cupy not installed!
+Falling back to CPU execution.
+```

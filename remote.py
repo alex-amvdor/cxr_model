@@ -19,7 +19,9 @@ One-shot (foreground, holds the ssh session open until the sweep finishes):
 Detached QUEUE (survives ssh disconnect -- launch, walk away, reconnect later):
 
     python remote.py start mose2 wse2 mos2    # queue several materials, run detached
+    python remote.py start mose2 --follow     # launch, then track it live
     python remote.py start mose2 --quick      # detached quick smoke test
+    python remote.py attach [JOBID]           # (re)connect + track live (default: latest)
     python remote.py jobs                     # list jobs on the box + their state
     python remote.py status [JOBID]           # one job: meta + state + log tail (default: latest)
     python remote.py logs [JOBID] --follow    # tail the remote log (live)
@@ -29,8 +31,13 @@ Detached QUEUE (survives ssh disconnect -- launch, walk away, reconnect later):
 `start` returns immediately: it ships the code, writes a small runner under
 <remote>/jobs/<jobid>/ and launches it with `nohup setsid` so it keeps running
 after you disconnect. The runner processes the materials sequentially (one
-`scan.py` per material), writing meta/state/log/pid into the job dir. Reconnect
-with `status`/`logs`, then `pull` once the state reads `done`.
+`scan.py` per material), writing meta/state/log/pid into the job dir.
+
+The job is detached on the box from the moment it starts, so the ssh connection
+is only ever a VIEWER. `--follow` (or `attach`) streams the log live and exits
+when the job finishes; to DISCONNECT, just Ctrl-C (or close the terminal / drop
+the link) -- that tears down the viewer only, and the job runs to completion.
+Reconnect any time with `attach`/`status`/`logs`, then `pull` once state is `done`.
 
 Then locally: open analysis.ipynb (same MATERIAL) or run export_pdf.py.
 
@@ -311,9 +318,59 @@ def tail_logs(jobid=None, follow=False):
         f'{tail} "$D/log"'
     )
     if follow:
-        subprocess.run(["ssh", HOST, remote])  # inherit stdio -> live stream
+        try:
+            subprocess.run(["ssh", HOST, remote])  # inherit stdio -> live stream
+        except KeyboardInterrupt:
+            print("\n(stopped following; the job is unaffected)")
     else:
         print(_ssh_capture(remote), end="")
+
+
+def _latest_jobid():
+    """The most recent job id on the box (job dirs are timestamp-named), or None."""
+    out = _ssh_capture(f'ls -1 "{REMOTE_DIR}/{JOBS_SUBDIR}" 2>/dev/null | tail -1').strip()
+    return out or None
+
+
+def _disconnect_hint(jobid):
+    print(
+        f"\n\ndisconnected from job {jobid} -- it keeps running on {HOST}.\n"
+        f"  reconnect: python remote.py attach {jobid}\n"
+        f"  status:    python remote.py status {jobid}\n"
+        f"  stop:      python remote.py stop   {jobid}"
+    )
+
+
+def attach(jobid=None):
+    """Live-track a job: stream its log until it finishes, then print the final
+    state. Disconnecting -- Ctrl-C, closing the terminal, or a dropped ssh --
+    tears down the VIEWER only; the job is detached server-side (nohup setsid)
+    and runs to completion regardless. Defaults to the most recent job."""
+    jobid = jobid or _latest_jobid()
+    if not jobid:
+        raise SystemExit("no jobs to attach to (start one: remote.py start <materials>)")
+    jobdir = f"{REMOTE_DIR}/{JOBS_SUBDIR}/{jobid}"
+    # tail the log live, but self-terminate once the job process exits, so a
+    # finished job doesn't leave you stuck in tail -f. The tail is NOT nohup'd, so
+    # a local Ctrl-C / dropped ssh tears it (and the wait loop) down while the
+    # setsid'd job keeps going.
+    remote = (
+        f'D="{jobdir}"; '
+        f'[ -d "$D" ] || {{ echo "no such job: {jobid}"; exit 1; }}; '
+        'tail -n 50 -f "$D/log" 2>/dev/null & TP=$!; '
+        'if [ -f "$D/pid" ]; then P=$(cat "$D/pid"); '
+        'while kill -0 "$P" 2>/dev/null; do sleep 2; done; fi; '
+        'sleep 1; kill "$TP" 2>/dev/null; '
+        'printf "\\n--- job finished ---\\n"; cat "$D/state" 2>/dev/null'
+    )
+    print(
+        f"attached to job {jobid} on {HOST} -- Ctrl-C to disconnect "
+        "(the job keeps running).\n"
+    )
+    try:
+        subprocess.run(["ssh", HOST, remote])
+    except KeyboardInterrupt:
+        _disconnect_hint(jobid)
 
 
 def stop_job(jobid):
@@ -353,6 +410,15 @@ def main():
     st.add_argument(
         "--dry-run", action="store_true", help="print the runner + commands, don't ssh"
     )
+    st.add_argument(
+        "--follow", "-f", action="store_true",
+        help="track the job live after launching (Ctrl-C disconnects; job keeps running)",
+    )
+
+    at = sub.add_parser(
+        "attach", help="live-track a job until it finishes (Ctrl-C disconnects; default: latest)"
+    )
+    at.add_argument("jobid", nargs="?", default=None)
 
     sub.add_parser("jobs", help="list jobs on the box and their state")
 
@@ -387,9 +453,13 @@ def main():
             f"MATERIAL='{stem}' (or run export_pdf.py) -- all viz/PDF stays local."
         )
     elif args.cmd == "start":
-        start_queue(
+        jobid = start_queue(
             args.materials, args.quick, args.workers, args.no_sync, args.dry_run
         )
+        if args.follow and not args.dry_run:
+            attach(jobid)
+    elif args.cmd == "attach":
+        attach(args.jobid)
     elif args.cmd == "jobs":
         list_jobs()
     elif args.cmd == "status":
