@@ -23,7 +23,7 @@ def _material(nb_path):
             nb = json.load(f)
     except OSError:
         return "cxr"
-    pat = re.compile(r"material\s*=\s*['\"]([A-Za-z0-9]+)['\"]", re.IGNORECASE)
+    pat = re.compile(r"material\s*=\s*['\"]([A-Za-z0-9_]+)['\"]", re.IGNORECASE)
     for cell in nb.get("cells", []):
         if cell.get("cell_type") != "code":
             continue
