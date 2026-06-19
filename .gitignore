@@ -232,3 +232,6 @@ zhai_fig1c_analog.png
 # Monte Carlo run checkpoints (the chunked-run cell pickles results here)
 *.pkl
 zhai_run_checkpoint.pkl
+
+# remote.py detached-job bookkeeping (created on the GPU box under <repo>/jobs/)
+jobs/

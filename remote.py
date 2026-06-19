@@ -8,11 +8,29 @@ sweep. This script ships the current code up, runs scan.py there, and pulls the
 resulting checkpoint back into ./checkpoints -- so you never hand-ssh in or copy
 files, and you never need a PDF toolchain on the lab box.
 
-    python remote.py scan mose2              # sync code up, run sweep, pull checkpoint
+One-shot (foreground, holds the ssh session open until the sweep finishes):
+
+    python remote.py scan mose2               # sync code up, run sweep, pull checkpoint
     python remote.py scan mose2 --quick       # tiny grid smoke test
     python remote.py scan mose2 --no-sync     # skip the code upload (code unchanged)
-    python remote.py pull mose2               # just fetch an existing checkpoint
-    python remote.py sync                      # only push the current code
+    python remote.py pull mose2 wse2          # fetch one or more existing checkpoints
+    python remote.py sync                     # only push the current code
+
+Detached QUEUE (survives ssh disconnect -- launch, walk away, reconnect later):
+
+    python remote.py start mose2 wse2 mos2    # queue several materials, run detached
+    python remote.py start mose2 --quick      # detached quick smoke test
+    python remote.py jobs                     # list jobs on the box + their state
+    python remote.py status [JOBID]           # one job: meta + state + log tail (default: latest)
+    python remote.py logs [JOBID] --follow    # tail the remote log (live)
+    python remote.py stop JOBID               # SIGTERM a running job's process group
+    python remote.py pull mose2 wse2 mos2     # fetch the finished checkpoints
+
+`start` returns immediately: it ships the code, writes a small runner under
+<remote>/jobs/<jobid>/ and launches it with `nohup setsid` so it keeps running
+after you disconnect. The runner processes the materials sequentially (one
+`scan.py` per material), writing meta/state/log/pid into the job dir. Reconnect
+with `status`/`logs`, then `pull` once the state reads `done`.
 
 Then locally: open analysis.ipynb (same MATERIAL) or run export_pdf.py.
 
@@ -22,8 +40,10 @@ Override the box via env: CXR_REMOTE_HOST / CXR_REMOTE_DIR / CXR_REMOTE_UV.
 """
 
 import argparse
+import datetime
 import io
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -35,6 +55,15 @@ REMOTE_DIR = os.environ.get("CXR_REMOTE_DIR", "/home/aamador/dev/cxr_model")
 REMOTE_UV = os.environ.get("CXR_REMOTE_UV", "/home/aamador/.local/bin/uv")
 LOCAL_ROOT = Path(__file__).resolve().parent
 
+# detached-job bookkeeping lives under <REMOTE_DIR>/jobs/<jobid>/ on the box
+# (gitignored there): run.sh, meta, pid, state, log. One subdir per `start`.
+JOBS_SUBDIR = "jobs"
+
+# material keys are embedded into a remote shell command, so constrain them to
+# the crystal-key alphabet -- this both rejects typos early and blocks shell
+# injection through the material argument.
+_MATERIAL_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
 # what `sync` ships up: the code that changes, not data/ (static, already there)
 # or checkpoints/ (the output we pull back the other way).
 SYNC_PATHS = ["src", "scan.py", "pyproject.toml"]
@@ -45,9 +74,28 @@ SYNC_PATHS = ["src", "scan.py", "pyproject.toml"]
 TEXT_EXTS = {".py", ".toml", ".cfg", ".ini", ".txt", ".md", ".csv"}
 
 
-def _run(cmd):
+def _run(cmd, **kw):
     print("+", " ".join(cmd), flush=True)
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, **kw)
+
+
+def _ssh_capture(remote_cmd):
+    """Run a remote command over ssh and return its stdout (text). Prints the
+    box's stderr and aborts on a nonzero exit."""
+    r = subprocess.run(["ssh", HOST, remote_cmd], text=True, capture_output=True)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        raise SystemExit(f"ssh command failed (exit {r.returncode})")
+    return r.stdout
+
+
+def _check_materials(materials):
+    bad = [m for m in materials if not _MATERIAL_RE.match(m)]
+    if bad:
+        raise SystemExit(
+            f"invalid material name(s) {bad}: expected crystal keys like "
+            f"mose2 / hopg / silicon (letters, digits, underscore only)."
+        )
 
 
 def _add_to_tar(tar, local, arcname):
@@ -108,33 +156,218 @@ def remote_scan(material, quick=False, workers=None):
     _run(["ssh", HOST, cmd])
 
 
-def pull(stem):
-    """Fetch checkpoints/<stem>.pkl back from the box (stem = material, or
-    material_quick for a --quick run)."""
+def pull(stems):
+    """Fetch checkpoints/<stem>.pkl back from the box for each stem (stem =
+    material, or material_quick for a --quick run)."""
     dest = LOCAL_ROOT / "checkpoints"
     dest.mkdir(exist_ok=True)
-    _run(
-        [
-            "scp",
-            f"{HOST}:{REMOTE_DIR}/checkpoints/{stem}.pkl",
-            str(dest / f"{stem}.pkl"),
-        ]
+    for stem in stems:
+        _run(
+            [
+                "scp",
+                f"{HOST}:{REMOTE_DIR}/checkpoints/{stem}.pkl",
+                str(dest / f"{stem}.pkl"),
+            ]
+        )
+        print(f"pulled -> checkpoints/{stem}.pkl")
+
+
+# ---- detached job queue -------------------------------------------------------
+def _stems(materials, quick):
+    """Checkpoint stems a queue produces (scan.py writes <material>_quick.pkl
+    for --quick runs)."""
+    return [f"{m}_quick" if quick else m for m in materials]
+
+
+def _queue_script(jobid, materials, quick, workers):
+    """The bash runner shipped to the box and launched detached. It records
+    pid/meta/state, then runs `scan.py` once per material in sequence, appending
+    all output to the job log and marking the state at each transition."""
+    flags = ""
+    if quick:
+        flags += " --quick"
+    if workers is not None:
+        flags += f" --workers {workers}"
+    mats = " ".join(materials)  # safe: each token matched _MATERIAL_RE
+    jobdir = f"{REMOTE_DIR}/{JOBS_SUBDIR}/{jobid}"
+    return f"""#!/usr/bin/env bash
+set -u
+JOBDIR="{jobdir}"
+cd "{REMOTE_DIR}" || exit 1
+echo $$ > "$JOBDIR/pid"
+{{ echo "job: {jobid}"; echo "materials: {mats}"; echo "quick: {bool(quick)}"; \
+echo "workers: {workers}"; echo "started: $(date -Is)"; echo "pid: $$"; \
+}} > "$JOBDIR/meta"
+mats=({mats})
+total=${{#mats[@]}}
+n=0
+for m in "${{mats[@]}}"; do
+  n=$((n + 1))
+  echo "running $m [$n/$total] since $(date -Is)" > "$JOBDIR/state"
+  printf '\\n===== [%s/%s] %s  %s =====\\n' "$n" "$total" "$m" "$(date -Is)" \
+>> "$JOBDIR/log"
+  if ! {REMOTE_UV} run --no-sync python scan.py "$m"{flags} >> "$JOBDIR/log" 2>&1
+  then
+    echo "FAILED at $m [$n/$total] $(date -Is)" > "$JOBDIR/state"
+    exit 1
+  fi
+done
+echo "done [$total/$total] $(date -Is)" > "$JOBDIR/state"
+"""
+
+
+def start_queue(materials, quick=False, workers=None, no_sync=False, dry_run=False):
+    """Launch a detached queue on the box: sync code, write the per-job runner,
+    and `nohup setsid` it so it survives ssh disconnect. Returns the job id."""
+    _check_materials(materials)
+    jobid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    jobdir = f"{REMOTE_DIR}/{JOBS_SUBDIR}/{jobid}"
+    script = _queue_script(jobid, materials, quick, workers)
+    # detach: redirect all three std streams off the ssh channel and setsid into
+    # a new session, so the ssh command returns immediately and the job keeps
+    # running after you disconnect.
+    launch = (
+        f"cd '{REMOTE_DIR}' && : > '{jobdir}/log' && "
+        f"nohup setsid bash '{jobdir}/run.sh' >/dev/null 2>&1 </dev/null & "
+        f"echo 'launched {jobid}'"
     )
-    print(f"pulled -> checkpoints/{stem}.pkl")
+
+    if dry_run:
+        print(f"# job {jobid}: {' '.join(materials)}{' (quick)' if quick else ''}")
+        print(f"# --- ssh {HOST}: mkdir -p {jobdir} && cat > {jobdir}/run.sh <<\n")
+        print(script)
+        print(f"# --- ssh {HOST}: {launch}")
+        return jobid
+
+    if not no_sync:
+        sync_code()
+    # create the job dir and write run.sh (script piped over stdin)
+    subprocess.run(
+        ["ssh", HOST, f"mkdir -p '{jobdir}' && cat > '{jobdir}/run.sh'"],
+        input=script,
+        text=True,
+        check=True,
+    )
+    _run(["ssh", HOST, launch])
+
+    stems = _stems(materials, quick)
+    print(
+        f"\nstarted job {jobid} on {HOST}: {' '.join(materials)}"
+        f"{' (quick)' if quick else ''}\n"
+        f"  watch:  python remote.py status {jobid}\n"
+        f"  logs:   python remote.py logs {jobid} --follow\n"
+        f"  pull:   python remote.py pull {' '.join(stems)}   (when state is 'done')"
+    )
+    return jobid
+
+
+def list_jobs():
+    """Print every job dir on the box with its current state line, oldest first
+    (the dirs are timestamp-named, so this is chronological)."""
+    remote = (
+        f'JOBS="{REMOTE_DIR}/{JOBS_SUBDIR}"; '
+        '[ -d "$JOBS" ] || { echo "(no jobs)"; exit 0; }; '
+        'found=; for d in "$JOBS"/*/; do [ -d "$d" ] || continue; found=1; '
+        'printf "%s  %s\\n" "$(basename "$d")" '
+        '"$(cat "$d/state" 2>/dev/null || echo "?")"; done; '
+        '[ -n "$found" ] || echo "(no jobs)"'
+    )
+    print(_ssh_capture(remote), end="")
+
+
+def _job_assign(jobid):
+    """Bash that sets JOB to the given id, or the latest job dir if none given."""
+    if jobid:
+        _check_materials([jobid.replace("-", "")])  # reject odd chars in the id
+        return f'JOB="{jobid}"'
+    return 'JOB=$(ls -1 "$JOBS" 2>/dev/null | tail -1)'
+
+
+def job_status(jobid=None):
+    """Print one job's meta, current state, whether its process is still alive,
+    and the tail of its log. Defaults to the most recent job."""
+    remote = (
+        f'JOBS="{REMOTE_DIR}/{JOBS_SUBDIR}"; {_job_assign(jobid)}; '
+        'D="$JOBS/$JOB"; '
+        'if [ -z "$JOB" ] || [ ! -d "$D" ]; then echo "no such job: ${JOB:-<none>}"; '
+        'exit 1; fi; '
+        'echo "== job $JOB =="; cat "$D/meta" 2>/dev/null; '
+        'echo "-- state --"; cat "$D/state" 2>/dev/null || echo "(no state yet)"; '
+        'if [ -f "$D/pid" ] && kill -0 "$(cat "$D/pid")" 2>/dev/null; '
+        'then echo "process: ALIVE"; else echo "process: not running"; fi; '
+        'echo "-- log tail --"; tail -n 20 "$D/log" 2>/dev/null'
+    )
+    print(_ssh_capture(remote), end="")
+
+
+def tail_logs(jobid=None, follow=False):
+    """Tail a job's log. With --follow, stream live (blocks until Ctrl-C)."""
+    tail = "tail -f" if follow else "tail -n 60"
+    remote = (
+        f'JOBS="{REMOTE_DIR}/{JOBS_SUBDIR}"; {_job_assign(jobid)}; '
+        'D="$JOBS/$JOB"; '
+        'if [ -z "$JOB" ] || [ ! -d "$D" ]; then echo "no such job: ${JOB:-<none>}"; '
+        'exit 1; fi; '
+        f'{tail} "$D/log"'
+    )
+    if follow:
+        subprocess.run(["ssh", HOST, remote])  # inherit stdio -> live stream
+    else:
+        print(_ssh_capture(remote), end="")
+
+
+def stop_job(jobid):
+    """SIGTERM a running job's whole process group (the runner + scan.py + its
+    transport worker pool), then mark the job stopped."""
+    _check_materials([jobid.replace("-", "")])
+    remote = (
+        f'D="{REMOTE_DIR}/{JOBS_SUBDIR}/{jobid}"; '
+        'if [ ! -f "$D/pid" ]; then echo "no pid for job {0}"; exit 1; fi; '
+        'P=$(cat "$D/pid"); '
+        'kill -TERM -"$P" 2>/dev/null || kill -TERM "$P" 2>/dev/null; '
+        'echo "stopped [{0}] $(date -Is)" > "$D/state"; '
+        'echo "sent SIGTERM to job {0} (pgid $P)"'
+    ).format(jobid)
+    _run(["ssh", HOST, remote])
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("scan", help="sync code, run the sweep on the box, pull checkpoint")
+    s = sub.add_parser(
+        "scan", help="sync code, run ONE sweep in the foreground, pull checkpoint"
+    )
     s.add_argument("material")
     s.add_argument("--quick", action="store_true")
     s.add_argument("--workers", type=int, default=None)
     s.add_argument("--no-sync", action="store_true", help="skip the code upload")
 
-    p = sub.add_parser("pull", help="fetch an existing checkpoint from the box")
-    p.add_argument("material")
+    st = sub.add_parser(
+        "start", help="sync code, launch a DETACHED queue of materials (survives disconnect)"
+    )
+    st.add_argument("materials", nargs="+", help="one or more crystal keys")
+    st.add_argument("--quick", action="store_true")
+    st.add_argument("--workers", type=int, default=None)
+    st.add_argument("--no-sync", action="store_true", help="skip the code upload")
+    st.add_argument(
+        "--dry-run", action="store_true", help="print the runner + commands, don't ssh"
+    )
+
+    sub.add_parser("jobs", help="list jobs on the box and their state")
+
+    js = sub.add_parser("status", help="show one job (default: latest)")
+    js.add_argument("jobid", nargs="?", default=None)
+
+    lg = sub.add_parser("logs", help="tail a job's log (default: latest)")
+    lg.add_argument("jobid", nargs="?", default=None)
+    lg.add_argument("--follow", "-f", action="store_true", help="stream live")
+
+    sp = sub.add_parser("stop", help="SIGTERM a running job")
+    sp.add_argument("jobid")
+
+    p = sub.add_parser("pull", help="fetch one or more existing checkpoints from the box")
+    p.add_argument("material", nargs="+", help="checkpoint stem(s), e.g. mose2 mose2_quick")
 
     sub.add_parser("sync", help="push the current code to the box only")
 
@@ -148,11 +381,23 @@ def main():
             sync_code()
         remote_scan(args.material, args.quick, args.workers)
         stem = f"{args.material}_quick" if args.quick else args.material
-        pull(stem)
+        pull([stem])
         print(
             f"\ndone. checkpoints/{stem}.pkl is local; open analysis.ipynb with "
             f"MATERIAL='{stem}' (or run export_pdf.py) -- all viz/PDF stays local."
         )
+    elif args.cmd == "start":
+        start_queue(
+            args.materials, args.quick, args.workers, args.no_sync, args.dry_run
+        )
+    elif args.cmd == "jobs":
+        list_jobs()
+    elif args.cmd == "status":
+        job_status(args.jobid)
+    elif args.cmd == "logs":
+        tail_logs(args.jobid, args.follow)
+    elif args.cmd == "stop":
+        stop_job(args.jobid)
 
 
 if __name__ == "__main__":

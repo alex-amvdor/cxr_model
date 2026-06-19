@@ -192,16 +192,34 @@ matplotlib + PDF toolchain). The GPU sweep runs on the box, everything visual
 stays local — no manual ssh, no hand-copying files:
 
 ```
-python remote.py scan mose2          # sync code up -> run scan.py on the box -> pull checkpoint back
+python remote.py scan mose2          # FOREGROUND: sync up -> run scan.py -> pull checkpoint (holds the ssh session)
 python remote.py scan mose2 --quick   # tiny grid smoke test (isolated <material>_quick.pkl)
-python remote.py pull mose2           # just fetch an existing checkpoint
+python remote.py pull mose2 wse2       # just fetch one or more existing checkpoints
+```
+
+**Detached queue** (multiple materials, survives ssh disconnect — launch, walk
+away, reconnect): `start` ships the code, writes a runner under
+`<remote>/jobs/<jobid>/` (gitignored), and `nohup setsid`-launches it so it keeps
+running after you disconnect; the runner calls `scan.py` once per material in
+sequence (pid/meta/state/log per job). Reconnect with `status`/`logs`, `pull`
+when the state reads `done`.
+
+```
+python remote.py start mose2 wse2 mos2   # queue, run detached, return immediately
+python remote.py start mose2 --quick      # detached quick smoke test
+python remote.py jobs                      # list jobs + their state
+python remote.py status [JOBID]            # meta + state + alive? + log tail (default: latest)
+python remote.py logs [JOBID] --follow     # live tail
+python remote.py stop JOBID                # SIGTERM the job's process group
 ```
 
 then open `analysis.ipynb` (same `MATERIAL`) or `export_pdf.py` locally. The
 box is ssh host `qlmc` (`~/.ssh/config`, cloudflared proxy); override with
 `CXR_REMOTE_{HOST,DIR,UV}`. `scan.py <material> [--quick] [--workers N]` is the
 guarded headless runner `remote.py` invokes (also runnable directly on the box).
-Don't run PDF export on the box — pull the checkpoint and render here.
+Don't run PDF export on the box — pull the checkpoint and render here. Material
+keys passed to `start`/`scan` are validated against the crystal-key alphabet
+(they're embedded in a remote shell command).
 
 Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
 `mos2`, `ws2`, `ptse2`, `hfse2`, `zrse2`. (Note: the graphite entry is keyed
@@ -268,8 +286,7 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
   starts at 0 eV, so `absorption_length_ang` is called at E=0 (L_abs→∞, μ→0,
   swallowed by `nan_to_num`); the now-benign "divide by zero" RuntimeWarning is
   suppressed in-function via `np.errstate`, values unchanged.
-- **Trajectory colouring (datashader)**: aggregate tracks with `cvs.line(...,
-  line_width=0)` so each pixel takes the true electron energy, then `tf.spread` to
+- **Trajectory colouring (datashader)**: aggregate tracks with `cvs.line(..., line_width=0)` so each pixel takes the true electron energy, then `tf.spread` to
   thicken. `line_width>0` coverage-weights the aggregated value and paints a bogus
   radial gradient ACROSS the line (hot centre → cool edges) instead of along the
   path. Tracks are continuous per-electron polylines (sort segments by
@@ -298,3 +315,8 @@ Crystals (TOML keys): `diamond`, `silicon`, `lif`, `hopg`, `mose2`, `wse2`,
   beyond, a caveat at 200 keV).
 - Crystal structures: `data/crystal_structures.toml` (lattice + basis + B-factors).
 - Detector QE: `data/eaglexo_qe.csv`; Timepix Si response computed from Henke f2.
+
+## TODOs
+
+* ~~Feature: queue multiple separate scans/materials~~ — done: `remote.py start <materials...>`.
+* ~~Feature: send tasks/scans to the remote lab box w/ 5080, then allow for disconnect of ssh session and later reconnection.~~ — done: `remote.py start` launches detached (`nohup setsid`); reconnect via `jobs`/`status`/`logs`/`stop` (see the Remote compute section).
