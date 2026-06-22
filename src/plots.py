@@ -19,10 +19,12 @@ Timepix3 detector view (forward model in ``timepix_response``)
     :func:`plot_timepix_poisson`.
 
 Eagle XO detector view (forward model in ``eaglexo_response``)
-  * :func:`plot_eaglexo_efficiency`, :func:`plot_eaglexo_detected`,
-    :func:`plot_eaglexo_measured` -- the direct-detection CCD (solid angle x QE):
-    soft PXR lines pass at ~90% QE while the hard brem is crushed by the thin
-    sensor. Browse per tilt with ``browse(results, settings, kind="eaglexo")``.
+  * :func:`plot_eaglexo_efficiency`, :func:`plot_eaglexo_detected` -- the
+    direct-detection CCD (solid angle x QE): soft PXR lines pass at ~90% QE while
+    the hard brem is crushed by the thin sensor. Browse per tilt with
+    ``browse(results, settings, kind="eaglexo")``. A bare CCD integrates charge
+    and cannot return a spectrum, so the "what it measures" view is the recorded
+    CHARGE: :func:`plot_eaglexo_charge` / :func:`plot_eaglexo_charge_map`.
 
 Everything takes ``results`` + a :class:`results.Settings` explicitly.
 """
@@ -106,7 +108,8 @@ def _line_brem(r, settings, convolve=None):
 # ---- interactive viewer ------------------------------------------------------
 def browse(results, settings, kind="by_energy", label="polar tilt", static=None, **kw):
     """Page through one figure type BY POLAR TILT instead of printing every tilt
-    stacked. ``kind``: "by_energy" | "full" | "chunk" | "timepix" | "eaglexo".
+    stacked. ``kind``: "by_energy" | "full" | "chunk" | "timepix" | "eaglexo" |
+    "eaglexo_charge".
 
     A tilt slider + Prev/Next swaps a freshly-drawn figure into an output area --
     reliable on the **inline** backend (recommended; no ``%matplotlib widget`` /
@@ -127,6 +130,7 @@ def browse(results, settings, kind="by_energy", label="polar tilt", static=None,
         "chunk": (_draw_chunk, (11.0, 4.8)),
         "timepix": (_draw_timepix_detected, (9.5, 5.3)),
         "eaglexo": (_draw_eaglexo_detected, (9.5, 5.3)),
+        "eaglexo_charge": (_draw_eaglexo_charge, (9.5, 5.3)),
     }
     if kind not in drawers:
         raise ValueError(f"kind must be one of {list(drawers)}")
@@ -523,8 +527,7 @@ def _draw_full_spectrum(
     ax.set_xlabel("Photon energy (eV)")
     ax.set_ylabel("Intensity (Phs/eV/s/nA)")
     if xmax > 0:
-        lo = max(xmin, 1.0) if logx else xmin  # log x can't show 0 (brem grid -> 0)
-        ax.set_xlim(lo, xmax)  # span the full brem grid (to the beam energy)
+        ax.set_xlim(50.0)  # span the full brem grid (to the beam energy)
     else:
         ax.margins(x=0)
     ax.grid(alpha=0.3, which="both")
@@ -578,19 +581,31 @@ def plot_peak_vs_tilt(results, settings):
 
 
 def _draw_chunk(fig, trecs, settings):
-    """Render ONE polar tilt's best-azimuth INTRINSIC spectra onto ``fig`` (cleared
-    first): LEFT total (coherent + brem), RIGHT brem-subtracted CXR only. The
-    detector view is the separate Eagle XO browser (kind='eaglexo')."""
+    """Render ONE polar tilt's best-geometry INTRINSIC spectra onto ``fig``
+    (cleared first): LEFT total (coherent + brem), RIGHT brem-subtracted CXR only.
+    The detector view is the separate Eagle XO browser (kind='eaglexo').
+
+    One curve PER BEAM ENERGY: the highest-peak record across azimuth AND any other
+    swept dimension (e.g. thickness). best_azimuth() alone keyed on thickness, so a
+    thickness sweep dumped one line per thickness -- all with the same energy/azimuth
+    label -- onto each axis; collapsing per energy (like _draw_by_energy) is the fix.
+    When more than one thickness is in play the label carries the one shown."""
     fig.clear()
-    best = sorted(best_azimuth(trecs), key=lambda r: r["case"]["E0_keV"])
+    energies = sorted({r["case"]["E0_keV"] for r in trecs})
+    best = []
+    for E0 in energies:
+        grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
+        if grp:
+            best.append(max(grp, key=lambda r: float(np.max(r["spec"]))))
     if not best:
         return
     ax_tot, ax_cxr = fig.subplots(1, 2, sharex=True)
-    energies = [r["case"]["E0_keV"] for r in best]
+    multi_t = len({r["case"]["thickness_ang"] for r in best}) > 1
     for r in best:
         az, E0 = r["case"]["tilt_azim_deg"], r["case"]["E0_keV"]
         c = energy_color(E0, energies)
-        lbl = rf"{E0:g} keV ($\phi={az:g}\degree$)"
+        lbl = rf"{E0:g} keV ($\phi={az:g}\degree$"
+        lbl += rf", {r['case']['thickness_ang'] / 1e4:g} $\mu$m)" if multi_t else ")"
         E = r["E_grid"] / 1e3
         line_raw, brem_raw = _line_brem(r, settings, convolve=False)  # intrinsic
         ax_tot.plot(E, (line_raw + brem_raw) * r["scale"], color=c, lw=1.2, label=lbl)
@@ -815,8 +830,13 @@ def plot_timepix_poisson(
     rng = np.random.default_rng(seed)
     E_thr = _thr_keV() * 1e3
     energies = sorted({r["case"]["E0_keV"] for r in recs})
+    # per-panel ~4.6" with a sensible minimum total width (a single energy was
+    # only 3.7" -> too narrow + a clipped suptitle); constrained_layout reserves
+    # room for the suptitle instead of tight_layout clipping it.
+    n = len(energies)
     fig, axes = plt.subplots(
-        1, len(energies), figsize=(min(3.7 * len(energies), 11.5), 4.4), squeeze=False
+        1, n, figsize=(max(4.6 * n, 6.8), 4.6), squeeze=False,
+        constrained_layout=True,
     )
     for ax, E0 in zip(axes.ravel(), energies):
         grp = [r for r in recs if r["case"]["E0_keV"] == E0]
@@ -851,7 +871,6 @@ def plot_timepix_poisson(
         f"({thickness_um:g} $\\mu$m Si, {bias_v:g} V)",
         fontsize=14,
     )
-    fig.tight_layout()
     return fig
 
 
@@ -875,7 +894,9 @@ def plot_eaglexo_efficiency(sensor="4240", distance_m=None, coating="BN"):
     (knob 1) for the chosen sensor + working distance."""
     geo = eag.geometry(sensor, distance_m)
     E = np.geomspace(100.0, 60000.0, 600)
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.0, 4.3))
+    fig, (axL, axR) = plt.subplots(
+        1, 2, figsize=(11.0, 4.3), constrained_layout=True
+    )
     # -- QE (knob 2) --
     axL.axvspan(E[0], 3000.0, color="g", alpha=0.05)
     axL.axvspan(3000.0, E[-1], color="r", alpha=0.05)
@@ -918,7 +939,6 @@ def plot_eaglexo_efficiency(sensor="4240", distance_m=None, coating="BN"):
         f"{geo['active_mm'][0]:g}$\\times${geo['active_mm'][1]:g} mm)",
         fontsize=13,
     )
-    fig.tight_layout()
     return fig
 
 
@@ -1035,57 +1055,230 @@ def plot_eaglexo_detected(
     )
 
 
-def plot_eaglexo_measured(
-    results, settings, integration_s=600.0, coating="BN", resolve_energy=False, seed=0
+# NOTE: there is deliberately no ``plot_eaglexo_measured`` (a "measured spectrum")
+# here. A bare Eagle XO is an INTEGRATING CCD -- it accumulates charge and cannot
+# resolve individual photons, so it does not return a spectrum at all; presenting a
+# Poisson "measured spectrum" misrepresents the instrument. What the camera
+# actually reports is the recorded CHARGE -- see plot_eaglexo_charge (where the
+# signal comes from) and plot_eaglexo_charge_map (the integrated geometry map).
+# The energy-resolving photon-counting mode (eaglexo_response.poisson_counts /
+# resolve_energy) is a special low-occupancy extra, not the default readout.
+
+
+# ---- Eagle XO recorded-charge view (a CCD integrates charge, not photons) -----
+def _eag_charge_rate(r, coating="BN"):
+    """Total detected charge RATE [e-/s/nA] for one record: the Eagle XO
+    integrates every photon that lands -- coherent lines AND bremsstrahlung --
+    weighted by E/W_Si, over the full measured range when the wide brem grid is
+    present. The scalar 'brightness' the CCD reports for a geometry (no spectrum).
+    Coherent lines come from the fine line grid; the brem from the wide grid (or
+    the line-grid brem as a fallback) so the two don't double-count their overlap."""
+    resp = eag.get_response(r["E_grid"], coating=coating)
+    q = resp.integrated_charge(r["spec"] * r["scale"])  # coherent lines [e-/s/nA]
+    if r.get("brem_wide") is not None:
+        Eb = np.asarray(r["E_grid_brem"], dtype=float)
+        inc_b = np.nan_to_num(np.asarray(r["brem_wide"], dtype=float) * r["scale"])
+        cd_b = inc_b * eag.qe(Eb, coating) * (Eb / eag.W_EHP_EV)
+        q += float(np.trapezoid(cd_b, Eb))
+    else:
+        q += resp.integrated_charge(r["brem"] * r["scale"])
+    return q
+
+
+def _draw_eaglexo_charge(
+    fig, trecs, settings, coating="BN", collapse_azimuth=True, floor_frac=1e-4
 ):
-    """A Poisson 'measured' realization (photon-counting mode) for the highest-rate
-    config at each energy, over ``integration_s`` at the configured beam current.
-    The detected mean is incident x QE; counts are Poisson per bin. The title
-    reports the solid angle baked into the records."""
-    recs = records(results)
+    """Render ONE polar tilt of the Eagle XO CHARGE spectral density [e-/eV/s]:
+    where on the spectrum the CCD's recorded charge comes from, lines (fine grid,
+    solid) + wide brem (dashed), log-log. Every photon is weighted by E/W_Si, so
+    the hard brem carries far more charge than its photon count -- the legend
+    reports each curve's integrated charge rate [e-/s]."""
+    fig.clear()
+    ax = fig.subplots(1, 1)
+    cur = settings.beam_current_na
+    energies = sorted({r["case"]["E0_keV"] for r in trecs})
+    ymax, xlo, xhi = 0.0, np.inf, 0.0
+    for E0 in energies:
+        grp = [r for r in trecs if r["case"]["E0_keV"] == E0]
+        if not grp:
+            continue
+        if collapse_azimuth and len(grp) > 1:
+            grp = [max(grp, key=lambda r: float(np.max(r["spec"])))]
+        c = energy_color(E0, energies)
+        for r in sorted(grp, key=lambda r: r["case"]["tilt_azim_deg"]):
+            resp = eag.get_response(r["E_grid"], coating=coating)
+            E = np.asarray(r["E_grid"], dtype=float)
+            cd_line = resp.charge_density((r["spec"] + r["brem"]) * r["scale"]) * cur
+            xlo, xhi = min(xlo, float(E[0])), max(xhi, float(E[-1]))
+            fin = cd_line[np.isfinite(cd_line)]
+            if fin.size:
+                ymax = max(ymax, float(fin.max()))
+            az = r["case"]["tilt_azim_deg"]
+            rate = _eag_charge_rate(r, coating) * cur
+            ax.plot(
+                E, cd_line, color=c, lw=1.3,
+                label=rf"{E0:g} keV ($\phi$={az:.1f}$\degree$, {rate:.2g} e$^-$/s)",
+            )
+            if r.get("brem_wide") is not None:
+                Eb = np.asarray(r["E_grid_brem"], dtype=float)
+                inc_b = np.nan_to_num(np.asarray(r["brem_wide"], dtype=float) * r["scale"])
+                cd_b = inc_b * eag.qe(Eb, coating) * (Eb / eag.W_EHP_EV) * cur
+                xhi = max(xhi, float(Eb[-1]))
+                fb = cd_b[np.isfinite(cd_b)]
+                if fb.size:
+                    ymax = max(ymax, float(fb.max()))
+                ax.plot(Eb, cd_b, color=c, ls="--", lw=0.8, alpha=0.85)
+    case = trecs[0]["case"]
+    ax.axvline(SI_K_EDGE_EV, color="0.4", ls="--", lw=0.8, label="Si-K edge 1.84 keV")
+    if ymax > 0:
+        ax.set_yscale("log")
+        ax.set_ylim(ymax * floor_frac, ymax * 2)
+    ax.set_xscale("log")
+    if xhi > 0:
+        ax.set_xlim(max(xlo, 1.0), xhi)
+    ax.set_title(
+        rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
+        rf"$\theta_\mathrm{{tilt}}$={case['tilt_deg']:0.1f}$\degree$ — Eagle XO recorded "
+        rf"charge density ({coating}, dashed = brem)",
+        fontsize=11,
+    )
+    ax.set_xlabel("Photon energy (eV)")
+    ax.set_ylabel("charge density (e$^-$/eV/s)")
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=8, loc="lower left")
+    fig.tight_layout()
+
+
+def plot_eaglexo_charge(
+    results, settings, coating="BN", collapse_azimuth=True, floor_frac=1e-4
+):
+    """Eagle XO recorded CHARGE spectral density [e-/eV/s], ONE figure per polar
+    tilt, all energies overlaid (best azimuth each), lines + wide brem on log-log.
+    A CCD integrates charge rather than counting photons, so each photon is
+    weighted by E/W_Si: this shows where the recorded signal actually comes from
+    (the hard brem pulls more weight than its photon flux suggests). The companion
+    to plot_eaglexo_detected (photon density) and plot_eaglexo_charge_map (the
+    integrated geometry map)."""
+    return _per_tilt_figs(
+        records(results), settings, _draw_eaglexo_charge, (9.0, 5.2),
+        coating=coating, collapse_azimuth=collapse_azimuth, floor_frac=floor_frac,
+    )
+
+
+def plot_eaglexo_charge_map(
+    results,
+    settings,
+    cases=None,
+    x="tilt_azim_deg",
+    y="tilt_deg",
+    panel="E0_keV",
+    coating="BN",
+    exposure_s=None,
+    auto_lines=True,
+):
+    """Geometry map of the Eagle XO's recorded SIGNAL: the integrated detected
+    charge rate [e-/s] (coherent lines + brem, energy-weighted -- see
+    _eag_charge_rate) over ``x`` x ``y``, one panel per ``panel`` value, the best
+    (max) geometry per cell. This is the "what the CCD actually reports" view the
+    QE-only detected-spectrum plots miss: a CCD integrates charge, it cannot
+    resolve photons, so its figure of merit is collected charge, not line flux.
+
+    With ``exposure_s`` set, the map shows the WELL-FILL FRACTION (collected e- /
+    FULL_WELL_E) for that exposure at ``settings.beam_current_na`` instead -- how
+    close the brightest geometry comes to saturating the well. ``cases`` restricts
+    to one sweep (cf. plot_heatmaps). Honors the same thin-axis -> line-plot
+    fallback as plot_heatmaps (``auto_lines``): a single-valued x or y becomes a
+    line plot (signal vs the varying axis, one line per the other)."""
+    names = None if cases is None else {c["name"] for c in cases}
+    recs = records(results, names)
     if not recs:
         print("no results yet")
         return None
-    rng = np.random.default_rng(seed)
-    energies = sorted({r["case"]["E0_keV"] for r in recs})
+    cur = settings.beam_current_na
+
+    def _val(r):
+        rate = _eag_charge_rate(r, coating) * cur  # e-/s
+        if exposure_s is not None:
+            return rate * exposure_s / eag.FULL_WELL_E  # well-fill fraction
+        return rate
+
+    label = (
+        f"well-fill fraction ({exposure_s:g} s @ {cur:g} nA)"
+        if exposure_s is not None
+        else "detected charge rate  (e$^-$/s)"
+    )
+
+    if auto_lines:
+        nx = len({r["case"][x] for r in recs})
+        ny = len({r["case"][y] for r in recs})
+        if nx < 2 or ny < 2:
+            line_x, thin = (x, y) if nx >= ny else (y, x)
+            n_panel = len({r["case"][panel] for r in recs})
+            hue = panel if n_panel > 1 else thin
+            print(
+                f"plot_eaglexo_charge_map: axis {thin!r} has <2 values -> line plot "
+                f"(signal vs {line_x!r}, one line per {hue!r})."
+            )
+            hue_vals = sorted({r["case"][hue] for r in recs})
+            div_x = _AXIS_SPECS.get(line_x, (None, 1.0))[1]
+            fig, ax = plt.subplots(figsize=(8, 5))
+            for j, hv in enumerate(hue_vals):
+                hr = [r for r in recs if r["case"][hue] == hv]
+                xs = sorted({r["case"][line_x] for r in hr})
+                ys = [max(_val(r) for r in hr if r["case"][line_x] == xv) for xv in xs]
+                col = (
+                    energy_color(hv, hue_vals) if hue == "E0_keV"
+                    else COLORS[j % len(COLORS)]
+                )
+                ax.plot(
+                    [v / div_x for v in xs], ys, "o-", color=col, lw=1.8,
+                    label=_value_label(hue, hv),
+                )
+            ax.set_xlabel(_axis_label(line_x))
+            ax.set_ylabel(label)
+            ax.set_title(f"Eagle XO recorded signal ({coating}, best per point)", fontsize=12)
+            ax.grid(alpha=0.3)
+            ax.legend(title=_AXIS_SPECS.get(hue, (hue,))[0], fontsize=9)
+            fig.tight_layout()
+            return fig
+
+    panel_vals = sorted({r["case"][panel] for r in recs})
+    panels = []
+    for pv in panel_vals:
+        er = [r for r in recs if r["case"][panel] == pv]
+        xs = sorted({r["case"][x] for r in er})
+        ys = sorted({r["case"][y] for r in er})
+        xi = {v: i for i, v in enumerate(xs)}
+        yi = {v: j for j, v in enumerate(ys)}
+        best = {}  # (xv, yv) -> max signal
+        for r in er:
+            ck = (r["case"][x], r["case"][y])
+            v = _val(r)
+            if ck not in best or v > best[ck]:
+                best[ck] = v
+        Z = np.full((len(ys), len(xs)), np.nan)
+        for (xv, yv), v in best.items():
+            Z[yi[yv], xi[xv]] = v
+        panels.append(
+            (pv, Z, _cell_edges(_axis_disp(x, xs)), _cell_edges(_axis_disp(y, ys)))
+        )
+    finite = [Z[np.isfinite(Z)] for _, Z, _, _ in panels]
+    finite = (
+        np.concatenate(finite) if any(a.size for a in finite) else np.array([0.0, 1.0])
+    )
+    vmin, vmax = float(finite.min()), float(finite.max())
     fig, axes = plt.subplots(
-        1, len(energies), figsize=(min(3.7 * len(energies), 11.5), 4.4), squeeze=False
+        1, len(panels), figsize=(min(3.6 * len(panels) + 1.2, 12.0), 4.2),
+        squeeze=False, constrained_layout=True,
     )
-    for ax, E0 in zip(axes.ravel(), energies):
-        grp = [r for r in recs if r["case"]["E0_keV"] == E0]
-        r = max(grp, key=lambda r: float(np.max(r["spec"])))
-        _, det = _eag_detected(r, settings, coating, resolve_energy)
-        counts, expected = eag.poisson_counts(
-            r["E_grid"], det * settings.beam_current_na, integration_s, rng=rng
-        )
-        ax.step(
-            r["E_grid"],
-            counts,
-            where="mid",
-            color="k",
-            lw=0.7,
-            label=f"measured ({integration_s:g} s @ {settings.beam_current_na:g} nA)",
-        )
-        ax.plot(r["E_grid"], expected, "r-", lw=1.3, label="expected mean")
-        ax.axvline(SI_K_EDGE_EV, color="b", ls=":", lw=0.8, label="Si-K edge")
-        ax.set_title(
-            rf"{E0:g} keV, $\theta_\mathrm{{tilt}}={r['case']['tilt_deg']:g}\degree$, "
-            rf"$\phi={r['case']['tilt_azim_deg']:g}\degree$  "
-            rf"({counts.sum():.0f} cts)",
-            fontsize=10,
-        )
-        ax.set_xlabel("Photon energy (eV)")
-        ax.set_ylabel("counts / bin")
-        ax.margins(x=0)
-        ax.grid(alpha=0.3)
-        ax.legend(fontsize=8)
-    dom = _domega_of(recs[0])
-    fig.suptitle(
-        f"Eagle XO Poisson 'measured' spectra  "
-        rf"($\Omega$ = {dom:.3e} sr, {coating})",
-        fontsize=14,
-    )
-    fig.tight_layout()
+    im = None
+    for ax, (pv, Z, xe, ye) in zip(axes.ravel(), panels):
+        im = ax.pcolormesh(xe, ye, Z, cmap="inferno", vmin=vmin, vmax=vmax)
+        ax.set_title(f"{_AXIS_SPECS.get(panel, (panel,))[0]} = {_value_label(panel, pv)}")
+        ax.set_xlabel(_axis_label(x))
+        ax.set_ylabel(_axis_label(y))
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85)
+    fig.suptitle(f"Eagle XO recorded signal: {label}  ({coating}, best per cell)", fontsize=13)
     return fig
 
 
@@ -1191,6 +1384,7 @@ def _trajectory_data(case, Ne, seed):
         E=segs["E_keV"],
         t_fs=segs["t_ang"] / C_ANG_PER_FS,
         z_u=r[:, 2] / u,  # penetration depth below the surface, display units
+        elec_id=segs["elec_id"],  # emitting electron index, per segment
         L=segs["L_ang"],
         ndet=ndet,
         nslab=nslab,
@@ -1222,6 +1416,23 @@ def _trajectory_frame(pts_list, pct=99.0, pad=0.12, beam_frac=0.16):
     aL = beam_frac * (xhi - xlo)
     xlo = min(xlo, -1.5 * aL)  # room for the beam arrow + label
     return (float(xlo), float(xhi), float(-yhi), float(yhi))
+
+
+def _square_frame(frame):
+    """Expand the shorter side of a (xlo, xhi, ylo, yhi) frame symmetrically so it
+    is SQUARE -- no data is cropped, the extra room becomes centred margin. With
+    set_aspect("equal") this lets square subplot boxes hold the tracks without the
+    skinny-strip letterboxing the wide native frame produced (the trajectory-grid
+    sizing fix)."""
+    xlo, xhi, ylo, yhi = frame
+    w, h = xhi - xlo, yhi - ylo
+    if w > h:
+        pad = 0.5 * (w - h)
+        ylo, yhi = ylo - pad, yhi + pad
+    elif h > w:
+        pad = 0.5 * (h - w)
+        xlo, xhi = xlo - pad, xhi + pad
+    return (float(xlo), float(xhi), float(ylo), float(yhi))
 
 
 def _draw_trajectory_panel(
@@ -1328,9 +1539,9 @@ def plot_electron_trajectories(
         # size the FIGURE to the data aspect so the equal-aspect axes fills it
         # (no floating-title letterbox): reserve ~1.7" width for ylabel+colorbar
         # and ~1.1" height for title+xlabel, then constrained_layout packs it.
-        axw = 4.7
+        axw = 5.4
         _, ax = plt.subplots(
-            figsize=(axw + 1.7, float(np.clip(axw * asp + 1.1, 3.0, 7.6))),
+            figsize=(axw + 1.7, float(np.clip(axw * asp + 1.1, 3.2, 8.4))),
             constrained_layout=True,
         )
     _draw_trajectory_panel(
@@ -1352,19 +1563,29 @@ def plot_electron_trajectories(
 
 def plot_trajectory_grid(
     cases_or_results, energy=None, *, Ne=150, seed=0, E_cut=5.0, spread_px=1,
-    max_panels=20, ncols=None, max_width_in=12.0, max_height_in=8.5,
+    max_panels=12, ncols=None, max_width_in=13.0, max_height_in=11.0,
+    panel_in=3.3, min_panel_in=2.5,
 ):
     """Electron-penetration cross-sections at ONE beam energy, a panel per
     (polar, azimuthal) tilt -- the trajectory analogue of plot_heatmaps. Every
-    panel shares ONE frame (computed from the union of all the clouds), so across
-    the grid ONLY the slab rotates; the cascade is datashader-rasterized and
-    energy-coloured with a single shared colorbar.
+    panel shares ONE (squared) frame, so across the grid ONLY the slab rotates;
+    the cascade is datashader-rasterized and energy-coloured with a single shared
+    colorbar.
 
     ``cases_or_results`` is a build_cases list or a results store; ``energy`` picks
     the beam energy (default the lowest). If both polar and azimuthal tilt are
     swept it lays out a polar x azimuth grid (like the heatmaps); otherwise it
-    wraps the swept tilt into ``ncols`` columns. ``Ne`` (electrons/panel) trades
-    detail for speed -- the electron transport, not the drawing, is the cost."""
+    wraps the swept tilt into at most 3 columns (override with ``ncols``). ``Ne``
+    (electrons/panel) trades detail for speed -- the electron transport, not the
+    drawing, is the cost.
+
+    Panel SIZE: each panel is SQUARE (the shared frame is squared so set_aspect
+    "equal" stays exact) and targets ``panel_in`` inches (~3.3", matching
+    plot_best_spectra), never shrinking below ``min_panel_in``. For more tilts than
+    fit in 3 columns the figure grows TALLER (scrollable) rather than crushing
+    panels -- ``max_height_in`` no longer shrinks them. ``max_panels`` caps how
+    many (polar, azimuth) combos are drawn (evenly subsampled past the cap); raise
+    it (and/or ``panel_in``) for a denser grid, lower it for bigger panels."""
     cases = _trajectory_cases(cases_or_results)
     if not cases:
         print("no cases/results to plot")
@@ -1386,30 +1607,32 @@ def plot_trajectory_grid(
         combos = [combos[i] for i in keep]
         grid2d = False
     data = {cb: _trajectory_data(bycombo[cb], Ne, seed) for cb in combos}
-    frame = _trajectory_frame([d["pts"] for d in data.values()])
+    # square the shared frame so the panels read as squares (the native frame is
+    # wide -> skinny strips); no data is cropped, set_aspect("equal") stays exact.
+    frame = _square_frame(_trajectory_frame([d["pts"] for d in data.values()]))
 
     if grid2d:
         nrows, ncols = len(polars), len(azims)
         cell = [[(p, a) for a in azims] for p in polars]
     else:
         n = len(combos)
-        ncols = ncols or int(np.ceil(np.sqrt(n)))
+        ncols = ncols or min(3, n)  # cap at 3 columns; wrap the rest into ROWS
         nrows = int(np.ceil(n / ncols))
         cell = [
             [combos[r * ncols + col] if r * ncols + col < n else None for col in range(ncols)]
             for r in range(nrows)
         ]
 
-    # Size each panel to the shared data aspect so the equal-aspect axes fill
-    # their cells (no per-panel letterbox), reserving ~1.1" for the colorbar and
-    # ~0.7" for the suptitle; constrained_layout then packs it with no big gaps.
+    # SQUARE panels (the "trajectory plots are tiny / skinny" fix): the frame is
+    # square so asp == 1 and pw == ph. Target ``panel_in`` (~3.3", matching
+    # plot_best_spectra), clamp to the per-column width budget, never shrink below
+    # min_panel_in -- for many tilts the FIGURE grows TALLER (scrollable) rather
+    # than crushing every panel. ``max_height_in`` is no longer used to shrink.
     xlo, xhi, ylo, yhi = frame
-    asp = (yhi - ylo) / (xhi - xlo)
-    pw = min((max_width_in - 1.1) / ncols, 2.7)
+    asp = (yhi - ylo) / (xhi - xlo)  # == 1 after _square_frame
+    pw = min(panel_in, (max_width_in - 1.1) / ncols)
+    pw = max(pw, min_panel_in)
     ph = pw * asp
-    if nrows * ph + 0.7 > max_height_in:  # shrink panels so the grid fits on-screen
-        pw *= (max_height_in - 0.7) / (nrows * ph)
-        ph = pw * asp
     fig, axes = plt.subplots(
         nrows, ncols, figsize=(ncols * pw + 1.1, nrows * ph + 0.7), squeeze=False,
         sharex=True, sharey=True, constrained_layout=True,
@@ -1450,18 +1673,21 @@ def plot_trajectory_grid(
     return fig
 
 
-def plot_penetration_profile(
-    cases_or_results, *, Ne=500, seed=0, n_bins=40, tilt=None, depth_frac=True,
+def plot_penetration_survival(
+    cases_or_results, *, Ne=500, seed=0, n_bins=80, tilt=None, depth_frac=True,
 ):
-    """Mean electron ENERGY vs penetration depth -- the slowing-down /
-    penetration profile -- with the mean electron AGE (lifetime, sum L/beta -> fs)
-    vs depth alongside, one curve per beam energy.
+    """Surviving electron population vs penetration depth -- the fraction of the
+    incident electrons (% of N0) that reach AT LEAST a depth z below the entrance
+    surface, one monotonically-decreasing curve per beam energy. This is where the
+    beam stops: the curve falls from 100% at the surface to 0 at the deepest
+    penetration, and a higher-energy beam reaches deeper.
 
-    Depth is z below the entrance surface (the slab normal), path-length-weighted
-    so each bin reflects where the electrons actually spend their track length.
+    Per electron the deepest segment it reaches sets its penetration depth (the
+    max over its segment midpoints' depth below the slab normal); then
+    ``survival(z) = (# electrons reaching depth >= z) / N0``.
     ``tilt`` selects the polar tilt (nearest; default the one closest to normal
-    incidence). ``depth_frac`` plots depth as a fraction of the slab thickness
-    (so thin and thick slabs overlay); set False for absolute depth."""
+    incidence). ``depth_frac`` plots depth as a fraction of the slab thickness (so
+    thin and thick slabs overlay); set False for absolute depth."""
     cases = _trajectory_cases(cases_or_results)
     if not cases:
         print("no cases/results to plot")
@@ -1471,41 +1697,38 @@ def plot_penetration_profile(
     t = min(tilts, key=lambda x: abs(x - want))
     energies = sorted({c["E0_keV"] for c in cases})
 
-    fig, (axE, axT) = plt.subplots(1, 2, figsize=(11.0, 4.2))
-    for i, E0 in enumerate(energies):
+    fig, ax = plt.subplots(figsize=(8, 5))
+    xmax = 1.0
+    for E0 in energies:
         c = next((c for c in cases if c["E0_keV"] == E0 and c["tilt_deg"] == t), None)
         if c is None:
             continue
         d = _trajectory_data(c, Ne, seed)
-        depth = d["z_u"]
+        # deepest point each electron reaches (max over its segment depths), then
+        # clip the tiny negative excursions of backscattered electrons that exit
+        # just above the entrance face.
+        max_depth = np.full(d["Ne"], -np.inf)
+        np.maximum.at(max_depth, d["elec_id"], d["z_u"])
+        max_depth = np.clip(max_depth[np.isfinite(max_depth)], 0.0, None)
         thick = d["thick"]
-        x = depth / thick if depth_frac else depth
-        xmax = 1.0 if depth_frac else thick
-        edges = np.linspace(0.0, xmax, n_bins + 1)
-        ctr = 0.5 * (edges[:-1] + edges[1:])
-        idx = np.clip(np.digitize(x, edges) - 1, 0, n_bins - 1)
-        w = d["L"]  # path-length weight
-        sw = np.bincount(idx, w, minlength=n_bins)
-        good = sw > 0
-        swd = np.where(good, sw, 1.0)
-        meanE = np.bincount(idx, w * d["E"], minlength=n_bins) / swd
-        meanT = np.bincount(idx, w * d["t_fs"], minlength=n_bins) / swd
-        col = energy_color(E0, energies)
-        axE.plot(ctr[good], meanE[good], "-", color=col, lw=1.9, label=f"{E0:g} keV")
-        axT.plot(ctr[good], meanT[good], "-", color=col, lw=1.9, label=f"{E0:g} keV")
+        x = max_depth / thick if depth_frac else max_depth
+        xmax = 1.0 if depth_frac else max(xmax, float(thick))
+        zs = np.linspace(0.0, 1.0 if depth_frac else float(thick), n_bins)
+        surv = 100.0 * np.array([float((x >= z).mean()) for z in zs])
+        ax.plot(zs, surv, "-", color=energy_color(E0, energies), lw=1.9, label=f"{E0:g} keV")
     case0 = next(c for c in cases if c["tilt_deg"] == t)
     ulab = r"$\mu$m" if case0["thickness_ang"] >= 1e4 else "nm"
     xlab = "depth / thickness" if depth_frac else f"penetration depth ({ulab})"
-    axE.set(xlabel=xlab, ylabel="mean electron energy (keV)", title="Slowing-down profile")
-    axT.set(xlabel=xlab, ylabel="mean electron age (fs)", title="Electron lifetime vs depth")
-    for ax in (axE, axT):
-        ax.set_xlim(0, 1 if depth_frac else None)
-        ax.grid(alpha=0.3)
-        ax.legend(title="beam energy", fontsize=9)
-    fig.suptitle(
+    ax.set_xlabel(xlab)
+    ax.set_ylabel(r"surviving electrons (% of $N_0$)")
+    ax.set_xlim(0, xmax)
+    ax.set_ylim(0, 100)
+    ax.grid(alpha=0.3)
+    ax.legend(title="beam energy", fontsize=9)
+    ax.set_title(
         rf"{case0['name'].split()[0]}, {case0['thickness_ang'] / 1e4:.1f} $\mu$m, "
-        rf"$\theta_\mathrm{{tilt}}$={t:g}$\degree$ — penetration profiles",
-        fontsize=13,
+        rf"$\theta_\mathrm{{tilt}}$={t:g}$\degree$ — electron penetration / survival",
+        fontsize=12,
     )
     fig.tight_layout()
     return fig
@@ -1533,7 +1756,28 @@ _HEATMAP_QUANTITIES = [
     ("line_quality", "line-definition quality  (0-1)", "Greens"),
     ("total_flux", "total integrated flux, lines+brem  (Phs/s)", "viridis"),
 ]
+
+# Metrics that are NOT in the default heatmap set (so a plain plot_scan doesn't
+# grow an extra panel) but get a proper label + colormap when asked for by name,
+# e.g. plot_scan(..., quantities=["coherent_brem_ratio"]). coherent_brem_ratio is
+# ungated (not in _FLUX_GATED): it's the CXR/brem contrast, valid wherever brem>0.
+_EXTRA_QUANTITIES = {
+    "coherent_brem_ratio": ("coherent / incoherent-brem flux ratio  (CXR / brem)", "cividis"),
+}
 _METRIC_LABELS = {key: label for key, label, _ in _HEATMAP_QUANTITIES}
+_METRIC_LABELS.update({k: lbl for k, (lbl, _) in _EXTRA_QUANTITIES.items()})
+
+
+def _resolve_quantity(q):
+    """Normalize a quantity spec to a ``(key, label, cmap)`` triple: pass triples
+    through, look bare metric keys up in the default + extra registries (cmap
+    falls back to viridis for an unknown key)."""
+    if not isinstance(q, str):
+        return tuple(q)
+    if q in _EXTRA_QUANTITIES:
+        lbl, cmap = _EXTRA_QUANTITIES[q]
+        return (q, lbl, cmap)
+    return (q, _METRIC_LABELS.get(q, q), "viridis")
 
 # Line-characterization maps are meaningless where the line is ill-defined --
 # either near-zero emission OR a broad ramp / a cluster of comparable peaks
@@ -1590,6 +1834,10 @@ def plot_heatmaps(
 ):
     """Parametric heatmaps over ANY two swept parameters ``x`` x ``y``, one panel
     per value of ``panel``, one figure per quantity.
+
+    For two axes that may or may not both sweep, prefer :func:`plot_scan`, which
+    auto-picks this heatmap or a line plot from how many values each axis has;
+    this function always draws the map.
 
     ``x`` / ``y`` / ``panel`` are case-dict keys -- any of "tilt_deg",
     "tilt_azim_deg", "E0_keV", "thickness_ang", "B_ang2", ... The defaults
@@ -1716,6 +1964,35 @@ def plot_metric_vs(
     if not recs:
         print("no results yet")
         return None
+
+    def _ndistinct(field):
+        return len({r["case"][field] for r in recs if field in r["case"]})
+
+    # Guard a single-valued x: with only one x value every hue collapses to a
+    # vertical stack of points at that x (the "line_flux draws as stacked points"
+    # bug -- e.g. x="E0_keV" on a single-energy sweep). Substitute a parameter
+    # that actually sweeps so the curve is meaningful, rather than silently
+    # connecting points that share an x.
+    if _ndistinct(x) < 2:
+        alt = next(
+            (
+                f for f in ("tilt_deg", "thickness_ang", "E0_keV", "tilt_azim_deg", "B_ang2")
+                if f != x and f != hue and _ndistinct(f) >= 2
+            ),
+            None,
+        )
+        if alt is not None:
+            print(
+                f"plot_metric_vs: x={x!r} has <2 swept values -> using x={alt!r} "
+                f"instead (it actually sweeps)."
+            )
+            x = alt
+        else:
+            print(
+                f"plot_metric_vs: x={x!r} has <2 swept values and nothing else "
+                f"sweeps -> single point(s)."
+            )
+
     metrics = {
         id(r): line_metrics(r, settings, rel_prominence, metric=line_metric)
         for r in recs
@@ -1757,6 +2034,98 @@ def plot_metric_vs(
     return fig
 
 
+def plot_scan(
+    results,
+    settings,
+    *,
+    x="tilt_azim_deg",
+    y="tilt_deg",
+    panel="E0_keV",
+    hue=None,
+    quantities=None,
+    heatmap_min=4,
+    select="quality_peak",
+    cases=None,
+    rel_prominence=0.03,
+    line_metric="sharpness",
+    min_flux_frac=0.02,
+    min_line_quality=0.2,
+    logx=False,
+    logy=False,
+    force=None,
+):
+    """ONE parametric-scan entry point that auto-picks a HEATMAP or a LINE plot
+    from how many values each axis actually sweeps -- the merge of
+    :func:`plot_heatmaps` (2-D maps) and :func:`plot_metric_vs` (1-D line scans),
+    so you call this and don't have to choose:
+
+      * BOTH ``x`` and ``y`` sweep >= ``heatmap_min`` values  -> heatmap, one
+        panel per ``panel`` value (delegates to plot_heatmaps).
+      * otherwise (an axis is fixed, or has only a few values) -> line plot: the
+        DENSER axis goes on x, the sparser one becomes the line hue -- so a
+        thin-azimuth or few-tilt sweep is a handful of clean lines, not a heatmap
+        of horizontal bands (delegates to plot_metric_vs, one call per quantity).
+
+    Either way you get ONE FIGURE PER QUANTITY (same list-of-figs contract as
+    plot_heatmaps). ``quantities`` is a list of line_metrics keys (strings) and/or
+    ``(key, label, cmap)`` triples; default is the full heatmap set.
+
+    Knobs: ``heatmap_min`` is the per-axis value count below which a heatmap row/
+    column is too coarse to be worth it and lines win (so 2-3 tilts -> lines,
+    a full grid -> map). ``force`` overrides the choice ("heatmap" | "lines").
+    ``hue`` overrides the line-mode grouping (e.g. ``hue="E0_keV"`` for one line
+    per beam energy). All other args match plot_heatmaps / plot_metric_vs. Returns
+    the list of figures (empty if there are no results)."""
+    names = None if cases is None else {c["name"] for c in cases}
+    recs = records(results, names)
+    if not recs:
+        print("no results yet")
+        return []
+
+    # accept bare metric keys as well as (key, label, cmap) triples
+    quantities = quantities or _HEATMAP_QUANTITIES
+    quantities = [_resolve_quantity(q) for q in quantities]
+
+    def _ndistinct(field):
+        return len({r["case"][field] for r in recs if field in r["case"]})
+
+    nx, ny = _ndistinct(x), _ndistinct(y)
+    if force in ("heatmap", "lines"):
+        mode = force
+    elif nx >= heatmap_min and ny >= heatmap_min:
+        mode = "heatmap"
+    else:
+        mode = "lines"
+
+    if mode == "heatmap":
+        print(f"plot_scan: heatmap mode ({x} x {y}, panel per {panel})")
+        return plot_heatmaps(
+            results, settings, cases=cases, quantities=quantities, x=x, y=y,
+            panel=panel, select=select, rel_prominence=rel_prominence,
+            line_metric=line_metric, min_flux_frac=min_flux_frac,
+            min_line_quality=min_line_quality,
+        )
+
+    # line mode: denser axis -> x, sparser -> hue (unless hue is given)
+    line_x, other = (x, y) if nx >= ny else (y, x)
+    if hue is None:
+        if _ndistinct(other) >= 2:
+            hue = other
+        elif _ndistinct(panel) >= 2:
+            hue = panel
+        else:
+            hue = other  # nothing else varies -> a single line
+    print(f"plot_scan: line mode ({line_x} on x, one line per {hue})")
+    return [
+        plot_metric_vs(
+            results, settings, x=line_x, metric=key, hue=hue, select=select,
+            cases=cases, rel_prominence=rel_prominence, line_metric=line_metric,
+            logx=logx, logy=logy,
+        )
+        for key, _, _ in quantities
+    ]
+
+
 def plot_best_spectra(
     results,
     settings,
@@ -1764,7 +2133,7 @@ def plot_best_spectra(
     select="quality_peak",
     include_brem=True,
     cases=None,
-    ncols=4,
+    ncols=3,
     rel_prominence=0.03,
     line_metric="sharpness",
 ):
@@ -1792,7 +2161,8 @@ def plot_best_spectra(
     ncols = min(ncols, n)
     nrows = int(np.ceil(n / ncols))
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=(3.3 * ncols, 2.6 * nrows), squeeze=False
+        nrows, ncols, figsize=(3.3 * ncols, 2.6 * nrows), squeeze=False,
+        constrained_layout=True,
     )
     for k, r in enumerate(ranked):
         ax = axes[k // ncols][k % ncols]
@@ -1822,7 +2192,6 @@ def plot_best_spectra(
     fig.supxlabel("Photon energy (keV)", fontsize=9)
     fig.supylabel("Intensity (Phs/eV/s/nA)", fontsize=9)
     fig.suptitle(f"Top {n} geometries by {select} (dashed = brem)", fontsize=12)
-    fig.tight_layout()
     return fig
 
 

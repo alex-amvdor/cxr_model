@@ -330,6 +330,34 @@ class EagleResponse:
             return self.qe
         return qe(E_eV, coating=self.coating)
 
+    def charge_density(self, spec):
+        """Detected CHARGE spectral density [e-/eV/...] -- what the CCD actually
+        records, as opposed to the photon density :meth:`apply` returns.
+
+        A CCD integrates charge: it has no per-photon counting, so it cannot
+        report a photon spectrum. Each absorbed photon of energy E deposits
+        ``E / W_Si`` electrons, so the recorded signal is the detected photon
+        density weighted by photon ENERGY, not photon number::
+
+            charge_density(E) = spec(E) * QE(E) * (E / W_Si)
+
+        That energy weighting is the qualitative difference from a photon counter
+        (the Timepix): it tilts the recorded signal toward harder photons, partly
+        offsetting the thin-sensor QE roll-off. Same grid as the input; units are
+        the input flux units * e- (e.g. e-/eV/s/nA for a Phs/eV/s/nA input)."""
+        det = self.apply(spec)  # detected photon density [Phs/eV/...]
+        return det * (self.E / W_EHP_EV)  # -> electrons (charge) per eV
+
+    def integrated_charge(self, spec):
+        """Total detected charge RATE: trapz of :meth:`charge_density` over the
+        grid (input flux units * e-, e.g. e-/s/nA for a Phs/eV/s/nA input).
+
+        This is the scalar "brightness" the CCD reports for a spectrum -- no
+        energy information survives, just collected charge. Multiply by the beam
+        current [nA] and the exposure [s] to get the electrons accumulated, and
+        compare to :data:`FULL_WELL_E` for saturation."""
+        return float(np.trapezoid(self.charge_density(spec), self.E))
+
 
 # Responses are pure functions of (grid, coating, mode), so cache them -- a
 # results set mixing grids (e.g. distinct line/brem grids) gets one response each.

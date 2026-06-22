@@ -157,8 +157,8 @@ so imports work from any cwd. `*.pkl` checkpoints and `*.png` are gitignored.
   `plot_metric_vs` (1-D scans of any metric vs any swept param), `plot_best_spectra`
   (top-N geometries across the whole sweep — the answer to "thousands of cases"),
   `plot_material_comparison` (cross-material best line energy vs flux),
-  `plot_trajectory_grid`/`plot_penetration_profile` (datashader cascades + depth
-  profiles). Beam energy → colour is consistent across every figure
+  `plot_trajectory_grid`/`plot_penetration_survival` (datashader cascades +
+  surviving-population-vs-depth curve). Beam energy → colour is consistent across every figure
   (`energy_color`); `_per_tilt_figs` is the shared wrapper body. Intrinsic spectra
   are single-axis — the EDS view was removed; Eagle XO is the detector view, and
   `apply_detector_qe` now defaults **False** so "intrinsic" means intrinsic.
@@ -372,17 +372,135 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
   per-crystalline-layer radiation and full-stack self-absorption. Design + the 2H
   groundwork live on the `mote2-multilayer-materials` branch; blocked on a
   reliable 1T′-MoTe₂ CIF for exact coordinates.
-* Patch: Improve checkpointing -- current method leads to gigabyte-sized file transfers for material pickles that have had many cases run and contain much stale (or old but still useful) data. Some form of multiple pickles per material, or at least filtering of the remote pickled data for only the required information prior to plotting. Whichever is cleaner and more robust.
-* Patch: Similar to above, improve data selection when plotting. Currently, when trying to plot a circumspect thickness sweep on HOPG for a few select polar tilt angles, when the hopg.pkl is pulled from the remote, we get the massive dataset of all hopg parameter sets ever calculated, and they are all plotted against one-another.
-* Patch: Reflect upon the EagleXO detection scheme: while the spectral response is likely correct, it is simply a QE metric. The EagleXO is a CCD which only detects pixel brightness. This should be reflected in some sort of plot or heatmap of detected flux or charge, whatever the EagleXO actually reports.
-* Feature: Related to above: consider modeling a grazing-incidence soft x-ray diffraction grating (in combination with an EagleXO or an Alex detector), like those from Ultrafast Innovations.
-* Patch: All electron trajectory plots are *tiny*, it's impossible to make out any detail. Rescaling needs to be done (in a smart way) -- clearly this is not exactly simple to get perfectly right.
-* Patch: In the case that only one (or a few) azimuthal tilt angle(s) is (are) provided, render a plot with multiple lines corresponding to azimuthal tilt angles, rather than the heatmaps which just end up having horizontal bands on them.
-* Feature: Related to above patch, when running custom sweeps with large parameter spaces rather than just a few lines
-* Patch: Suppress warning when running analysis.ipynb on laptop without NVIDIA GPU:
+* Patch: Improve checkpointing -- current method leads to gigabyte-sized file transfers for material pickles that have had many cases run and contain much stale (or old but still useful) data. Some form of multiple pickles per material, or at least filtering of the remote pickled data for only the required information prior to plotting. Whichever is cleaner and more robust. (Partial mitigation landed plot-side: `select_results`/`sweep_values` slice a loaded checkpoint by value before plotting — but the on-disk pickle is still the full union, so the transfer-size problem itself is unsolved.)
+* Feature: grazing-incidence soft x-ray diffraction grating (in combination with an
+  EagleXO or an Alex detector), like those from Ultrafast Innovations.
+* Feature: first-class support for custom large-parameter-space sweeps (beyond the
+  current `plot_scan` heatmap/line auto-pick) — e.g. interactive slicing/faceting
+  of many simultaneously-swept knobs.
 
-```
-C:\Users\alexa\code\ucla\research\cxr_model\.venv\Lib\site-packages\cupy\_environment.py:284: UserWarning: CUDA path could not be detected. Set CUDA_PATH environment variable if CuPy fails to load.
-  warnings.warn(No GPU found, or cupy not installed!
-Falling back to CPU execution.
-```
+### Done (recent)
+
+* ✅ Data selection when plotting — `results.select_results` (value-based slicing:
+  scalar / list / predicate) + `results.sweep_values` (what's in a checkpoint).
+  The notebook slices `res` before any plot, so a fat hopg.pkl no longer overplots
+  every thickness. (The remote *transfer* size is still open — see above.)
+* ✅ EagleXO detection scheme — a CCD integrates charge, so the figure of merit is
+  recorded CHARGE, not a QE-shaped spectrum: `EagleResponse.charge_density` /
+  `integrated_charge`, the per-tilt `browse(kind="eaglexo_charge")` view, and the
+  `plot_eaglexo_charge_map` geometry map (detected charge rate, or well-fill
+  fraction vs `FULL_WELL_E` with `exposure_s`). The misleading "measured spectrum"
+  plot was removed (a bare CCD can't return a spectrum).
+* ✅ Tiny electron-trajectory plots — `plot_trajectory_grid` panels are now SQUARE
+  (shared frame squared) and capped at 3 columns; the figure grows in rows rather
+  than crushing panels.
+* ✅ Few-azimuth → lines, not banded heatmaps — `plot_scan` auto-picks lines vs
+  heatmap from each axis's value count, and `plot_metric_vs` guards a single-valued
+  x (auto-substitutes a genuinely-swept axis).
+* ✅ CuPy "CUDA path could not be detected" warning on the GPU-less laptop —
+  silenced at the cupy import in `montecarlo.py` (the CPU fallback is unchanged).
+* ✅ Figure/UX polish pass — see the "Figure / plotting polish — follow-up review"
+  section above (all 7 items resolved).
+
+### Figure / plotting polish — follow-up review (2026-06-19)
+
+Context: a prior session addressed several of the patches above (CuPy warning
+suppressed; `select_results`/`sweep_values` value-slicing added; unified
+`plot_scan` auto-picks heatmap vs lines; `_draw_chunk` collapse bug fixed;
+EagleXO charge view + per-tilt `browse(kind="eaglexo_charge")` added; trajectory
+panel sizing bumped). The items below were the **remaining** figure/UX problems
+found while actually using the wired-in `analysis.ipynb` on the hopg checkpoint
+(40 thicknesses × 15 polar tilts × 1 energy).
+
+**Status: all 7 RESOLVED** (2026-06-19 session). Summary of what landed (the
+detailed items are kept below for reference): (1) `plot_best_spectra` default
+`ncols=3` + `constrained_layout`; (2) `plot_metric_vs` now guards a single-valued
+`x` — warns and auto-substitutes a genuinely-swept axis — and the notebook plots
+`line_flux`/`peak_flux` vs `tilt_deg`; (3) the thickness×tilt `coherent_flux` /
+`coherent_brem_ratio` cells are now `plot_scan` heatmaps, with
+`coherent_brem_ratio` given a real label+cmap via a new `_EXTRA_QUANTITIES`
+registry (kept out of the default `_HEATMAP_QUANTITIES` so plain scans don't grow
+a panel); (4) `plot_eaglexo_measured` removed (a bare CCD can't return a
+spectrum; the charge view is the "what it measures" path), Eagle/Timepix kept
+plots moved to `constrained_layout` so suptitles aren't clipped; (5)
+`plot_timepix_poisson` widened (~4.6"/panel, ≥6.8" min) + `constrained_layout`;
+(6) `plot_penetration_profile` replaced by `plot_penetration_survival`
+(surviving-population % of N₀ vs depth, per-electron max depth via the new
+`elec_id` key in `_trajectory_data`); (7) `plot_trajectory_grid` panels are now
+square (shared frame squared via `_square_frame`) and capped at 3 columns, the
+figure growing in rows. Verified: full pytest suite + notebook-compile + an
+Agg-backend smoke pass over every touched figure on the hopg checkpoint.
+(Implementation pointers below were guidance, not a spec.)
+
+1. **`plot_best_spectra` ("Top N geometries by …") is too wide — drop to 3
+   columns.** The figure runs off-screen to the right unless the window is
+   full-screened. In `src/plots.py:plot_best_spectra`, the default is `ncols=4`
+   with `figsize=(3.3*ncols, 2.6*nrows)`; change the default to **`ncols=3`** (≈10"
+   wide) so it fits without full-screening. The trajectory grid (#7) should match
+   this per-panel width.
+
+2. **`line_flux` ("integrated flux under the dominant line") draws as stacked
+   points at a single x, not a line.** The notebook cell
+   `plot_metric_vs(res, settings, x="E0_keV", metric="line_flux", hue="tilt_deg")`
+   puts beam energy on x, but hopg has only ONE energy (30 keV) → every polar tilt
+   becomes a separate point stacked vertically at x=30 keV. Want: **line_flux vs
+   polar tilt** (`x="tilt_deg"`), a real line. Fix in the notebook (use a swept
+   axis), and/or make `plot_metric_vs` / `plot_scan` guard a single-valued `x` —
+   warn and auto-substitute a genuinely-swept parameter (or refuse to connect
+   meaningless points) instead of silently stacking them.
+
+3. **`coherent_flux` and `coherent_brem_ratio` vs thickness are 15-line spaghetti
+   — make them heatmaps.** The notebook cells
+   `plot_metric_vs(x="thickness_ang", metric="coherent_flux"/"coherent_brem_ratio",
+   hue="tilt_deg")` draw one line per polar tilt (15 lines). Per the unified-scan
+   decision, thickness(40)×tilt(15) is dense on both axes and should be a
+   **heatmap**: replace with
+   `plot_scan(res, settings, x="thickness_ang", y="tilt_deg", quantities=["coherent_flux"])`
+   and the same with `quantities=["coherent_brem_ratio"]`. Both keys already work
+   as heatmap quantities (`coherent_brem_ratio` is ungated); confirm a sensible
+   colormap + label for the ratio (it's not in `_HEATMAP_QUANTITIES`, so it gets
+   the default label/cmap via `plot_scan`'s string-quantity path — give it a real
+   one in `_HEATMAP_QUANTITIES`/`_METRIC_LABELS` if it's to be a first-class map).
+
+4. **`plot_eaglexo_measured` is conceptually wrong (a CCD can't return a spectrum)
+   and its title is clipped.** A bare Eagle XO integrates charge; it yields a
+   *spectrum* only in the special low-occupancy single-photon-counting mode, so the
+   default "Poisson 'measured' spectra" plot is misleading. **Remove**
+   `plot_eaglexo_measured` (and demote `eaglexo_response.poisson_counts` /
+   `resolve_energy` to an explicitly-labeled "photon-counting mode" extra), and make
+   the "what it actually measures" view the integrated **charge / well-fill**
+   (`plot_eaglexo_charge_map`, already added — possibly also a 2-D detected-charge
+   image). Also: the `suptitle` is cut off (`constrained_layout`/suptitle spacing)
+   — fix that wherever a kept plot still uses a suptitle.
+
+5. **`plot_timepix_poisson` title is clipped and the figure is too narrow.** In
+   `src/plots.py:plot_timepix_poisson`, `figsize=(min(3.7*len(energies), 11.5), 4.4)`
+   → for a single energy that's only 3.7" wide (far too narrow) and the suptitle
+   "…Poisson 'measured' spectra…" is cut off. Fix: per-panel width ≈4.5" with a
+   sensible **minimum total width**, and use `constrained_layout` / proper suptitle
+   spacing so the title isn't clipped. (The Timepix DOES count photons, so its
+   measured spectrum is legitimate — unlike the Eagle XO in #4.)
+
+6. **Replace the penetration energy/age profiles with an electron-population-vs-
+   depth curve.** **Remove `src/plots.py:plot_penetration_profile` entirely** (both
+   the mean-electron-energy-vs-depth *and* the mean-age-vs-depth panels and their
+   calculations). Replace with a **surviving-population vs depth** plot: the
+   fraction of the initial electrons still "alive" (transporting above the energy
+   cutoff — not yet stopped or backscattered out) as a **% of N₀**, vs depth z below
+   the entrance surface. Suggested definition: per electron take the deepest point
+   it reaches, then `survival(z) = (#electrons reaching depth ≥ z) / N₀` — a
+   monotonically decreasing penetration/survival curve, one per beam energy.
+   `simulate_trajectories` already returns `elec_id`, segment midpoints/`r_mid`, and
+   `n_backscattered`/`n_transmitted`, so the per-electron max depth is recoverable.
+   Update the notebook's penetration cell to call the new function.
+
+7. **Trajectory grid panels are still far too small — max 3 SQUARE panels per row,
+   sized like #1.** `src/plots.py:plot_trajectory_grid` wraps the swept tilts into a
+   √n grid whose panels inherit the (wide, non-square) shared data frame, so they
+   read as skinny vertically-stacked strips. Want: **cap at 3 columns** and make
+   each axis **square** (square subplot box, ≈3.3" wide to match
+   `plot_best_spectra`), keeping `set_aspect("equal")` so the slab/tracks stay
+   physically correct — let the data letterbox within the square box, or re-crop the
+   shared frame toward square. For >3 tilts the figure grows in ROWS (taller /
+   scrollable), never by shrinking panels. (This supersedes the partial sizing bump
+   already applied; the column cap + square aspect is the missing piece.)

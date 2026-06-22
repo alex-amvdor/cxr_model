@@ -124,6 +124,80 @@ def filter_results(results, cases):
     return {n: results[n] for n in results if n in names}
 
 
+def sweep_values(results, fields=None):
+    """The distinct swept values present in ``results``, per case field -- a quick
+    "what's actually in this checkpoint" introspection so you know what to pass to
+    :func:`select_results`. Returns ``{field: sorted list of values}`` for the
+    given ``fields`` (default the common geometry/energy knobs), skipping fields
+    absent from the records::
+
+        sweep_values(results)
+        # {'E0_keV': [30.0], 'tilt_deg': [-89.9, -80.4, ...], 'thickness_ang': [...]}
+    """
+    if fields is None:
+        fields = (
+            "crystal", "E0_keV", "tilt_deg", "tilt_azim_deg", "thickness_ang", "B_ang2"
+        )
+    out = {}
+    for r in records(results):
+        for f in fields:
+            if f in r["case"]:
+                out.setdefault(f, set()).add(r["case"][f])
+    return {f: sorted(out[f]) for f in fields if f in out}
+
+
+def select_results(results, **constraints):
+    """Subset ``results`` to the records whose ``case`` matches EVERY constraint --
+    a VALUE-based filter for slicing a big accumulated checkpoint down to the
+    handful of cases you actually want to plot, WITHOUT building a matching
+    build_cases list (cf. :func:`filter_results`, which filters by config NAME).
+
+    This is the fix for "I pulled hopg.pkl to plot a few polar tilts and got every
+    hopg case ever run, all overplotted." Each ``field=spec`` constraint is matched
+    against ``record['case'][field]``:
+
+      * scalar          -> equals (floats within a tolerance, so an exact swept
+                           value like ``tilt_deg=-89.9`` works)
+      * list/tuple/set  -> membership, any-of (floats matched within tolerance)
+      * callable        -> ``spec(value)`` is truthy -- use for RANGES / fuzzy
+                           matches, e.g. ``tilt_deg=lambda t: -60 <= t <= -20`` or
+                           ``thickness_ang=lambda x: x <= 5e4``
+
+    A record is kept only if it carries every named field and all constraints pass.
+    Returns a new ``{name: {E0: record}}`` store (same nesting), so it drops
+    straight into any plotter::
+
+        res = select_results(results, tilt_deg=[-89.9, -50.0, -20.0],
+                             thickness_ang=lambda x: x <= 5e4)
+        plot_metric_vs(res, settings, x="thickness_ang", hue="tilt_deg")
+
+    Call :func:`sweep_values` first to see which values are available to ask for.
+    """
+
+    def _match(val, spec):
+        if callable(spec):
+            return bool(spec(val))
+        if isinstance(spec, (list, tuple, set, np.ndarray)):
+            return any(_match(val, s) for s in spec)
+        if isinstance(val, (int, float)) and isinstance(spec, (int, float)):
+            return bool(np.isclose(val, spec, rtol=1e-9, atol=1e-6))
+        return val == spec
+
+    out = {}
+    for name, by_E in results.items():
+        kept = {
+            E0: r
+            for E0, r in by_E.items()
+            if all(
+                f in r["case"] and _match(r["case"][f], spec)
+                for f, spec in constraints.items()
+            )
+        }
+        if kept:
+            out[name] = kept
+    return out
+
+
 def _peak(r):
     """The selection metric: the highest spectral flux value, max(spectrum)."""
     return float(np.max(r["spec"]))

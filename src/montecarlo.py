@@ -39,18 +39,24 @@ Lengths in Angstrom, energies in eV (electron energies in keV where noted).
 """
 
 import os
+import warnings
 from functools import lru_cache
 
 import numpy as np
 
 try:
-    import cupy as cp
-
     # cupy-cuda* imports cleanly even with no usable CUDA runtime (e.g. on the
-    # viz laptop, which has the wheel but no GPU/driver). Importing is therefore
-    # NOT proof the GPU path works -- a later cp.float32 / kernel call would blow
-    # up with AttributeError or a CUDARuntimeError. Probe for a real device and
-    # fall back to CPU on ANY failure, so the laptop runs the notebook on numpy.
+    # viz laptop, which has the wheel but no GPU/driver), but on such a machine it
+    # emits a UserWarning at import ("CUDA path could not be detected ..."). We
+    # fall back to CPU below anyway, so silence just that import-time warning to
+    # keep the notebook output clean. Importing is NOT proof the GPU path works --
+    # a later cp.float32 / kernel call would blow up with AttributeError or a
+    # CUDARuntimeError. Probe for a real device and fall back to CPU on ANY
+    # failure, so the laptop runs the notebook on numpy.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*CUDA path could not be detected.*")
+        import cupy as cp
+
     if cp.cuda.runtime.getDeviceCount() < 1:
         raise RuntimeError("no CUDA device")
     _GPU = True

@@ -56,9 +56,9 @@ _MATERIAL_GRIDS = {
     # hue="tilt_deg") has nothing to silently collapse -- one clean curve per tilt.
     # For an energy comparison instead, add 40 to energy_keV and use hue="E0_keV".
     "hopg": dict(
-        thickness_ang=np.logspace(np.log10(0.1e4), np.log10(30e4), 30),  # 0.1-30 um
+        thickness_ang=np.logspace(np.log10(0.1e4), np.log10(30e4), 40, endpoint=True),  # 0.1-30 um
         energy_keV=[30],
-        tilt_deg=[-15.0, -45.0, -80.0],
+        tilt_deg=np.linspace(-89.9, -5, 10, endpoint=True),
         tilt_azim_deg=0.0,
         E_grid_line=np.arange(50.0, 4500.0, 1.0),
         E_grid_brem=np.arange(0.0, 60000.0, 30.0),
