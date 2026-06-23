@@ -259,17 +259,15 @@ the (*) sites; a NEW ELEMENT needs all of them:
 2. (*) `src/config.py` — add to `_MATERIAL_GRIDS` (`MATERIALS` auto-derives).
 3. (*) `src/sweep.py` — `MATERIAL_LABELS` **and** a `crystal_params()` branch
    (composition, `hkl_list`, `beam_uvw`, `B_ang2`).
-4. `src/atomic_form_factors.py` — `Z_TABLE` **and** `CROMER_MANN` (9-coeff f0,
-   ITC Vol C Table 6.1.1.4; check Σaᵢ+c ≈ Z).
-5. `src/crystallography.py` — add to `_EDGE_PRONE` if any absorption edge lands
-   in the ≤4.5 keV line grid (forces the complex Henke f).
-6. `src/montecarlo.py` — `TRANSPORT_ELEMENTS` (Z, A, `J_keV` = the ICRU/NIST mean
+4. `src/crystallography.py` — add to `_EDGE_PRONE` if any absorption edge lands
+   in the ≤4.5 keV line grid (forces the complex resonant f0+f′+if″).
+5. `src/montecarlo.py` — `TRANSPORT_ELEMENTS` (Z, A, `J_keV` = the ICRU/NIST mean
    excitation energy in keV — NOT a fudge factor; e.g. Te = 0.485).
-7. `data/atomic_scattering_factors/<El>.csv` — Henke f1/f2. Download the raw table
-   from CXRO `https://henke.lbl.gov/optical_constants/sf/<el>.nff` (same format,
-   10 eV–30 keV, `-9999.` sentinel below valid f1 — no conversion). Use `curl`,
-   NOT WebFetch (WebFetch summarizes and will not reproduce the ~500 numeric rows).
-8. this file — append the key to the "Crystals (TOML keys)" line above.
+6. this file — append the key to the "Crystals (TOML keys)" line above.
+
+Atomic scattering data (Z, f0, f′, f″) now comes from **xraydb** for any element —
+no table to edit (was: hand-typed `Z_TABLE` + `CROMER_MANN` coefficients + a CXRO
+`.nff` download per element). See [docs/atomic-data-sources.md](docs/atomic-data-sources.md).
 
 NIST Mott transport tables (`data/mott_transport_cross_sections/`) are OPTIONAL:
 a missing element (W, S, Pt, Hf, Zr, Te…) falls back to analytic
@@ -359,7 +357,9 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
 
 ### Data provenance
 
-- Atomic scattering: Cromer-Mann f0 + Henke/CXRO f′,f″ (`data/atomic_scattering_factors/*.csv`, `.nff` format).
+- Atomic scattering: Waasmaier–Kirfel f0 + Chantler/FFAST f′,f″, via **xraydb**
+  (`src/atomic_form_factors.py`). The legacy Henke/CXRO `.nff` CSVs in
+  `data/atomic_scattering_factors/` are now unused (kept for provenance / A-B).
 - Elastic transport: NIST SRD 64 relativistic Mott **transport** cross sections
   (`data/mott_transport_cross_sections/`), used to calibrate the screened-Rutherford
   α(E) per element; free paths from the Browning fit (valid ≤30 keV — extrapolated
