@@ -84,8 +84,8 @@ lab setup — a home-built **2×2 Timepix3 quad** (and an alternative **Raptor
 Eagle XO** CCD) at θ_obs = 90°, ~30–60 keV beam, to be compared against the
 paper's TEM/SEM measurements.
 
-Repo: `https://github.com/alex-amvdor/cxr_model.git` (history was force-slimmed;
-notebooks are stripped by `nbstripout` via `.gitattributes`).
+Repo: `https://github.com/alex-amvdor/cxr_model.git` (notebooks are stripped
+by `nbstripout` via `.gitattributes`).
 
 ### Layout
 
@@ -317,9 +317,7 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
   stays clean — a later `git pull` is no longer blocked by cosmetic diffs.
 - **GPU ⇒ serial**: with CuPy present, `run_cases` runs serially (one CUDA
   context), not in a process pool. Multiprocessing speedups only apply CPU-side.
-- **Workers**: machine is an i7-13620H — 10 physical cores / 16 threads. Cap
-  `max_workers` at ~10 (CPU path); the extra 6 are P-core hyperthreads (~15% more,
-  but the laptop gets sluggish). Workers run BELOW_NORMAL priority with BLAS
+- **Workers**: Workers run BELOW_NORMAL priority with BLAS
   pinned to 1 thread.
 - **Detector geometry is per-instrument** — do not transfer numbers. Zhai SEM
   (JEOL 7800): θ_obs=119°, Δθ=16.6°, Ω=0.066 sr. TEM (JEOL 2010HR, the MoSe₂/WSe₂
@@ -369,15 +367,54 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
 
 ## TODOs
 
+### General Project Refinement — Top Priority
+
+The user's Principal Investigor wishes to publish this repository according to the following message received by the user:
+
+> We are launching a new subtap on our website for **CODES**, meant to feature all the “public-ready” codes developed within the group.
+>
+> *Prep work:*
+>
+> * Itemize each self-standing code (i.e., it is “finished” and self-consistently functional,
+>   this is not your code under development).
+>   * Make sure it’s properly commented or documented (e.g., a read-me)
+> * Per each code, make sure that it is uploaded to the QLMC Github account
+> * Per each code, make sure that it is has a DOI assigned to it
+>
+> After you have the above ready, provide the following *Materials for Website:*
+>
+> * A title for your code + DOI code
+> * A single, succinct, paragraph, describing what the code does and notably, what it doesn’t
+> * A permalink of where the code resides on our Github
+
+* **Don't do any of the external github/DOI assignment yet.** At this stage, we just want to refine the project/repo to be fully prepared for future publication,
+* **Broadly evaluate the structure of this project**. Confirm whether or not this `CLAUDE.md` file is being used according to industry standard best practices, or if the project information/TODOs should be relocated elsewhere; if so, do so. Trim the fat as needed; remove any bloat that isn't critical.
+* **Evaluate the python filestructure,** including the use of notebooks, source code, etc., and refactor/reorganize as necessary (if necessary). Analyze if `jupyter` kernel implementation, its interaction with `uv`, etc., is easily transferrable between end users who might clone the repo.
+* **Evaluate the documentation as written thus far** (in `./docs/`, as well as in this file and in `README.md`), and confirm whether or not it is all written and organized according to industry standards. **Evaluate if this project is a good candidate for `sphinx`** or a similar python documentation rendering software; if it is, then implement the best-fit software.
+* **Ensure codebase on main is fully functional and polished**. Move any in-progress or partially completed features to a `feature/`, `patch/`, `hotfix/`, or other branch
+* **Ensure all documentation is fully up-to-date.** It should be optimized for readability and clarity (from both a physics and a codebase explanation perspective), with bloat minimized.
+* **Evaluate package structure.** Analyze if project should be `uv`-installable so that commands are directly runnable from CLI; if so, plan the CLI syntax (i.e., `scan` structure, `remote` structure, etc), then implement.
+* **Evaluate containerization with Docker**. Given the dependencies on `uv`, `jupyter`, and potentially `pyelpsa` (see TODOs below), etc., evaluate whether or not adding the optional capability for future endusers to simply build with `Docker` to skip the setup of the various dependencies is worthwhile. If so, implement it.
+
+### Features, Patches, Bugfixes
+
 * Feature: film-on-substrate multi-layer materials — a vdW film
   (MoSe₂/MoS₂/WS₂/MoTe₂) on its real substrate (SiO₂/Si or sapphire), with
   per-crystalline-layer radiation and full-stack self-absorption. The 2H
   groundwork (incl. 2H-MoTe₂) is on `main`; the multilayer engine itself is
-  unstarted. Full design + phasing in
-  [docs/multilayer-materials.md](docs/multilayer-materials.md) (recommended first
-  slice = cross-stack self-absorption, ≈2–3 days). Only 1T′-MoTe₂ exact
-  coordinates remain blocked on a reliable CIF.
-* Patch: Improve checkpointing -- current method leads to gigabyte-sized file transfers for material pickles that have had many cases run and contain much stale (or old but still useful) data. Some form of multiple pickles per material, or at least filtering of the remote pickled data for only the required information prior to plotting. Whichever is cleaner and more robust. (Partial mitigation landed plot-side: `select_results`/`sweep_values` slice a loaded checkpoint by value before plotting — but the on-disk pickle is still the full union, so the transfer-size problem itself is unsolved.)
+  unstarted.
+
+  * Full design + phasing in [docs/multilayer-materials.md](docs/multilayer-materials.md) (recommended first
+    slice = cross-stack self-absorption). Only 1T′-MoTe₂ exact coordinates
+    remain blocked on a reliable CIF.
+* Patch: Improve checkpointing — current method leads to gigabyte-sized file
+  transfers for material pickles that have had many cases run and contain much
+  stale (or old but still useful) data. Some form of multiple pickles per material,
+  or at least filtering of the remote pickled data for only the required information
+  prior to plotting. Whichever is cleaner and more robust. (Partial mitigation landed
+  plot-side: `select_results`/`sweep_values` slice a loaded checkpoint by value
+  before plotting, but the on-disk pickle is still the full union, so the transfer-size
+  problem itself is unsolved.)
 * Feature: grazing-incidence soft x-ray diffraction grating (in combination with an
   EagleXO or an Alex detector), like those from Ultrafast Innovations.
 * Feature: first-class support for custom large-parameter-space sweeps (beyond the
@@ -389,10 +426,11 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
   MC route is the upgrade for the large-mosaic / broad-line regime where the analytic
   energy-shift-only model breaks (HOPG ZYH, ψ→90°). Shares machinery with the deferred
   **detector solid-angle integration** (both incoherently sum the spectrum over a
-  distribution of a direction — g for mosaic, n̂ for the aperture). Caveat from the
-  feasibility study: the electron multiple-scattering Doppler width often dominates the
-  line, so mosaic is visible mainly in thin / near-perfect crystals. Full design + pros/cons:
-  [docs/crystal-mosaicity.md](docs/crystal-mosaicity.md).
+  distribution of a direction — g for mosaic, n̂ for the aperture).
+
+  * Caveat: the electron multiple-scattering Doppler width often dominates the line,
+    so mosaic is visible mainly in thin / near-perfect crystals.
+    Full design + pros/cons: [docs/crystal-mosaicity.md](docs/crystal-mosaicity.md).
 * Feature: detector solid-angle integration — replace the single-`n_hat` +
   flat-`domega_sr` + analytic `aperture_fwhm_eV` approximation with a first-principles
   integral of `mc_spectrum` over a grid of `n_hat` tiling the chip. Matters for the wide
@@ -400,144 +438,20 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
   unit-convention refactor (drop the double-counted `domega_sr`/`aperture_fwhm_eV`) and
   the GPU-serial wall-clock multiplier, not the kernel. Full design + pros/cons:
   [docs/detector-solid-angle.md](docs/detector-solid-angle.md).
+* Feature: Python unit management library — evaluate the use of Pint or a similar
+  unit management Python library. Look at the most popular candidates (Pint, natu,
+  Buckingham, Units, among others), evaluate/compare their value in making this
+  project more robust, readable, or otherwise improved. If they are worthwhile,
+  select the one that best fits this project, then implement it project-wide.
+* Feature: NIST transport databases replacement with pyelsepa — evaluate the use
+  of pyelsepa/ELSEPA in this project to replace the currently used NIST Mott transport tables.
+  Currently, these tables are given by hardcoded data files at `data/mott_transport_cross_sections/`.
+  User has begun the process of adding support for pyelsepa in the case it is found to be useful.
 
-### Done (recent)
-
-* ✅ Crystal mosaicity — INITIAL ANALYTIC model (switchable, per-crystal, optional).
-  A mosaic tilt rotates g, and only the numerator `v·g` of `E_res` depends on it, so the
-  line gets a Gaussian broadening `FWHM = E·|tan ψ|·η` (ψ = ∠(v,g), η = rocking-curve
-  FWHM), added in quadrature with the EDS + aperture widths in `store_result` (capped at
-  `E_pk`; the linearization diverges as ψ→90°). `montecarlo.mosaic_fwhm_eV` +
-  `mosaic_psi_rad` (+ extracted `_orientation_R`, shared with `mc_spectrum`);
-  `crystal_structures.toml` carries an OPTIONAL `mosaic_fwhm_deg` per crystal (HOPG = 0.8°
-  ZYB; perfect crystals omit it); `load_crystals` surfaces it; `Sweep(mosaic=True[,
-  mosaic_fwhm_deg=…])` is the on/off switch (`build_cases` → `case["mosaic_fwhm_rad"]`,
-  `None` ⇒ perfect ⇒ exact no-op, so old checkpoints and `mosaic=False` are unchanged).
-  `plots.plot_mosaic_comparison(r, settings, grades_deg=…)` overlays grades from ONE
-  computed record (re-convolution only — intrinsic spec is fixed). Tests in
-  `tests/test_mosaic.py`. NB analytic = energy-shift only (amplitudes held fixed across
-  the cone); the exact per-orientation MC sum is the future upgrade above.
-
-* ✅ Data selection when plotting — `results.select_results` (value-based slicing:
-  scalar / list / predicate) + `results.sweep_values` (what's in a checkpoint).
-  The notebook slices `res` before any plot, so a fat hopg.pkl no longer overplots
-  every thickness. (The remote *transfer* size is still open — see above.)
-* ✅ EagleXO detection scheme — a CCD integrates charge, so the figure of merit is
-  recorded CHARGE, not a QE-shaped spectrum: `EagleResponse.charge_density` /
-  `integrated_charge`, the per-tilt `browse(kind="eaglexo_charge")` view, and the
-  `plot_eaglexo_charge_map` geometry map (detected charge rate, or well-fill
-  fraction vs `FULL_WELL_E` with `exposure_s`). The misleading "measured spectrum"
-  plot was removed (a bare CCD can't return a spectrum).
-* ✅ Tiny electron-trajectory plots — `plot_trajectory_grid` panels are now SQUARE
-  (shared frame squared) and capped at 3 columns; the figure grows in rows rather
-  than crushing panels.
-* ✅ Few-azimuth → lines, not banded heatmaps — `plot_scan` auto-picks lines vs
-  heatmap from each axis's value count, and `plot_metric_vs` guards a single-valued
-  x (auto-substitutes a genuinely-swept axis).
-* ✅ CuPy "CUDA path could not be detected" warning on the GPU-less laptop —
-  silenced at the cupy import in `montecarlo.py` (the CPU fallback is unchanged).
-* ✅ Figure/UX polish pass — see the "Figure / plotting polish — follow-up review"
-  section above (all 7 items resolved).
-
-### Figure / plotting polish — follow-up review (2026-06-19)
-
-Context: a prior session addressed several of the patches above (CuPy warning
-suppressed; `select_results`/`sweep_values` value-slicing added; unified
-`plot_scan` auto-picks heatmap vs lines; `_draw_chunk` collapse bug fixed;
-EagleXO charge view + per-tilt `browse(kind="eaglexo_charge")` added; trajectory
-panel sizing bumped). The items below were the **remaining** figure/UX problems
-found while actually using the wired-in `analysis.ipynb` on the hopg checkpoint
-(40 thicknesses × 15 polar tilts × 1 energy).
-
-**Status: all 7 RESOLVED** (2026-06-19 session). Summary of what landed (the
-detailed items are kept below for reference): (1) `plot_best_spectra` default
-`ncols=3` + `constrained_layout`; (2) `plot_metric_vs` now guards a single-valued
-`x` — warns and auto-substitutes a genuinely-swept axis — and the notebook plots
-`line_flux`/`peak_flux` vs `tilt_deg`; (3) the thickness×tilt `coherent_flux` /
-`coherent_brem_ratio` cells are now `plot_scan` heatmaps, with
-`coherent_brem_ratio` given a real label+cmap via a new `_EXTRA_QUANTITIES`
-registry (kept out of the default `_HEATMAP_QUANTITIES` so plain scans don't grow
-a panel); (4) `plot_eaglexo_measured` removed (a bare CCD can't return a
-spectrum; the charge view is the "what it measures" path), Eagle/Timepix kept
-plots moved to `constrained_layout` so suptitles aren't clipped; (5)
-`plot_timepix_poisson` widened (~4.6"/panel, ≥6.8" min) + `constrained_layout`;
-(6) `plot_penetration_profile` replaced by `plot_penetration_survival`
-(surviving-population % of N₀ vs depth, per-electron max depth via the new
-`elec_id` key in `_trajectory_data`); (7) `plot_trajectory_grid` panels are now
-square (shared frame squared via `_square_frame`) and capped at 3 columns, the
-figure growing in rows. Verified: full pytest suite + notebook-compile + an
-Agg-backend smoke pass over every touched figure on the hopg checkpoint.
-(Implementation pointers below were guidance, not a spec.)
-
-1. **`plot_best_spectra` ("Top N geometries by …") is too wide — drop to 3
-   columns.** The figure runs off-screen to the right unless the window is
-   full-screened. In `src/plots.py:plot_best_spectra`, the default is `ncols=4`
-   with `figsize=(3.3*ncols, 2.6*nrows)`; change the default to **`ncols=3`** (≈10"
-   wide) so it fits without full-screening. The trajectory grid (#7) should match
-   this per-panel width.
-
-2. **`line_flux` ("integrated flux under the dominant line") draws as stacked
-   points at a single x, not a line.** The notebook cell
-   `plot_metric_vs(res, settings, x="E0_keV", metric="line_flux", hue="tilt_deg")`
-   puts beam energy on x, but hopg has only ONE energy (30 keV) → every polar tilt
-   becomes a separate point stacked vertically at x=30 keV. Want: **line_flux vs
-   polar tilt** (`x="tilt_deg"`), a real line. Fix in the notebook (use a swept
-   axis), and/or make `plot_metric_vs` / `plot_scan` guard a single-valued `x` —
-   warn and auto-substitute a genuinely-swept parameter (or refuse to connect
-   meaningless points) instead of silently stacking them.
-
-3. **`coherent_flux` and `coherent_brem_ratio` vs thickness are 15-line spaghetti
-   — make them heatmaps.** The notebook cells
-   `plot_metric_vs(x="thickness_ang", metric="coherent_flux"/"coherent_brem_ratio",
-   hue="tilt_deg")` draw one line per polar tilt (15 lines). Per the unified-scan
-   decision, thickness(40)×tilt(15) is dense on both axes and should be a
-   **heatmap**: replace with
-   `plot_scan(res, settings, x="thickness_ang", y="tilt_deg", quantities=["coherent_flux"])`
-   and the same with `quantities=["coherent_brem_ratio"]`. Both keys already work
-   as heatmap quantities (`coherent_brem_ratio` is ungated); confirm a sensible
-   colormap + label for the ratio (it's not in `_HEATMAP_QUANTITIES`, so it gets
-   the default label/cmap via `plot_scan`'s string-quantity path — give it a real
-   one in `_HEATMAP_QUANTITIES`/`_METRIC_LABELS` if it's to be a first-class map).
-
-4. **`plot_eaglexo_measured` is conceptually wrong (a CCD can't return a spectrum)
-   and its title is clipped.** A bare Eagle XO integrates charge; it yields a
-   *spectrum* only in the special low-occupancy single-photon-counting mode, so the
-   default "Poisson 'measured' spectra" plot is misleading. **Remove**
-   `plot_eaglexo_measured` (and demote `eaglexo_response.poisson_counts` /
-   `resolve_energy` to an explicitly-labeled "photon-counting mode" extra), and make
-   the "what it actually measures" view the integrated **charge / well-fill**
-   (`plot_eaglexo_charge_map`, already added — possibly also a 2-D detected-charge
-   image). Also: the `suptitle` is cut off (`constrained_layout`/suptitle spacing)
-   — fix that wherever a kept plot still uses a suptitle.
-
-5. **`plot_timepix_poisson` title is clipped and the figure is too narrow.** In
-   `src/plots.py:plot_timepix_poisson`, `figsize=(min(3.7*len(energies), 11.5), 4.4)`
-   → for a single energy that's only 3.7" wide (far too narrow) and the suptitle
-   "…Poisson 'measured' spectra…" is cut off. Fix: per-panel width ≈4.5" with a
-   sensible **minimum total width**, and use `constrained_layout` / proper suptitle
-   spacing so the title isn't clipped. (The Timepix DOES count photons, so its
-   measured spectrum is legitimate — unlike the Eagle XO in #4.)
-
-6. **Replace the penetration energy/age profiles with an electron-population-vs-
-   depth curve.** **Remove `src/plots.py:plot_penetration_profile` entirely** (both
-   the mean-electron-energy-vs-depth *and* the mean-age-vs-depth panels and their
-   calculations). Replace with a **surviving-population vs depth** plot: the
-   fraction of the initial electrons still "alive" (transporting above the energy
-   cutoff — not yet stopped or backscattered out) as a **% of N₀**, vs depth z below
-   the entrance surface. Suggested definition: per electron take the deepest point
-   it reaches, then `survival(z) = (#electrons reaching depth ≥ z) / N₀` — a
-   monotonically decreasing penetration/survival curve, one per beam energy.
-   `simulate_trajectories` already returns `elec_id`, segment midpoints/`r_mid`, and
-   `n_backscattered`/`n_transmitted`, so the per-electron max depth is recoverable.
-   Update the notebook's penetration cell to call the new function.
-
-7. **Trajectory grid panels are still far too small — max 3 SQUARE panels per row,
-   sized like #1.** `src/plots.py:plot_trajectory_grid` wraps the swept tilts into a
-   √n grid whose panels inherit the (wide, non-square) shared data frame, so they
-   read as skinny vertically-stacked strips. Want: **cap at 3 columns** and make
-   each axis **square** (square subplot box, ≈3.3" wide to match
-   `plot_best_spectra`), keeping `set_aspect("equal")` so the slab/tracks stay
-   physically correct — let the data letterbox within the square box, or re-crop the
-   shared frame toward square. For >3 tilts the figure grows in ROWS (taller /
-   scrollable), never by shrinking panels. (This supersedes the partial sizing bump
-   already applied; the column cap + square aspect is the missing piece.)
+  * On user's home desktop, it is located at `C:\\dev\\pyelsepa\\`. The docker image has been built
+    according to the github repo [github.com/eScatter/pyelsepa](https://github.com/eScatter/pyelsepa)
+* Feature: Clean up and centralize physics anchors/checks — make Feranchuk/Zhai anchors
+  in `./checks/` also produce plots to compare with those provided in the literature (for the user).
+  Specifically, the figures in Zhai are critical, especially 1C. Preferably, a minimal pre-configured
+  jupyter notebook for the data viz for the user interface, though backend source code files
+  used by the notebook are fine.
