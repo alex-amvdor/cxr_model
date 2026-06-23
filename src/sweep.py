@@ -81,6 +81,50 @@ def pm(*hkls):
     return out
 
 
+# amorphous substrate number densities [1/Ang^3], from bulk mass density:
+#   n_formula = rho[g/cc] * 0.602214 / M[g/mol], then * per-element stoichiometry
+_SUBSTRATE_COMP = {
+    "sio2": [("Si", 0.02205), ("O", 0.04410)],   # fused silica, rho=2.20, M=60.08
+    "al2o3": [("Al", 0.04702), ("O", 0.07053)],  # sapphire,     rho=3.98, M=101.96
+}
+
+
+def substrate_composition(substrate):
+    """Number-density composition [(element, n_per_Ang3), ...] for a substrate.
+    Amorphous presets ('sio2', 'al2o3') come from bulk density; a crystalline
+    substrate already in CRYSTALS (e.g. 'silicon') uses its unit-cell density."""
+    if substrate.lower() in _SUBSTRATE_COMP:
+        return [(el, n) for el, n in _SUBSTRATE_COMP[substrate.lower()]]
+    if substrate in CRYSTALS:
+        from collections import Counter
+
+        info = CRYSTALS[substrate]
+        counts = Counter(el for el, _ in info["basis"])
+        return [(el, c / info["V_cell"]) for el, c in counts.items()]
+    raise ValueError(
+        f"unknown substrate {substrate!r}; use one of {list(_SUBSTRATE_COMP)} "
+        f"or a crystal key in {list(CRYSTALS)}"
+    )
+
+
+def film_on_substrate_layers(
+    film_composition, film_thickness_ang, substrate, substrate_thickness_ang
+):
+    """Absorber stack [(z_top, z_bot, composition), ...] for a film at the
+    entrance face (z=0..t_film) on a substrate (t_film..t_film+t_sub). Attach as
+    a case's ``abs_layers`` so emitted lines/brem are attenuated by the WHOLE
+    stack (the film still RADIATES via the case's crystal/hkl_list). Beam enters
+    the film side; with negative tilt (front exit) the substrate sits BEHIND the
+    emission and does not attenuate -- it bites the back-exit / transmission
+    geometry. See docs/multilayer-materials.md."""
+    t_f = float(film_thickness_ang)
+    t_s = float(substrate_thickness_ang)
+    return [
+        (0.0, t_f, [(el, float(n)) for el, n in film_composition]),
+        (t_f, t_f + t_s, substrate_composition(substrate)),
+    ]
+
+
 def crystal_params(material, n_families=4):
     """Fixed crystallography for a material: composition, the dominant
     reflections, the beam zone axis [uvw], the (isotropic) B-factor, and a
@@ -226,6 +270,13 @@ class Sweep:
     #       crystal that has none. Ignored unless mosaic=True.
     mosaic: bool = False
     mosaic_fwhm_deg: Optional[float] = None
+    # film-on-substrate stack (optional, FIRST SLICE of the multilayer feature --
+    # docs/multilayer-materials.md). substrate=None -> free-standing film
+    # (unchanged). Otherwise the film's emitted lines + brem are attenuated by the
+    # substrate via each case's abs_layers; transport + radiation still use the
+    # film material (substrate backscatter / substrate emission are deferred).
+    substrate: Optional[str] = None  # "sio2" | "al2o3" | a crystal key e.g. "silicon"
+    substrate_thickness_ang: float = 5e6  # 0.5 mm default
 
 
 def _seq(x):
@@ -288,6 +339,15 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
         )
     ):
         name = f"{label} {fmt_thickness(thickness)} pol={tilt:g} az={azim:g}"
+        abs_layers = None
+        if sweep.substrate is not None:
+            name = f"{name} on {sweep.substrate}"
+            abs_layers = film_on_substrate_layers(
+                cp["composition"],
+                thickness,
+                sweep.substrate,
+                sweep.substrate_thickness_ang,
+            )
         for i_e, E0 in enumerate(energies):
             cases.append(
                 dict(
@@ -306,6 +366,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     tilt_azim_deg=float(azim),
                     beam_uvw=beam_uvw,
                     mosaic_fwhm_rad=mosaic_fwhm_rad,  # None -> perfect crystal
+                    abs_layers=abs_layers,  # None -> single slab; else film-on-substrate stack
                     brem_file=None,
                     Ne=n_electrons,
                     Ne_brem=n_electrons_brem,

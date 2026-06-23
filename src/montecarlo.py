@@ -298,6 +298,34 @@ def _mu_total_inv_ang(comp, E_eV):
     return mu
 
 
+# ---- layered (film-on-substrate) self-absorption ----------------------------
+def _layer_dz(z_mid, n_z, z_top, z_bot):
+    """z-extent of the layer [z_top, z_bot] that a photon leaving depth z_mid
+    along n_hat (z-component n_z) crosses on its way out: toward z=0 when n_z<0
+    (the entrance face) or the back face when n_z>0. numpy ufuncs are used so the
+    same code serves numpy or cupy z_mid. Returns an array shaped like z_mid."""
+    if n_z < 0:  # escape ray spans depths [0, z_mid]
+        return np.maximum(np.minimum(z_mid, z_bot) - z_top, 0.0)
+    return np.maximum(z_bot - np.maximum(z_mid, z_top), 0.0)  # spans [z_mid, z_total]
+
+
+def _stack_tau(layers, z_mid, n_z, E):
+    """Beer-Lambert optical depth for a photon leaving each segment midpoint
+    (depth z_mid) along n_hat through a LAYERED absorber stack:
+        tau = (1/|n_z|) * sum_i mu_i(E) * dz_i
+    layers = [(z_top, z_bot, composition), ...] top (entrance) first, contiguous,
+    the deepest z_bot being the total stack thickness. z_mid and E are per-segment
+    arrays (E the resonance energy); the result matches their device. A single
+    layer over [0, total_thickness] reproduces the single-slab escape exactly,
+    so passing layers=None elsewhere stays bit-for-bit identical."""
+    inv = 1.0 / max(abs(float(n_z)), 1e-12)
+    tau = 0.0
+    for z_top, z_bot, comp in layers:
+        dz = _layer_dz(z_mid, n_z, float(z_top), float(z_bot))
+        tau = tau + _mu_total_inv_ang(comp, E) * dz * inv
+    return tau
+
+
 def _rotate_directions(d, cos_t, phi):
     """Rotate unit vectors d (N,3) by polar angle theta, azimuth phi."""
     sin_t = np.sqrt(np.maximum(1.0 - cos_t**2, 0.0))
@@ -575,6 +603,7 @@ def mc_spectrum(
     azimuth_rad=0.0,
     sinc_cutoff=None,
     components=False,
+    layers=None,
 ):
     """
     Per-electron CXR spectrum d2N/dE dOmega [photons / eV / sr / electron]
@@ -595,6 +624,11 @@ def mc_spectrum(
     composition: [(element, n_per_Ang3), ...] for compound self-absorption;
     defaults to the single absorber_element at the crystal's total atom
     density (exact for elemental crystals).
+    layers: optional film-on-substrate absorber stack
+    [(z_top, z_bot, composition), ...] (top/entrance first). When given, the
+    escape attenuation is the piecewise mu_i*dz_i sum across the whole stack
+    rather than the single slab; the RADIATION still comes from crystal/hkl_list
+    (the film). None -> single slab (bit-for-bit unchanged).
 
     beam_uvw: CRYSTAL AXIS along the slab normal (+z). Default None keeps the
     construction-frame convention, i.e. [001] (the c-axis for hexagonal
@@ -751,13 +785,19 @@ def mc_spectrum(
             A2_cbs += xp.abs(A_CBS) ** 2
 
         # -- 6. Beer-Lambert escape factor from the segment midpoint -------------
-        # straight path along n_hat to whichever slab face the photon exits
+        # straight path along n_hat to whichever face the photon exits. With a
+        # LAYERED absorber (layers) the optical depth sums mu_i*dz_i across the
+        # film-on-substrate stack; otherwise it's the single-slab path.
         z_mid = seg_r[idx, 2]
-        if n_hat[2] < 0:
-            L_esc = z_mid / (-n_hat[2])  # out the entrance face
+        if layers is None:
+            if n_hat[2] < 0:
+                L_esc = z_mid / (-n_hat[2])  # out the entrance face
+            else:
+                L_esc = (thickness - z_mid) / n_hat[2]  # out the back face
+            tau = L_esc * _mu_total_inv_ang(abs_comp, E_r)
         else:
-            L_esc = (thickness - z_mid) / n_hat[2]  # out the back face
-        T_abs = xp.exp(-L_esc * _mu_total_inv_ang(abs_comp, E_r))
+            tau = _stack_tau(layers, z_mid, n_hat[2], E_r)
+        T_abs = xp.exp(-tau)
 
         # -- 7. accumulate the finite-segment lineshape ---------------------------
         # d2N/dE dOmega = alpha*omega/(4 pi^2 hbar c) |A|^2 t_L^2
@@ -878,6 +918,7 @@ def mc_brem_spectrum(
     n_hat=None,
     chunk=20000,
     composition=None,
+    layers=None,
 ):
     """
     Incoherent bremsstrahlung background d2N/dE dOmega
@@ -910,12 +951,20 @@ def mc_brem_spectrum(
         n_hat = n_hat / np.linalg.norm(n_hat)
 
     E_grid = xp.asarray(E_grid_eV, dtype=REAL)
-    mu = _mu_total_inv_ang(comp, E_grid)  # (NE,) [1/Ang]
+    mu = _mu_total_inv_ang(comp, E_grid)  # (NE,) [1/Ang], single-slab fallback
     # The Henke absorption tables span ~20 eV - 30 keV; outside that the wide
     # brem grid gets NaN (above 30 keV) or inf (at E=0), and a single bad bin
     # makes brem_wide -- and its integrated count rate -- NaN. Hard X-rays escape
     # essentially unattenuated, so treat an unavailable mu as zero (transparent).
     mu = xp.nan_to_num(mu, nan=0.0, posinf=0.0, neginf=0.0)
+    # layered (film-on-substrate) absorber: precompute each layer's mu(E_grid);
+    # the per-segment z-path dz folds in inside the chunk loop. None -> single slab.
+    if layers is not None:
+        inv_nz = 1.0 / max(abs(float(n_hat[2])), 1e-12)
+        layer_mu = [
+            xp.nan_to_num(_mu_total_inv_ang(c, E_grid), nan=0.0, posinf=0.0, neginf=0.0)
+            for (_, _, c) in layers
+        ]
 
     seg_r = xp.asarray(segments["r_mid"], dtype=REAL)
     seg_L = xp.asarray(segments["L_ang"], dtype=REAL)
@@ -930,7 +979,14 @@ def mc_brem_spectrum(
     M = seg_E.size
     for j0 in range(0, M, chunk):
         sl = slice(j0, min(j0 + chunk, M))
-        T_abs = xp.exp(-L_esc[sl][:, None] * mu[None, :])
+        if layers is None:
+            T_abs = xp.exp(-L_esc[sl][:, None] * mu[None, :])
+        else:
+            tau = 0.0
+            for (z_top, z_bot, _), mu_i in zip(layers, layer_mu):
+                dz = _layer_dz(z_mid[sl], n_hat[2], float(z_top), float(z_bot))
+                tau = tau + (dz * inv_nz)[:, None] * mu_i[None, :]
+            T_abs = xp.exp(-tau)
         path_cm = seg_L[sl] * 1e-8
         for el_i, n_i in comp:
             Z_i = TRANSPORT_ELEMENTS[el_i]["Z"]
@@ -1014,6 +1070,8 @@ def _spectrum_case(case, tp):
     CUDA context ever touches the device."""
     E_grid, E_brem, n_hat = tp["E_grid"], tp["E_brem"], tp["n_hat"]
     segs, segs_b = tp["segs"], tp["segs_b"]
+    # optional film-on-substrate absorber stack (None -> single slab, unchanged)
+    abs_layers = case.get("abs_layers")
     spec = mc_spectrum(
         segs,
         E_grid,
@@ -1026,6 +1084,7 @@ def _spectrum_case(case, tp):
         azimuth_rad=case.get("azimuth_rad", 0.0),
         sinc_cutoff=case.get("sinc_cutoff"),
         chunk=case.get("spec_chunk") or 40000,
+        layers=abs_layers,
     )
     brem_wide = mc_brem_spectrum(
         segs_b,
@@ -1033,6 +1092,7 @@ def _spectrum_case(case, tp):
         composition=case["composition"],
         n_hat=n_hat,
         chunk=case.get("brem_chunk") or 20000,
+        layers=abs_layers,
     )
     brem = np.interp(E_grid, E_brem, brem_wide)  # brem under the lines (line grid)
     # Hand this case's GPU scratch back to the OS so the CuPy memory pool can't
