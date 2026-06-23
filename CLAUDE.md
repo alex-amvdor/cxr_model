@@ -371,9 +371,12 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
 
 * Feature: film-on-substrate multi-layer materials — a vdW film
   (MoSe₂/MoS₂/WS₂/MoTe₂) on its real substrate (SiO₂/Si or sapphire), with
-  per-crystalline-layer radiation and full-stack self-absorption. Design + the 2H
-  groundwork live on the `mote2-multilayer-materials` branch; blocked on a
-  reliable 1T′-MoTe₂ CIF for exact coordinates.
+  per-crystalline-layer radiation and full-stack self-absorption. The 2H
+  groundwork (incl. 2H-MoTe₂) is on `main`; the multilayer engine itself is
+  unstarted. Full design + phasing in
+  [docs/multilayer-materials.md](docs/multilayer-materials.md) (recommended first
+  slice = cross-stack self-absorption, ≈2–3 days). Only 1T′-MoTe₂ exact
+  coordinates remain blocked on a reliable CIF.
 * Patch: Improve checkpointing -- current method leads to gigabyte-sized file transfers for material pickles that have had many cases run and contain much stale (or old but still useful) data. Some form of multiple pickles per material, or at least filtering of the remote pickled data for only the required information prior to plotting. Whichever is cleaner and more robust. (Partial mitigation landed plot-side: `select_results`/`sweep_values` slice a loaded checkpoint by value before plotting — but the on-disk pickle is still the full union, so the transfer-size problem itself is unsolved.)
 * Feature: grazing-incidence soft x-ray diffraction grating (in combination with an
   EagleXO or an Alex detector), like those from Ultrafast Innovations.

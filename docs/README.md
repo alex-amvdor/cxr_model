@@ -15,6 +15,7 @@ bloat those files.
 |---|---|---|
 | [crystal-mosaicity.md](crystal-mosaicity.md) | The analytic mosaic broadening (shipped) and the exact Monte-Carlo route (designed, not implemented) | analytic ✅ · MC ⏳ |
 | [detector-solid-angle.md](detector-solid-angle.md) | Single-angle approximation (shipped) vs. a first-principles solid-angle integral (designed, not implemented) | ⏳ |
+| [multilayer-materials.md](multilayer-materials.md) | Film-on-substrate stacks: cross-stack self-absorption, per-layer radiation, multilayer electron transport (designed, not implemented) | ⏳ |
 | [atomic-data-sources.md](atomic-data-sources.md) | Hard-coded Henke + Cromer-Mann data vs. an external library (xraydb / xraylib / …); evaluation + recommendation | evaluated, not adopted |
 
 Legend: ✅ implemented · ⏳ designed, not implemented.
