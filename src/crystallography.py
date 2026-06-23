@@ -159,7 +159,16 @@ def load_crystals(
         raw = tomllib.load(f)
     crystals = {}
     for name, spec in raw.items():
-        lattice = {key: val for key, val in spec.items() if key != "basis"}
+        # mosaic_fwhm_deg is an OPTIONAL per-crystal property (the c-axis mosaic
+        # spread), not part of the lattice geometry -- carve it out before building
+        # the lattice dict so it can't leak into _direct_lattice_vectors / the
+        # reciprocal-basis cache key. Absent -> None (perfect crystal).
+        mosaic_fwhm_deg = spec.get("mosaic_fwhm_deg")
+        lattice = {
+            key: val
+            for key, val in spec.items()
+            if key not in ("basis", "mosaic_fwhm_deg")
+        }
         basis = [
             (atom["element"], np.array(atom["pos"], dtype=float))
             for atom in spec["basis"]
@@ -169,6 +178,7 @@ def load_crystals(
             "lattice": lattice,
             "basis": basis,
             "V_cell": float(np.dot(a1, np.cross(a2, a3))),
+            "mosaic_fwhm_deg": mosaic_fwhm_deg,
         }
     return crystals
 

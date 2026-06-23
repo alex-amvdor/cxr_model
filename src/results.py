@@ -28,6 +28,8 @@ from montecarlo import (
     beta_from_keV,
     eds_fwhm_eV,
     aperture_fwhm_eV,
+    mosaic_fwhm_eV,
+    mosaic_psi_rad,
     convolve_detector,
     detector_efficiency,
     load_external_brem,
@@ -60,13 +62,24 @@ def store_result(results, case, out):
     name, E0 = case["name"], case["E0_keV"]
     E_grid = out["E_grid"]
     E_pk = E_grid[np.argmax(out["spec"])]
-    fwhm = np.sqrt(
+    fwhm_sq = (
         eds_fwhm_eV(E_pk) ** 2
         + aperture_fwhm_eV(
             E_pk, beta_from_keV(E0), case["theta_obs_rad"], case["dtheta_obs_rad"]
         )
         ** 2
     )
+    # crystal mosaicity (analytic): add the mosaic broadening in quadrature when the
+    # run enabled it (case["mosaic_fwhm_rad"] from build_cases; None/absent -> skip,
+    # an exact no-op so old checkpoints and mosaic=False runs are unchanged). The
+    # linearization diverges as psi -> 90 deg, so cap the term at E_pk -- beyond
+    # FWHM ~ E the line is washed out and the model is meaningless anyway.
+    mosaic_rad = case.get("mosaic_fwhm_rad")
+    if mosaic_rad:
+        psi = mosaic_psi_rad(case, E_pk)
+        if psi is not None:
+            fwhm_sq += min(mosaic_fwhm_eV(E_pk, psi, mosaic_rad), E_pk) ** 2
+    fwhm = np.sqrt(fwhm_sq)
     results.setdefault(name, {})[E0] = dict(
         E_grid=E_grid,
         spec=out["spec"],

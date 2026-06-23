@@ -122,7 +122,9 @@ so imports work from any cwd. `*.pkl` checkpoints and `*.png` are gitignored.
   `t_ang` = Σ L/β and `elec_id`, used by the penetration plots), per-segment
   spectrum (`mc_spectrum`), Born+Elwert brem (`mc_brem_spectrum`), detector
   helpers (`eds_fwhm_eV`, `aperture_fwhm_eV`, `convolve_detector`,
-  `detector_efficiency`), `tilted_geometry`, and the parallel drivers
+  `detector_efficiency`), the analytic crystal-mosaic broadening
+  (`mosaic_fwhm_eV` + `mosaic_psi_rad`, with the shared `_orientation_R`),
+  `tilted_geometry`, and the parallel drivers
   `run_case`/`run_cases`. **Optional CuPy GPU** (`xp = cp` if importable; prints
   "Using GPU"); spectra use fp32 on-device.
 - **`sweep.py`** — `Sweep` dataclass + `build_cases`. Every physical knob is
@@ -378,8 +380,40 @@ with a single `run_case` at tiny `Ne` — it exercises every registry above.
 * Feature: first-class support for custom large-parameter-space sweeps (beyond the
   current `plot_scan` heatmap/line auto-pick) — e.g. interactive slicing/faceting
   of many simultaneously-swept knobs.
+* Feature: crystal mosaicity — the **exact Monte-Carlo route** (incoherent sum over
+  Gaussian-spread crystallite orientations inside `mc_spectrum`, broadening PXR+CBS
+  per orientation). The cheap **analytic** route already landed (see Done below); the
+  MC route is the upgrade for the large-mosaic / broad-line regime where the analytic
+  energy-shift-only model breaks (HOPG ZYH, ψ→90°). Shares machinery with the deferred
+  **detector solid-angle integration** (both incoherently sum the spectrum over a
+  distribution of a direction — g for mosaic, n̂ for the aperture). Caveat from the
+  feasibility study: the electron multiple-scattering Doppler width often dominates the
+  line, so mosaic is visible mainly in thin / near-perfect crystals. Full design + pros/cons:
+  [docs/crystal-mosaicity.md](docs/crystal-mosaicity.md).
+* Feature: detector solid-angle integration — replace the single-`n_hat` +
+  flat-`domega_sr` + analytic `aperture_fwhm_eV` approximation with a first-principles
+  integral of `mc_spectrum` over a grid of `n_hat` tiling the chip. Matters for the wide
+  SEM/TEM detectors (≈12–17°), negligible for the tiny Timepix Ω. Main cost is the
+  unit-convention refactor (drop the double-counted `domega_sr`/`aperture_fwhm_eV`) and
+  the GPU-serial wall-clock multiplier, not the kernel. Full design + pros/cons:
+  [docs/detector-solid-angle.md](docs/detector-solid-angle.md).
 
 ### Done (recent)
+
+* ✅ Crystal mosaicity — INITIAL ANALYTIC model (switchable, per-crystal, optional).
+  A mosaic tilt rotates g, and only the numerator `v·g` of `E_res` depends on it, so the
+  line gets a Gaussian broadening `FWHM = E·|tan ψ|·η` (ψ = ∠(v,g), η = rocking-curve
+  FWHM), added in quadrature with the EDS + aperture widths in `store_result` (capped at
+  `E_pk`; the linearization diverges as ψ→90°). `montecarlo.mosaic_fwhm_eV` +
+  `mosaic_psi_rad` (+ extracted `_orientation_R`, shared with `mc_spectrum`);
+  `crystal_structures.toml` carries an OPTIONAL `mosaic_fwhm_deg` per crystal (HOPG = 0.8°
+  ZYB; perfect crystals omit it); `load_crystals` surfaces it; `Sweep(mosaic=True[,
+  mosaic_fwhm_deg=…])` is the on/off switch (`build_cases` → `case["mosaic_fwhm_rad"]`,
+  `None` ⇒ perfect ⇒ exact no-op, so old checkpoints and `mosaic=False` are unchanged).
+  `plots.plot_mosaic_comparison(r, settings, grades_deg=…)` overlays grades from ONE
+  computed record (re-convolution only — intrinsic spec is fixed). Tests in
+  `tests/test_mosaic.py`. NB analytic = energy-shift only (amplitudes held fixed across
+  the cone); the exact per-orientation MC sum is the future upgrade above.
 
 * ✅ Data selection when plotting — `results.select_results` (value-based slicing:
   scalar / list / predicate) + `results.sweep_values` (what's in a checkpoint).

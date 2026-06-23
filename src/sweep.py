@@ -214,6 +214,18 @@ class Sweep:
     # a busy or shared device; the cost is only a little extra loop overhead.
     spec_chunk: Optional[int] = None
     brem_chunk: Optional[int] = None
+    # crystal mosaicity (the INITIAL ANALYTIC broadening; switchable per run).
+    #   mosaic=False (default) -> OFF: perfect crystal, an exact no-op.
+    #   mosaic=True            -> apply the per-crystal mosaic_fwhm_deg from
+    #       crystal_structures.toml. Crystals without a value (diamond, silicon, the
+    #       TMDs) stay perfect even with mosaic=True, so this is the "optional,
+    #       excluding crystals which lack such data" switch -- HOPG has a value (0.8
+    #       deg) and so DOES broaden when mosaic=True.
+    #   mosaic_fwhm_deg        -> override the per-crystal value for ALL crystals in
+    #       the sweep (e.g. HOPG ZYA 0.4 / ZYB 0.8 / ZYH 3.5), or supply one for a
+    #       crystal that has none. Ignored unless mosaic=True.
+    mosaic: bool = False
+    mosaic_fwhm_deg: Optional[float] = None
 
 
 def _seq(x):
@@ -250,6 +262,18 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
     beam_uvw = cp["beam_uvw"] if sweep.beam_uvw is None else sweep.beam_uvw
     label = MATERIAL_LABELS.get(sweep.material, sweep.material)
 
+    # crystal mosaicity (analytic, optional): None unless the run enables it AND the
+    # crystal has a mosaic_fwhm_deg (or the Sweep overrides it). None -> perfect
+    # crystal, so store_result adds no mosaic term (exact no-op).
+    mosaic_deg = None
+    if sweep.mosaic:
+        mosaic_deg = (
+            sweep.mosaic_fwhm_deg
+            if sweep.mosaic_fwhm_deg is not None
+            else CRYSTALS[cp["crystal"]].get("mosaic_fwhm_deg")
+        )
+    mosaic_fwhm_rad = float(np.deg2rad(mosaic_deg)) if mosaic_deg else None
+
     def _triple(g):
         """(start, stop, step) so np.arange(*triple) reproduces grid g."""
         step = float(g[1] - g[0])
@@ -281,6 +305,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     tilt_deg=float(tilt),
                     tilt_azim_deg=float(azim),
                     beam_uvw=beam_uvw,
+                    mosaic_fwhm_rad=mosaic_fwhm_rad,  # None -> perfect crystal
                     brem_file=None,
                     Ne=n_electrons,
                     Ne_brem=n_electrons_brem,

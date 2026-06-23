@@ -53,10 +53,15 @@ basis = [
 ]
 
 # AB-stacked (Bernal) highly-oriented pyrolytic graphite, 4 atoms per cell.
+# mosaic_fwhm_deg: c-axis (00l) rocking-curve FWHM of the mosaic-block spread.
+# 0.8 deg = ZYB research grade (ZYA 0.4 / ZYB 0.8 / ZYH 3.5). OPTIONAL per crystal:
+# omit it for near-perfect crystals (diamond, silicon) -> treated as perfect. Only
+# applied when a run sets Sweep(mosaic=True); see sweep.build_cases / montecarlo.mosaic_fwhm_eV.
 [hopg]
 system = "hexagonal"
 a = 2.461
 c = 6.711
+mosaic_fwhm_deg = 0.8
 basis = [
     { element = "C", pos = [0.000000, 0.000000, 0.0] },
     { element = "C", pos = [0.3333333333333333, 0.6666666666666667, 0.0] },

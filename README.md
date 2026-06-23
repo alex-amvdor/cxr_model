@@ -79,6 +79,7 @@ export_pdf.py      headless analysis.ipynb → PDF export (run locally)
 src/               importable modules (both notebooks do sys.path.insert(0, "src"))
 data/              crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
 checks/            validation scripts + notebooks (Feranchuk anchor, Zhai Fig 1c, kinematic audit)
+docs/              design notes & decision records (deferred features, library choices)
 checkpoints/       per-material results pickles (gitignored)
 results/           exported figures / PDFs (PNGs gitignored)
 ```
@@ -200,6 +201,36 @@ Adding a new material (or element) touches several non-colocated registries
 flag, a Henke `.csv`, the config grid, and the `sweep.py` wiring). The full
 checklist lives in [`CLAUDE.md`](CLAUDE.md) under *"Adding a material"*.
 
+### Crystal mosaicity (optional, analytic — off by default)
+
+Real crystals are mosaic: an incoherent ensemble of slightly misoriented crystallites with
+a Gaussian *mosaic spread* η (rocking-curve FWHM; e.g. HOPG ZYA 0.4° / ZYB 0.8° / ZYH
+3.5°). The simulation includes an **initial analytic model** of the resulting line
+broadening, **off by default** and switchable per run:
+
+```python
+material_sweep("hopg", mosaic=True)                       # use the per-crystal value
+material_sweep("hopg", mosaic=True, mosaic_fwhm_deg=3.5)  # override (e.g. ZYH grade)
+```
+
+**How it works.** A mosaic tilt rotates **g**, and only the numerator `v·g` of the
+resonance `E_res = ħc·(v·g)/(1 − v·n̂)` depends on it, so the line picks up a Gaussian
+broadening `FWHM_mosaic = E·|tan ψ|·η` (ψ = ∠(v, g)), added in quadrature with the EDS and
+detector-aperture widths and applied through the same `convolve_detector` pass. The
+**intrinsic** spectrum is unchanged — mosaicity enters only the detector-convolution FWHM,
+so `plots.plot_mosaic_comparison` can overlay several grades from a single computed record.
+The per-crystal spread is an **optional** `mosaic_fwhm_deg` in `crystal_structures.toml`
+(only HOPG carries one today); crystals without it stay perfect, and `mosaic=False` is an
+exact no-op.
+
+**Limits.** It is *energy-shift only* (amplitudes held fixed across the mosaic cone),
+diverges as ψ → 90° (capped at the peak energy), is usually sub-dominant to the
+multiple-scattering Doppler width except in thin / near-perfect / high-mosaic cases, and
+**is not yet validated** against measured line widths (see *Validation*). The exact
+Monte-Carlo route (a per-orientation incoherent sum that broadens PXR+CBS, not just shifts
+the energy) is designed but unimplemented — see
+[`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
+
 ---
 
 ## Detectors
@@ -247,12 +278,35 @@ soft lines.
 - `zhai_fig1c_check.ipynb`, `cxr_analysis_feranchuk.ipynb` — figure reproductions.
 - `src/_compile_nb.py` — compiles every notebook's code cells (syntax smoke test).
 
+### What remains to be validated / approximated
+
+These are known approximations or unvalidated additions — read before quoting absolute
+numbers:
+
+- **Crystal mosaicity** (the analytic model above) is **not** checked against measured HOPG
+  rocking-curve / line widths; it is energy-shift only and unreliable near grazing, and the
+  exact Monte-Carlo route is unimplemented — [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
+- **Detector solid angle** is treated as a single observation direction `n̂` with a flat Ω
+  flux scale and an analytic Gaussian polar-aperture broadening (`aperture_fwhm_eV`),
+  exactly as the source papers do. A first-principles integral over the detector face is
+  unimplemented; it matters for the wide SEM/TEM detectors (≈12–17°), not the small Timepix
+  Ω — [`docs/detector-solid-angle.md`](docs/detector-solid-angle.md).
+- **Atomic data** (Henke/CXRO f1/f2 + Cromer–Mann f0) is validated against the
+  Feranchuk/Zhai anchors. Swapping to a library (xraydb/xraylib) would shift the resonant
+  amplitudes a few percent (and more at edges) and require re-validation —
+  [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md).
+- **Timepix3 hardware** parameters (`SENSOR_THICKNESS_UM`, `BIAS_VOLTAGE_V`,
+  `TEMPERATURE_K` in `timepix_response.py`) are **placeholders** pending the real quad
+  values; the detected-spectrum figures inherit that uncertainty.
+
 ---
 
 ## Data provenance
 
 - **Atomic scattering:** Cromer–Mann `f0` + Henke/CXRO `f', f''`
-  (`data/atomic_scattering_factors/*.csv`, CXRO `.nff` format, 10 eV–30 keV).
+  (`data/atomic_scattering_factors/*.csv`, CXRO `.nff` format, 10 eV–30 keV). A library
+  alternative (xraydb / xraylib) was evaluated but not adopted —
+  [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md).
 - **Elastic transport:** NIST SRD 64 relativistic Mott *transport* cross sections
   (`data/mott_transport_cross_sections/`) calibrate the screened-Rutherford
   α(E) per element; free paths from the Browning fit. Elements without a NIST

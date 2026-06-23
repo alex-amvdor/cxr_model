@@ -342,6 +342,25 @@ def tilted_geometry(theta_obs_rad, tilt_polar_rad, tilt_azim_rad=0.0):
     return beam_dir, n_hat
 
 
+def _orientation_R(lattice, beam_uvw, azimuth_rad):
+    """Rotation applied to EVERY reciprocal vector: the minimal rotation taking the
+    crystal direct-lattice direction `beam_uvw` onto +z (the slab normal), then a
+    roll of `azimuth_rad` about +z. Returns None for the construction-frame default
+    (beam_uvw is None and azimuth_rad == 0). Shared by mc_spectrum and mosaic_psi_rad
+    so the orientation convention lives in one place."""
+    R = None
+    if beam_uvw is not None:
+        u, v, w = np.asarray(beam_uvw, dtype=float)
+        a1, a2, a3 = _direct_lattice_vectors(lattice)
+        axis = u * a1 + v * a2 + w * a3
+        R = _rotation_between(axis / np.linalg.norm(axis), np.array([0.0, 0.0, 1.0]))
+    if azimuth_rad:
+        ca, sa = np.cos(azimuth_rad), np.sin(azimuth_rad)
+        Rz = np.array([[ca, -sa, 0.0], [sa, ca, 0.0], [0.0, 0.0, 1.0]])
+        R = Rz if R is None else Rz @ R
+    return R
+
+
 def simulate_trajectories(
     E0_keV,
     Ne,
@@ -603,18 +622,7 @@ def mc_spectrum(
     abs_comp = _normalize_composition(absorber_element, n_atoms, composition)
 
     # crystal orientation: rotation applied to all reciprocal vectors
-    R_orient = None
-    if beam_uvw is not None:
-        u, v, w = np.asarray(beam_uvw, dtype=float)
-        a1, a2, a3 = _direct_lattice_vectors(info["lattice"])
-        axis = u * a1 + v * a2 + w * a3
-        R_orient = _rotation_between(
-            axis / np.linalg.norm(axis), np.array([0.0, 0.0, 1.0])
-        )
-    if azimuth_rad:
-        ca, sa = np.cos(azimuth_rad), np.sin(azimuth_rad)
-        Rz = np.array([[ca, -sa, 0.0], [sa, ca, 0.0], [0.0, 0.0, 1.0]])
-        R_orient = Rz if R_orient is None else Rz @ R_orient
+    R_orient = _orientation_R(info["lattice"], beam_uvw, azimuth_rad)
     thickness = segments["thickness_ang"]
     Ne = segments["Ne"]
 
@@ -1263,6 +1271,66 @@ def aperture_fwhm_eV(E_eV, beta, theta_obs_rad, dtheta_obs_rad):
     """Line broadening from the detector polar-angle span, SI Eq. (14)."""
     dE_dth = E_eV * beta * np.sin(theta_obs_rad) / (1.0 - beta * np.cos(theta_obs_rad))
     return 2.0 * np.sqrt(2.0 * np.log(2.0) / 3.0) * dE_dth * dtheta_obs_rad
+
+
+def mosaic_fwhm_eV(E_eV, psi_rad, mosaic_fwhm_rad):
+    """Line broadening from crystal mosaicity -- the INITIAL ANALYTIC model.
+
+    A mosaic crystal is an incoherent ensemble of crystallites whose orientations
+    are Gaussian-spread about the mean with a rocking-curve FWHM `mosaic_fwhm_rad`.
+    Tilting a crystallite rotates its reciprocal vector g; only the NUMERATOR v.g of
+    the resonance E_res = hbar c (v.g)/(1 - v.n) depends on g, so to first order the
+    fractional line shift is dE/E = -tan(psi) dtheta, psi = angle(v, g). A Gaussian
+    tilt of FWHM `mosaic_fwhm_rad` (in the longitudinal plane) therefore broadens the
+    line by a Gaussian of energy FWHM
+
+        FWHM_mosaic = E * |tan(psi)| * mosaic_fwhm_rad,
+
+    added in quadrature with the EDS and aperture widths (results.store_result) and
+    applied via the same convolve_detector pass -- the cheap analytic counterpart of
+    a full Monte-Carlo average over crystallite orientations.
+
+    Crude by construction: (i) it captures only the resonance-ENERGY shift, holding
+    the amplitudes / lineshape weight fixed across the mosaic cone (good while the
+    line stays narrow); (ii) the linearization diverges as psi -> 90 deg (g grazing
+    the velocity), so the caller should cap the result (store_result clips it at E).
+    The exact treatment is the per-orientation MC sum inside mc_spectrum (future
+    work). psi is supplied by mosaic_psi_rad() at the nominal (unscattered) geometry.
+    """
+    return E_eV * np.abs(np.tan(psi_rad)) * mosaic_fwhm_rad
+
+
+def mosaic_psi_rad(case, E_pk_eV):
+    """psi = angle(beam velocity, g) [rad] of the reflection whose NOMINAL
+    (unscattered-beam) resonance energy is nearest E_pk -- the representative
+    geometry for the analytic mosaic broadening (mosaic_fwhm_eV). Mirrors how
+    aperture_fwhm_eV uses the nominal theta_obs rather than the per-segment scattered
+    directions. Returns None if no listed reflection radiates a positive line."""
+    info = CRYSTALS[case["crystal"]]
+    beam_dir, n_hat = tilted_geometry(
+        case["theta_obs_rad"],
+        np.deg2rad(case.get("tilt_deg", 0.0)),
+        np.deg2rad(case.get("tilt_azim_deg", 0.0)),
+    )
+    beta = beta_from_keV(case["E0_keV"])
+    R = _orientation_R(info["lattice"], case.get("beam_uvw"), case.get("azimuth_rad", 0.0))
+    denom = 1.0 - beta * float(beam_dir @ n_hat)  # g-independent (Doppler denominator)
+    if denom <= 0.0:
+        return None
+    best = None
+    for hkl in case["hkl_list"]:
+        g_vec, g = reciprocal_g_vector(hkl, info["lattice"])
+        if R is not None:
+            g_vec = R @ g_vec
+        bdotg = float(beam_dir @ g_vec)
+        E_res = HBARC_EV_ANG * beta * bdotg / denom
+        if E_res <= 0.0:
+            continue
+        psi = np.arccos(np.clip(bdotg / g, -1.0, 1.0))
+        d = abs(E_res - E_pk_eV)
+        if best is None or d < best[0]:
+            best = (d, psi)
+    return None if best is None else best[1]
 
 
 def convolve_detector(E_grid_eV, spec, fwhm_eV):

@@ -37,6 +37,11 @@ from montecarlo import (
     detector_efficiency,
     simulate_trajectories,
     tilted_geometry,
+    beta_from_keV,
+    eds_fwhm_eV,
+    aperture_fwhm_eV,
+    mosaic_fwhm_eV,
+    mosaic_psi_rad,
 )
 from results import (
     detected_background,
@@ -647,6 +652,75 @@ def stream_chunk(results, names, settings, collapse_azimuth=True, **_):
     if collapse_azimuth:
         recs = best_azimuth(recs)
     show_summary(recs, settings)
+
+
+# ---- crystal mosaicity (analytic broadening) ---------------------------------
+def plot_mosaic_comparison(r, settings, grades_deg=(None, 0.4, 0.8, 3.5), ax=None):
+    """Detector-convolved line spectrum of ONE record ``r`` overlaid for several
+    crystal mosaic grades -- WITHOUT re-running transport. The analytic mosaic model
+    (montecarlo.mosaic_fwhm_eV) only changes the convolution FWHM and leaves the
+    intrinsic spectrum fixed, so each grade is just a re-convolution of the same
+    ``r["spec"]``. ``grades_deg`` entries are mosaic rocking-curve FWHM in degrees;
+    None = perfect crystal (no mosaic term). Handy for HOPG: ZYA 0.4 / ZYB 0.8 /
+    ZYH 3.5 deg. The record can come from a mosaic=False run -- the broadening is
+    re-derived here per grade. Returns the Figure."""
+    case = r["case"]
+    E, E_pk = r["E_grid"], r["E_pk"]
+    qe = detector_efficiency(E) if settings.apply_detector_qe else 1.0
+    line_in = r["spec"] * qe
+    base_sq = (
+        eds_fwhm_eV(E_pk) ** 2
+        + aperture_fwhm_eV(
+            E_pk, beta_from_keV(case["E0_keV"]),
+            case["theta_obs_rad"], case["dtheta_obs_rad"],
+        ) ** 2
+    )
+    psi = mosaic_psi_rad(case, E_pk)
+
+    curves = []  # (label, fwhm, detected)
+    for grade in grades_deg:
+        if grade is None:
+            fwhm = float(np.sqrt(base_sq))
+            lbl = "perfect"
+        else:
+            extra = (
+                min(mosaic_fwhm_eV(E_pk, psi, np.deg2rad(grade)), E_pk)
+                if psi is not None else 0.0
+            )
+            fwhm = float(np.sqrt(base_sq + extra**2))
+            lbl = rf"mosaic {grade:g}$\degree$"
+        det = convolve_detector(E, line_in, fwhm) * r["scale"]
+        curves.append((lbl, fwhm, det))
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8.0, 4.6), constrained_layout=True)
+    else:
+        fig = ax.figure
+    ymax = 0.0
+    for lbl, fwhm, det in curves:
+        fin = det[np.isfinite(det)]
+        if fin.size:
+            ymax = max(ymax, float(fin.max()))
+        ax.plot(E, det, lw=1.5, label=f"{lbl} (FWHM {fwhm:.0f} eV)")
+    if ymax > 0:
+        ax.set_ylim(0, ymax * 1.08)
+    # zoom to the line: +-6 of the broadest FWHM about the peak, clamped to the grid
+    half = 6.0 * max(f for _, f, _ in curves)
+    ax.set_xlim(max(float(E[0]), E_pk - half), min(float(E[-1]), E_pk + half))
+    ax.set_title(
+        rf"{case['name'].split()[0]}, {case['thickness_ang'] / 1e4:.1f} $\mu$m, "
+        rf"$E_0$={case['E0_keV']:g} keV, $\theta_\mathrm{{tilt}}$="
+        rf"{case['tilt_deg']:.1f}$\degree$ — crystal-mosaic broadening",
+        fontsize=12,
+    )
+    ax.set_xlabel("Photon energy (eV)")
+    ax.set_ylabel("Phs/eV/s/nA")
+    ax.grid(alpha=0.3)
+    ax.legend(
+        fontsize=8,
+        title=(rf"$\psi$(v,g)={np.degrees(psi):.1f}$\degree$" if psi is not None else None),
+    )
+    return fig
 
 
 # ---- Timepix3 detector view --------------------------------------------------
