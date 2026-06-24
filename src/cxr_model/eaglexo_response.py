@@ -104,9 +104,7 @@ SENSORS = {
     "4240": dict(
         sensor="E2V 42-40", n_pix=(2048, 2048), pixel_um=13.5, active_mm=(27.6, 27.6)
     ),  # the larger sensor
-    "4710": dict(
-        sensor="E2V 47-10", n_pix=(1024, 1024), pixel_um=13.0, active_mm=(13.3, 13.3)
-    ),
+    "4710": dict(sensor="E2V 47-10", n_pix=(1024, 1024), pixel_um=13.0, active_mm=(13.3, 13.3)),
 }
 DEFAULT_SENSOR = "4240"
 
@@ -238,7 +236,7 @@ def qe(E_eV, coating="BN"):
         np.log10(np.clip(E, 1e-3, None)), np.log10(Et), col, left=0.0, right=col[-1]
     )  # clamp top; overwrite >Emax
     tail = col[-1] * (np.clip(E, Et[-1], None) / Et[-1]) ** slope
-    out = np.where(E > Et[-1], tail, out)
+    out = np.where(Et[-1] < E, tail, out)
     return np.clip(out, 0.0, 1.0)
 
 
@@ -303,9 +301,7 @@ class EagleResponse:
         as the input (e.g. Phs/eV/s/nA): ``spec * QE(E)``, optionally blurred by
         the photon-counting energy resolution. NaN/inf samples (a bad-geometry
         case) are treated as zero flux rather than poisoning the result."""
-        spec = np.nan_to_num(
-            np.asarray(spec, dtype=float), nan=0.0, posinf=0.0, neginf=0.0
-        )
+        spec = np.nan_to_num(np.asarray(spec, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
         if spec.shape != self.E.shape:
             raise ValueError(
                 f"spec length {spec.shape} != response grid {self.E.shape}. "
@@ -316,7 +312,7 @@ class EagleResponse:
         if self.resolve_energy:
             from .montecarlo import convolve_detector
 
-            dE = self.E[1] - self.E[0]
+            self.E[1] - self.E[0]
             fwhm = float(np.median(energy_fwhm_eV(self.E, self.n_pix)))
             det = convolve_detector(self.E, det, fwhm)  # ~const, sqrt(E)-weak
         return det
@@ -378,9 +374,7 @@ def get_response(E_grid_eV, *, coating="BN", resolve_energy=False, n_pix=4):
     )
     resp = _RESPONSE_CACHE.get(key)
     if resp is None:
-        resp = EagleResponse(
-            E, coating=coating, resolve_energy=resolve_energy, n_pix=n_pix
-        )
+        resp = EagleResponse(E, coating=coating, resolve_energy=resolve_energy, n_pix=n_pix)
         _RESPONSE_CACHE[key] = resp
     return resp
 

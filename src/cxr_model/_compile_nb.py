@@ -26,8 +26,7 @@ for path in nbs:
         raw = c["source"]
         text = "".join(raw) if isinstance(raw, list) else raw
         src = "".join(
-            ln for ln in text.splitlines(keepends=True)
-            if not ln.lstrip().startswith(("%", "!"))
+            ln for ln in text.splitlines(keepends=True) if not ln.lstrip().startswith(("%", "!"))
         )
         cid = c.get("id", str(i))
         try:
@@ -35,10 +34,7 @@ for path in nbs:
         except SyntaxError as e:
             bad += 1
             print(f"  SYNTAX ERROR in {path} cell[{i}] ({cid}): {e}")
-    print(
-        f"{path}: {n_code} code cells compiled"
-        + ("" if not bad else "  <-- errors above")
-    )
+    print(f"{path}: {n_code} code cells compiled" + ("" if not bad else "  <-- errors above"))
 
 print("\n" + ("ALL CELLS COMPILE" if bad == 0 else f"{bad} CELLS FAILED"))
 sys.exit(1 if bad else 0)

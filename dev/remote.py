@@ -301,7 +301,7 @@ def job_status(jobid=None):
         f'JOBS="{REMOTE_DIR}/{JOBS_SUBDIR}"; {_job_assign(jobid)}; '
         'D="$JOBS/$JOB"; '
         'if [ -z "$JOB" ] || [ ! -d "$D" ]; then echo "no such job: ${JOB:-<none>}"; '
-        'exit 1; fi; '
+        "exit 1; fi; "
         'echo "== job $JOB =="; cat "$D/meta" 2>/dev/null; '
         'echo "-- state --"; cat "$D/state" 2>/dev/null || echo "(no state yet)"; '
         'if [ -f "$D/pid" ] && kill -0 "$(cat "$D/pid")" 2>/dev/null; '
@@ -318,7 +318,7 @@ def tail_logs(jobid=None, follow=False):
         f'JOBS="{REMOTE_DIR}/{JOBS_SUBDIR}"; {_job_assign(jobid)}; '
         'D="$JOBS/$JOB"; '
         'if [ -z "$JOB" ] || [ ! -d "$D" ]; then echo "no such job: ${JOB:-<none>}"; '
-        'exit 1; fi; '
+        "exit 1; fi; "
         f'{tail} "$D/log"'
     )
     if follow:
@@ -367,10 +367,7 @@ def attach(jobid=None):
         'sleep 1; kill "$TP" 2>/dev/null; '
         'printf "\\n--- job finished ---\\n"; cat "$D/state" 2>/dev/null'
     )
-    print(
-        f"attached to job {jobid} on {HOST} -- Ctrl-C to disconnect "
-        "(the job keeps running).\n"
-    )
+    print(f"attached to job {jobid} on {HOST} -- Ctrl-C to disconnect (the job keeps running).\n")
     try:
         subprocess.run(["ssh", HOST, remote])
     except KeyboardInterrupt:
@@ -396,31 +393,31 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="remote.py", description=__doc__.splitlines()[1])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser(
-        "scan", help="sync code, run ONE sweep in the foreground, pull checkpoint"
-    )
+    s = sub.add_parser("scan", help="sync code, run ONE sweep in the foreground, pull checkpoint")
     s.add_argument("material")
     s.add_argument("--quick", action="store_true")
     s.add_argument("--workers", type=int, default=None)
     s.add_argument("--no-sync", action="store_true", help="skip the code upload")
 
     st = sub.add_parser(
-        "start", help="sync code, launch a DETACHED queue of materials (survives disconnect)"
+        "start",
+        help="sync code, launch a DETACHED queue of materials (survives disconnect)",
     )
     st.add_argument("materials", nargs="+", help="one or more crystal keys")
     st.add_argument("--quick", action="store_true")
     st.add_argument("--workers", type=int, default=None)
     st.add_argument("--no-sync", action="store_true", help="skip the code upload")
+    st.add_argument("--dry-run", action="store_true", help="print the runner + commands, don't ssh")
     st.add_argument(
-        "--dry-run", action="store_true", help="print the runner + commands, don't ssh"
-    )
-    st.add_argument(
-        "--follow", "-f", action="store_true",
+        "--follow",
+        "-f",
+        action="store_true",
         help="track the job live after launching (Ctrl-C disconnects; job keeps running)",
     )
 
     at = sub.add_parser(
-        "attach", help="live-track a job until it finishes (Ctrl-C disconnects; default: latest)"
+        "attach",
+        help="live-track a job until it finishes (Ctrl-C disconnects; default: latest)",
     )
     at.add_argument("jobid", nargs="?", default=None)
 
@@ -457,9 +454,7 @@ def main(argv=None):
             f"MATERIAL='{stem}' (or run export_pdf.py) -- all viz/PDF stays local."
         )
     elif args.cmd == "start":
-        jobid = start_queue(
-            args.materials, args.quick, args.workers, args.no_sync, args.dry_run
-        )
+        jobid = start_queue(args.materials, args.quick, args.workers, args.no_sync, args.dry_run)
         if args.follow and not args.dry_run:
             attach(jobid)
     elif args.cmd == "attach":

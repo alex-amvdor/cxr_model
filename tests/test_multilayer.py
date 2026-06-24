@@ -10,22 +10,22 @@ import pytest
 
 from cxr_model.montecarlo import (
     _layer_dz,
-    _stack_tau,
     _mu_total_inv_ang,
+    _stack_tau,
     simulate_trajectories,
 )
 from cxr_model.sweep import (
     Sweep,
     build_cases,
-    substrate_composition,
     film_on_substrate_layers,
+    substrate_composition,
 )
 
 
 def test_layer_dz_back_exit():
     # photon exits the back face (n_z>0): escape ray spans depths [z_mid, z_total]
     z = np.array([100.0, 500.0, 900.0])
-    assert np.allclose(_layer_dz(z, +1.0, 0.0, 500.0), [400.0, 0.0, 0.0])     # film
+    assert np.allclose(_layer_dz(z, +1.0, 0.0, 500.0), [400.0, 0.0, 0.0])  # film
     assert np.allclose(_layer_dz(z, +1.0, 500.0, 1000.0), [500.0, 500.0, 100.0])  # sub
 
 
@@ -123,11 +123,16 @@ def test_build_cases_attaches_abs_layers_only_with_substrate():
     assert all(c["abs_layers"] is None for c in plain)
 
     stacked = build_cases(
-        Sweep(material="mose2", tilt_deg=-30.0, energy_keV=30.0,
-              substrate="sio2", substrate_thickness_ang=1e6)
+        Sweep(
+            material="mose2",
+            tilt_deg=-30.0,
+            energy_keV=30.0,
+            substrate="sio2",
+            substrate_thickness_ang=1e6,
+        )
     )
     for c in stacked:
         assert c["abs_layers"] is not None and len(c["abs_layers"]) == 2
-        (z0, z1, _), (z2, z3, _) = c["abs_layers"]
+        (z0, z1, _), (z2, _z3, _) = c["abs_layers"]
         assert z0 == 0.0 and z1 == c["thickness_ang"] and z2 == c["thickness_ang"]
         assert "on sio2" in c["name"]

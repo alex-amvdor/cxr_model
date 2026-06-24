@@ -9,15 +9,15 @@ broadening, node convergence, yield change) lives in checks/mosaic_mc_check.py."
 import numpy as np
 import pytest
 
-from cxr_model.sweep import Sweep, build_cases
-from cxr_model.results import store_result
 from cxr_model.montecarlo import (
+    _mosaic_quadrature,
+    _small_tilt_R,
     aperture_fwhm_eV,
     beta_from_keV,
     eds_fwhm_eV,
-    _mosaic_quadrature,
-    _small_tilt_R,
 )
+from cxr_model.results import store_result
+from cxr_model.sweep import Sweep, build_cases
 
 E_GRID = np.arange(400.0, 1400.0, 1.0)
 
@@ -71,8 +71,13 @@ def test_quadrature_nodes_scale_with_spread():
 # ---- Sweep wiring: the two routes are mutually exclusive ----------------------
 def _sweep(**kw):
     return Sweep(
-        material="hopg", thickness_ang=1e4, energy_keV=30, tilt_deg=-30.0,
-        E_grid_line=E_GRID, E_grid_brem=np.arange(0.0, 1000.0, 100.0), **kw,
+        material="hopg",
+        thickness_ang=1e4,
+        energy_keV=30,
+        tilt_deg=-30.0,
+        E_grid_line=E_GRID,
+        E_grid_brem=np.arange(0.0, 1000.0, 100.0),
+        **kw,
     )
 
 
@@ -92,9 +97,16 @@ def test_route_mc_sets_mc_term_and_suppresses_analytic():
 def test_route_mc_is_noop_without_mosaic_data():
     # diamond has no mosaic_fwhm_deg, so even route="mc" leaves it a perfect crystal
     case = build_cases(
-        Sweep(material="diamond", thickness_ang=1e4, energy_keV=30, tilt_deg=-30.0,
-              E_grid_line=E_GRID, E_grid_brem=np.arange(0.0, 1000.0, 100.0),
-              mosaic=True, mosaic_route="mc")
+        Sweep(
+            material="diamond",
+            thickness_ang=1e4,
+            energy_keV=30,
+            tilt_deg=-30.0,
+            E_grid_line=E_GRID,
+            E_grid_brem=np.arange(0.0, 1000.0, 100.0),
+            mosaic=True,
+            mosaic_route="mc",
+        )
     )[0]
     assert case["mosaic_mc_fwhm_rad"] is None
     assert case["mosaic_fwhm_rad"] is None
@@ -116,7 +128,10 @@ def test_route_mc_adds_no_analytic_broadening_in_store_result():
     expected = np.sqrt(
         eds_fwhm_eV(r["E_pk"]) ** 2
         + aperture_fwhm_eV(
-            r["E_pk"], beta_from_keV(30.0), case["theta_obs_rad"], case["dtheta_obs_rad"]
+            r["E_pk"],
+            beta_from_keV(30.0),
+            case["theta_obs_rad"],
+            case["dtheta_obs_rad"],
         )
         ** 2
     )

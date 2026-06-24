@@ -7,9 +7,9 @@ import pytest
 
 from cxr_model.atomic_form_factors import (
     Z_TABLE,
-    henke_dispersion,
-    cromer_mann_f0,
     atomic_form_factor,
+    cromer_mann_f0,
+    henke_dispersion,
     load_henke,
 )
 

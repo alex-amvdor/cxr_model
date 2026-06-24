@@ -3,7 +3,7 @@ name = "cxr-model"
 version = "0.1.0"
 description = "Coherent X-ray radiation (PXR + coherent bremsstrahlung) from table-top electron beams in crystals"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "cupy-cuda13x>=14.1.1",
     "datashader>=0.19.1",
@@ -12,13 +12,18 @@ dependencies = [
     "jupyter-core>=5.9.1",
     "jupyter-mcp-server>=1.0.2",
     "jupyterlab==4.4.1",
+    "jupytext>=1.19.4",
     "matplotlib>=3.11.0",
     "nbconvert>=7.17.1",
+    "nbqa>=1.9.1",
     "nbstripout>=0.9.1",
     "numpy>=2.4.6",
     "pandas>=3.0.3",
     "pandoc>=2.4",
     "plotly>=6.0",
+    "pre-commit>=4.6.0",
+    "pyright>=1.1.410",
+    "ruff>=0.15.19",
     "scipy>=1.17.1",
     "tabulate>=0.10.0",
     "tqdm>=4.68.2",
@@ -55,3 +60,45 @@ docs = [
 pythonpath = ["src", "dev"]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.jupytext]
+formats = "ipynb,md:myst"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+# keep this tight; avoid duplicate exclusion logic
+exclude = [
+    ".venv",
+    "__pycache__",
+    ".ruff_cache",
+    ".pytest_cache",
+    "docs/_build",
+    "docs/_autosummary",
+]
+
+[tool.ruff.lint]
+# core useful rules without the “style noise overload”
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade (keeps Python 3.12/3.13 modern)
+    "B",   # bugbear (real bugs, not stylistic nitpicks)
+]
+
+# suppress high-noise / low-value rules from your current output
+ignore = [
+    "E501",
+    "E402",   # <-- THIS is the one causing your notebook + module failures
+    "B008",
+    "SIM108",
+    "SIM115",
+    "UP007",  # optional if you don't want typing churn
+    "UP038",  # optional (numpy isinstance suggestions)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -24,16 +24,15 @@ CRYSTALS dict; see that file for the format. Depends on atomic_form_factors.py
 """
 
 import tomllib
-from pathlib import Path
 
 import numpy as np
 
 from . import DATA_DIR
 from .atomic_form_factors import (
-    cromer_mann_f0,
-    atomic_form_factor,
-    henke_dispersion,
     Z_TABLE,
+    atomic_form_factor,
+    cromer_mann_f0,
+    henke_dispersion,
 )
 
 # ---- constants --------------------------------------------------------------
@@ -42,9 +41,7 @@ HBARC_EV_ANG = 1973.269804  # hbar c [eV*Angstrom]
 ALPHA_FS = 1.0 / 137.035999
 M_E_EV = 510998.95  # electron rest energy [eV]
 R_E_ANG = 2.8179403e-5  # classical electron radius [Angstrom]
-E2_EV_ANG = (
-    ALPHA_FS * HBARC_EV_ANG
-)  # e^2 (Gaussian) = alpha hbar c = 14.3996 [eV*Angstrom]
+E2_EV_ANG = ALPHA_FS * HBARC_EV_ANG  # e^2 (Gaussian) = alpha hbar c = 14.3996 [eV*Angstrom]
 
 # elements whose edges fall in the soft-x-ray band -> force Henke correction
 # (Te L3/L2/L1 = 4.34/4.61/4.94 keV land inside the line grid).
@@ -127,12 +124,7 @@ def _reciprocal_basis(lattice):
     if B is None:
         a1, a2, a3 = _direct_lattice_vectors(lattice)
         V = np.dot(a1, _cross3(a2, a3))
-        B = (
-            2.0
-            * np.pi
-            * np.array([_cross3(a2, a3), _cross3(a3, a1), _cross3(a1, a2)])
-            / V
-        )
+        B = 2.0 * np.pi * np.array([_cross3(a2, a3), _cross3(a3, a1), _cross3(a1, a2)]) / V
         _RECIP_BASIS_CACHE[key] = B
     return B
 
@@ -165,15 +157,8 @@ def load_crystals(
         # the lattice dict so it can't leak into _direct_lattice_vectors / the
         # reciprocal-basis cache key. Absent -> None (perfect crystal).
         mosaic_fwhm_deg = spec.get("mosaic_fwhm_deg")
-        lattice = {
-            key: val
-            for key, val in spec.items()
-            if key not in ("basis", "mosaic_fwhm_deg")
-        }
-        basis = [
-            (atom["element"], np.array(atom["pos"], dtype=float))
-            for atom in spec["basis"]
-        ]
+        lattice = {key: val for key, val in spec.items() if key not in ("basis", "mosaic_fwhm_deg")}
+        basis = [(atom["element"], np.array(atom["pos"], dtype=float)) for atom in spec["basis"]]
         a1, a2, a3 = _direct_lattice_vectors(lattice)
         crystals[name] = {
             "lattice": lattice,
@@ -238,8 +223,8 @@ def structure_factor(crystal, hkl, photon_E_eV, B_ang2=0.0, use_henke=False):
     _, g = reciprocal_g_vector(hkl, info["lattice"])
     dwf = debye_waller(g, B_ang2)
     S = 0.0 + 0.0j
-    for (el, R), F in zip(
-        info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)
+    for (_el, R), F in zip(
+        info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke), strict=False
     ):
         phase = np.exp(1j * 2.0 * np.pi * np.dot(hkl, R))
         S += F * phase * dwf
@@ -273,7 +258,7 @@ def U_g(crystal, hkl, photon_E_eV, B_ang2=0.0, use_henke=False):
     dwf = debye_waller(g, B_ang2)
     acc = 0.0 + 0.0j
     for (el, R), F in zip(
-        info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke)
+        info["basis"], _basis_F(info["basis"], g, photon_E_eV, use_henke), strict=False
     ):
         phase = np.exp(1j * 2.0 * np.pi * np.dot(hkl, R))
         acc += phase * (Z_TABLE[el] - F.real) / g**2 * dwf
@@ -312,11 +297,7 @@ def _rotation_between(u_hat, t_hat):
         if c > 0:
             return np.eye(3)
         # antiparallel: 180 deg about any axis perpendicular to u_hat
-        tmp = (
-            np.array([1.0, 0.0, 0.0])
-            if abs(u_hat[0]) < 0.9
-            else np.array([0.0, 1.0, 0.0])
-        )
+        tmp = np.array([1.0, 0.0, 0.0]) if abs(u_hat[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
         axis = _cross3(u_hat, tmp)
         axis /= np.linalg.norm(axis)
         K = np.array(
@@ -328,9 +309,7 @@ def _rotation_between(u_hat, t_hat):
         )
         return np.eye(3) + 2.0 * K @ K
     axis = axis / s
-    K = np.array(
-        [[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]]
-    )
+    K = np.array([[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]])
     return np.eye(3) + s * K + (1.0 - c) * (K @ K)
 
 
@@ -365,9 +344,7 @@ def dominant_reflections(
     a_vecs = _direct_lattice_vectors(info["lattice"])
 
     # exact per-axis index bounds: |h_i| <= g_max |a_i| / 2 pi
-    nmax = [
-        int(np.floor(g_max_invang * np.linalg.norm(a) / (2.0 * np.pi))) for a in a_vecs
-    ]
+    nmax = [int(np.floor(g_max_invang * np.linalg.norm(a) / (2.0 * np.pi))) for a in a_vecs]
     grids = np.meshgrid(*(np.arange(-n, n + 1) for n in nmax), indexing="ij")
     hkl = np.column_stack([G.ravel() for G in grids]).astype(float)
     g_vec = hkl @ B

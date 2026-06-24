@@ -1,0 +1,21 @@
+repos:
+  # Ruff (lint + format)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.3  # use latest stable
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Jupyter notebook linting via nbqa
+  - repo: https://github.com/nbQA-dev/nbQA
+    rev: 1.9.1  # pin a stable version
+    hooks:
+      - id: nbqa-ruff
+        args: [--fix]
+
+  # Strip notebook outputs
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.7.1
+    hooks:
+      - id: nbstripout

@@ -25,16 +25,16 @@ import pandas as pd
 from scipy.signal import find_peaks, peak_widths
 
 from .montecarlo import (
-    beta_from_keV,
-    eds_fwhm_eV,
     aperture_fwhm_eV,
-    mosaic_fwhm_eV,
-    mosaic_psi_rad,
+    beta_from_keV,
     convolve_detector,
     detector_efficiency,
+    eds_fwhm_eV,
     load_external_brem,
+    mosaic_fwhm_eV,
+    mosaic_psi_rad,
 )
-from .sweep import fmt_thickness, MATERIAL_LABELS
+from .sweep import MATERIAL_LABELS, fmt_thickness
 
 PER_NA = 6.2415e9  # electrons/s at 1 nA
 
@@ -64,9 +64,7 @@ def store_result(results, case, out):
     E_pk = E_grid[np.argmax(out["spec"])]
     fwhm_sq = (
         eds_fwhm_eV(E_pk) ** 2
-        + aperture_fwhm_eV(
-            E_pk, beta_from_keV(E0), case["theta_obs_rad"], case["dtheta_obs_rad"]
-        )
+        + aperture_fwhm_eV(E_pk, beta_from_keV(E0), case["theta_obs_rad"], case["dtheta_obs_rad"])
         ** 2
     )
     # crystal mosaicity (analytic): add the mosaic broadening in quadrature when the
@@ -99,9 +97,7 @@ def detected_background(r, settings, convolve=None):
     honoring the brem source + QE flags in ``settings``. ``convolve`` overrides
     settings.convolve_with_det when given (True/False) -- lets a caller draw the
     intrinsic and detector-convolved background side by side."""
-    do_conv = (
-        getattr(settings, "convolve_with_det", False) if convolve is None else convolve
-    )
+    do_conv = getattr(settings, "convolve_with_det", False) if convolve is None else convolve
     E = r["E_grid"]
     if settings.brem_source == "none":
         return np.zeros_like(E)
@@ -149,7 +145,12 @@ def sweep_values(results, fields=None):
     """
     if fields is None:
         fields = (
-            "crystal", "E0_keV", "tilt_deg", "tilt_azim_deg", "thickness_ang", "B_ang2"
+            "crystal",
+            "E0_keV",
+            "tilt_deg",
+            "tilt_azim_deg",
+            "thickness_ang",
+            "B_ang2",
         )
     out = {}
     for r in records(results):
@@ -201,10 +202,7 @@ def select_results(results, **constraints):
         kept = {
             E0: r
             for E0, r in by_E.items()
-            if all(
-                f in r["case"] and _match(r["case"][f], spec)
-                for f, spec in constraints.items()
-            )
+            if all(f in r["case"] and _match(r["case"][f], spec) for f, spec in constraints.items())
         }
         if kept:
             out[name] = kept
@@ -285,9 +283,7 @@ def summary_table(recs, settings):
                 "Ee [keV]": c["E0_keV"],
                 "line [eV]": r["E_grid"][i_pk],
                 "peak [Phs/eV/s]": line_det[i_pk] * r["scale"] * cur,
-                "peak/bg": (line_det[i_pk] / brem_det[i_pk])
-                if brem_det[i_pk]
-                else np.inf,
+                "peak/bg": (line_det[i_pk] / brem_det[i_pk]) if brem_det[i_pk] else np.inf,
                 "line [cts/s]": line_cts,
                 "brem [cts/s]": brem_cts,
                 "total [cts/s]": line_cts + brem_cts,
@@ -451,7 +447,7 @@ def line_metrics(r, settings, rel_prominence=0.03, n_fwhm=3.0, metric="sharpness
             w_samp = float(peak_widths(spec, [idx], rel_height=0.5)[0][0])
     except Exception:
         w_samp = 0.0
-    half = max(int(round(n_fwhm * w_samp / 2.0)), 1)
+    half = max(round(n_fwhm * w_samp / 2.0), 1)
     lo, hi = max(idx - half, 0), min(idx + half + 1, spec.size)
     line_int = float(np.trapezoid(spec[lo:hi], E[lo:hi])) if hi > lo else 0.0
     coh_int = float(np.trapezoid(spec, E)) if spec.size else 0.0
@@ -542,9 +538,7 @@ def top_geometries(
                 "quality": round(m["line_quality"], 2),
                 "peak [Phs/eV/s]": float(f"{m['peak_flux']:.3g}"),
                 "coherent [Phs/s]": float(f"{m['coherent_flux']:.3g}"),
-                "line/tot": (
-                    round(m["line_frac"], 2) if np.isfinite(m["line_frac"]) else np.nan
-                ),
+                "line/tot": (round(m["line_frac"], 2) if np.isfinite(m["line_frac"]) else np.nan),
             }
         )
     return pd.DataFrame(rows).set_index("rank")

@@ -9,7 +9,7 @@ A single console script with subcommands, wired in pyproject.toml as
 
 import argparse
 
-from . import __version__, scan, export
+from . import __version__, export, scan
 
 
 def main(argv=None):

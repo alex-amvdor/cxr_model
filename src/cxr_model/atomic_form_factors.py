@@ -22,14 +22,14 @@ Conventions:
   f0(s), s = sin(theta)/lambda = g/(4*pi).
 """
 
-from functools import lru_cache
+from functools import cache
 
 import numpy as np
 import xraydb
 
 
 # ---- atomic numbers ---------------------------------------------------------
-@lru_cache(maxsize=None)
+@cache
 def _z_of(element):
     """Atomic number for an element symbol, or None if xraydb doesn't know it."""
     try:
@@ -76,7 +76,7 @@ def cromer_mann_f0(element, g):
 
 
 # ---- f'(E), f''(E): resonant dispersion + absorption ------------------------
-@lru_cache(maxsize=None)
+@cache
 def _chantler_bounds(element):
     """(Emin, Emax) [eV] of the element's tabulated Chantler/FFAST grid."""
     E = np.asarray(xraydb.chantler_energies(element), dtype=float)
@@ -110,8 +110,7 @@ def henke_dispersion(element, E_eV, on_out_of_range="nan"):
     if on_out_of_range == "raise" and not np.all(in_range):
         bad = Eflat[~in_range]
         raise ValueError(
-            f"E={bad} eV outside Chantler range "
-            f"[{Emin:.1f}, {Emax:.1f}] eV for {element}."
+            f"E={bad} eV outside Chantler range [{Emin:.1f}, {Emax:.1f}] eV for {element}."
         )
 
     fp = np.full(Eflat.shape, np.nan)
@@ -139,7 +138,7 @@ def atomic_form_factor(element, g, E_eV, on_out_of_range="nan"):
 
 
 # ---- Henke-style (E, f1, f2) table -----------------------------------------
-@lru_cache(maxsize=None)
+@cache
 def load_henke(element):
     """Element's anomalous-scattering table as (E [eV], f1, f2) arrays on the
     native Chantler/FFAST energy grid (which densely samples absorption edges --
@@ -147,7 +146,7 @@ def load_henke(element):
     Henke-convention forward-scattering factor; f2 = f''. Cached per element.
     """
     E = np.asarray(xraydb.chantler_energies(element), dtype=float)
-    E = E[E > E.min()]  # drop the single endpoint where f1_chantler is unstable
+    E = E[E.min() < E]  # drop the single endpoint where f1_chantler is unstable
     Z = Z_TABLE[element]
     fp = np.asarray(xraydb.f1_chantler(element, E), dtype=float)
     f2 = np.asarray(xraydb.f2_chantler(element, E), dtype=float)

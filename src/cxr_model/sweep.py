@@ -20,9 +20,10 @@ energy grid) is looked up per material; the detector geometry defaults to the
 this module is cheap to import and test.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import product
-from typing import Optional, Sequence, Union
+from typing import Union
 
 import numpy as np
 
@@ -84,7 +85,7 @@ def pm(*hkls):
 # amorphous substrate number densities [1/Ang^3], from bulk mass density:
 #   n_formula = rho[g/cc] * 0.602214 / M[g/mol], then * per-element stoichiometry
 _SUBSTRATE_COMP = {
-    "sio2": [("Si", 0.02205), ("O", 0.04410)],   # fused silica, rho=2.20, M=60.08
+    "sio2": [("Si", 0.02205), ("O", 0.04410)],  # fused silica, rho=2.20, M=60.08
     "al2o3": [("Al", 0.04702), ("O", 0.07053)],  # sapphire,     rho=3.98, M=101.96
 }
 
@@ -190,9 +191,7 @@ def crystal_params(material, n_families=4):
         return dict(
             crystal="diamond",
             composition=[("C", n_of("diamond", "C"))],
-            hkl_list=dominant_reflections(
-                "diamond", n_families=n_families, B_ang2=0.21
-            ),
+            hkl_list=dominant_reflections("diamond", n_families=n_families, B_ang2=0.21),
             beam_uvw=(4, 0, 0),
             B_ang2=0.21,
             E_grid=np.arange(100.0, 5000.0, 2.0),
@@ -201,9 +200,7 @@ def crystal_params(material, n_families=4):
         return dict(
             crystal="silicon",
             composition=[("Si", n_of("silicon", "Si"))],
-            hkl_list=dominant_reflections(
-                "silicon", n_families=n_families, B_ang2=0.46
-            ),
+            hkl_list=dominant_reflections("silicon", n_families=n_families, B_ang2=0.46),
             beam_uvw=(4, 4, 0),
             B_ang2=0.46,
             E_grid=np.arange(100.0, 5000.0, 3.0),
@@ -247,17 +244,17 @@ class Sweep:
     #       (cheap). Extend to 20-40 keV / the beam energy to model the full
     #       measured spectrum without inflating the line cost. Default spans the
     #       line start up to the highest beam energy at a 50 eV step.
-    E_grid_line: Optional[np.ndarray] = None
-    E_grid_brem: Optional[np.ndarray] = None
-    e_grid_eV: Optional[np.ndarray] = None  # deprecated: alias for E_grid_line
-    dtheta_obs_deg: Optional[float] = None  # None -> Timepix3 default
-    domega_sr: Optional[float] = None  # None -> Timepix3 default
-    beam_uvw: Optional[tuple] = None  # None -> per-material default
+    E_grid_line: np.ndarray | None = None
+    E_grid_brem: np.ndarray | None = None
+    e_grid_eV: np.ndarray | None = None  # deprecated: alias for E_grid_line
+    dtheta_obs_deg: float | None = None  # None -> Timepix3 default
+    domega_sr: float | None = None  # None -> Timepix3 default
+    beam_uvw: tuple | None = None  # None -> per-material default
     # GPU memory knobs: segments per matmul in the spectrum / brem kernels (None
     # -> 40000 / 20000 defaults). Lower them (e.g. 4000) to cap peak GPU memory on
     # a busy or shared device; the cost is only a little extra loop overhead.
-    spec_chunk: Optional[int] = None
-    brem_chunk: Optional[int] = None
+    spec_chunk: int | None = None
+    brem_chunk: int | None = None
     # crystal mosaicity (the INITIAL ANALYTIC broadening; switchable per run).
     #   mosaic=False (default) -> OFF: perfect crystal, an exact no-op.
     #   mosaic=True            -> apply the per-crystal mosaic_fwhm_deg from
@@ -269,7 +266,7 @@ class Sweep:
     #       the sweep (e.g. HOPG ZYA 0.4 / ZYB 0.8 / ZYH 3.5), or supply one for a
     #       crystal that has none. Ignored unless mosaic=True.
     mosaic: bool = False
-    mosaic_fwhm_deg: Optional[float] = None
+    mosaic_fwhm_deg: float | None = None
     # how the mosaic broadening (when mosaic=True) is applied:
     #   "analytic" (default) -> the cheap energy-shift Gaussian added in quadrature
     #       at detector convolution (results.store_result); the intrinsic spectrum is
@@ -288,7 +285,7 @@ class Sweep:
     # self-absorption of the film's lines/brem. The film (layer 0) radiates the
     # coherent lines; an amorphous substrate adds only brem + absorption (coherent
     # lines from a crystalline substrate remain deferred -- per-layer radiation).
-    substrate: Optional[str] = None  # "sio2" | "al2o3" | a crystal key e.g. "silicon"
+    substrate: str | None = None  # "sio2" | "al2o3" | a crystal key e.g. "silicon"
     substrate_thickness_ang: float = 5e6  # 0.5 mm default
 
 
@@ -313,15 +310,9 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
     if sweep.E_grid_brem is not None:
         brem_grid = np.asarray(sweep.E_grid_brem, float)
     else:
-        brem_grid = np.arange(
-            float(line_grid[0]), float(energies.max()) * 1e3 + 50.0, 50.0
-        )
+        brem_grid = np.arange(float(line_grid[0]), float(energies.max()) * 1e3 + 50.0, 50.0)
 
-    dtheta = (
-        TIMEPIX3_DTHETA_OBS_DEG
-        if sweep.dtheta_obs_deg is None
-        else sweep.dtheta_obs_deg
-    )
+    dtheta = TIMEPIX3_DTHETA_OBS_DEG if sweep.dtheta_obs_deg is None else sweep.dtheta_obs_deg
     domega = TIMEPIX3_DOMEGA_SR if sweep.domega_sr is None else sweep.domega_sr
     beam_uvw = cp["beam_uvw"] if sweep.beam_uvw is None else sweep.beam_uvw
     label = MATERIAL_LABELS.get(sweep.material, sweep.material)
@@ -338,9 +329,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
         )
     mosaic_fwhm_rad = float(np.deg2rad(mosaic_deg)) if mosaic_deg else None
     if sweep.mosaic_route not in ("analytic", "mc"):
-        raise ValueError(
-            f"mosaic_route must be 'analytic' or 'mc', got {sweep.mosaic_route!r}"
-        )
+        raise ValueError(f"mosaic_route must be 'analytic' or 'mc', got {sweep.mosaic_route!r}")
     # exact MC route: do the broadening INSIDE mc_spectrum and turn the analytic
     # store_result term OFF (mutually exclusive -- applying both double-counts).
     # Both are None when there is no mosaic to apply.
@@ -357,9 +346,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
 
     cases = []
     for i_c, (thickness, tilt, azim) in enumerate(
-        product(
-            _seq(sweep.thickness_ang), _seq(sweep.tilt_deg), _seq(sweep.tilt_azim_deg)
-        )
+        product(_seq(sweep.thickness_ang), _seq(sweep.tilt_deg), _seq(sweep.tilt_azim_deg))
     ):
         name = f"{label} {fmt_thickness(thickness)} pol={tilt:g} az={azim:g}"
         abs_layers = None

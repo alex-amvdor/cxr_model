@@ -25,13 +25,13 @@ version = "0.1.0"
 
 # -- Extensions --------------------------------------------------------------
 extensions = [
-    "myst_parser",            # render the docs/*.md design notes
-    "sphinx.ext.autodoc",     # API docs from docstrings
-    "sphinx.ext.autosummary", # per-module summary tables + stub pages
-    "sphinx.ext.napoleon",    # Google/NumPy docstring styles
-    "sphinx.ext.viewcode",    # [source] links
-    "sphinx.ext.intersphinx", # cross-link to numpy/scipy/python
-    "sphinx.ext.mathjax",     # the docstrings carry LaTeX
+    "myst_parser",  # render the docs/*.md design notes
+    "sphinx.ext.autodoc",  # API docs from docstrings
+    "sphinx.ext.autosummary",  # per-module summary tables + stub pages
+    "sphinx.ext.napoleon",  # Google/NumPy docstring styles
+    "sphinx.ext.viewcode",  # [source] links
+    "sphinx.ext.intersphinx",  # cross-link to numpy/scipy/python
+    "sphinx.ext.mathjax",  # the docstrings carry LaTeX
 ]
 
 # -- Autodoc / autosummary ---------------------------------------------------

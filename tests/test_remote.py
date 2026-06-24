@@ -3,7 +3,6 @@
 These are pure-string/logic checks (no ssh), so they run anywhere."""
 
 import pytest
-
 import remote
 
 
@@ -22,8 +21,8 @@ def test_queue_script_has_per_material_scan_calls():
     assert "scan.py" in s
     assert "--quick" in s and "--workers 8" in s
     assert "mose2" in s and "wse2" in s
-    assert "20260101-000000" in s          # job id is embedded
-    assert 'mats=(mose2 wse2)' in s        # bash array drives the loop
+    assert "20260101-000000" in s  # job id is embedded
+    assert "mats=(mose2 wse2)" in s  # bash array drives the loop
 
 
 def test_queue_script_no_flags_when_unset():

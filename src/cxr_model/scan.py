@@ -27,8 +27,8 @@ import os
 import numpy as np
 
 from .config import default_settings, material_sweep
-from .sweep import build_cases
 from .run import run_sweep
+from .sweep import build_cases
 
 
 def _build_parser(ap):
@@ -69,8 +69,7 @@ def run(args):
     cases = build_cases(sweep, settings.n_electrons, settings.n_electrons_brem)
     print(
         f"{args.material}: {len(cases)} cases across "
-        f"{len({c['name'] for c in cases})} configs"
-        + (" (quick grid)" if args.quick else "")
+        f"{len({c['name'] for c in cases})} configs" + (" (quick grid)" if args.quick else "")
     )
 
     # A --quick smoke test writes to its OWN checkpoint (<material>_quick.pkl), so

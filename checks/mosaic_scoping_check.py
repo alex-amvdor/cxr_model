@@ -37,14 +37,14 @@ from tabulate import tabulate
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from cxr_model.sweep import crystal_params  # noqa: E402
-from cxr_model.montecarlo import (  # noqa: E402
-    simulate_trajectories,
+from cxr_model.montecarlo import (
     mc_spectrum,
-    tilted_geometry,
-    mosaic_psi_rad,
     mosaic_fwhm_eV,
+    mosaic_psi_rad,
+    simulate_trajectories,
+    tilted_geometry,
 )
+from cxr_model.sweep import crystal_params
 
 # ---- setup (HOPG, the mosaic case; Timepix3 theta_obs = 90 deg) ---------------
 E0_KEV = 30.0
@@ -77,7 +77,7 @@ def _line_fwhm_eV(E, y):
         L -= 1
     eL = float(E[0]) if y[L] > h else _cross(E[L], E[L + 1], y[L], y[L + 1], h)
     R = i
-    while R < len(y) - 1 and y[R] > h:
+    while len(y) - 1 > R and y[R] > h:
         R += 1
     eR = float(E[-1]) if y[R] > h else _cross(E[R - 1], E[R], y[R - 1], y[R], h)
     return float(E[i]), eR - eL
@@ -88,13 +88,25 @@ def _intrinsic_line(tilt_deg, thickness_ang):
     to locate the brightest line, a fine 0.5 eV pass around it for the FWHM."""
     beam, n_hat = tilted_geometry(THETA_OBS, np.deg2rad(tilt_deg))
     segs = simulate_trajectories(
-        E0_KEV, NE, thickness_ang, composition=COMP, E_cut_keV=5.0, seed=SEED, beam_dir=beam
+        E0_KEV,
+        NE,
+        thickness_ang,
+        composition=COMP,
+        E_cut_keV=5.0,
+        seed=SEED,
+        beam_dir=beam,
     )
 
     def _spec(E_grid):
         return mc_spectrum(
-            segs, E_grid, crystal="hopg", hkl_list=cp["hkl_list"], n_hat=n_hat,
-            B_ang2=cp["B_ang2"], composition=COMP, beam_uvw=cp["beam_uvw"],
+            segs,
+            E_grid,
+            crystal="hopg",
+            hkl_list=cp["hkl_list"],
+            n_hat=n_hat,
+            B_ang2=cp["B_ang2"],
+            composition=COMP,
+            beam_uvw=cp["beam_uvw"],
         )
 
     E_coarse = np.arange(60.0, 4500.0, 2.0)
@@ -107,8 +119,14 @@ def _intrinsic_line(tilt_deg, thickness_ang):
 def _case(tilt_deg):
     """Minimal case dict for mosaic_psi_rad (it reads only these keys)."""
     return dict(
-        crystal="hopg", theta_obs_rad=THETA_OBS, tilt_deg=tilt_deg, tilt_azim_deg=0.0,
-        E0_keV=E0_KEV, hkl_list=cp["hkl_list"], beam_uvw=cp["beam_uvw"], azimuth_rad=0.0,
+        crystal="hopg",
+        theta_obs_rad=THETA_OBS,
+        tilt_deg=tilt_deg,
+        tilt_azim_deg=0.0,
+        E0_keV=E0_KEV,
+        hkl_list=cp["hkl_list"],
+        beam_uvw=cp["beam_uvw"],
+        azimuth_rad=0.0,
     )
 
 
@@ -134,7 +152,14 @@ for t_lbl, t_ang in THICKNESSES:
         n_hat, E_pk, intrinsic, n_seg = _intrinsic_line(tilt, t_ang)
         psi = mosaic_psi_rad(_case(tilt), E_pk)
         psi_deg = np.nan if psi is None else np.degrees(psi)
-        row = [t_lbl, f"{tilt:g}", f"{E_pk:.0f}", f"{intrinsic:.1f}", f"{psi_deg:.1f}", n_seg]
+        row = [
+            t_lbl,
+            f"{tilt:g}",
+            f"{E_pk:.0f}",
+            f"{intrinsic:.1f}",
+            f"{psi_deg:.1f}",
+            n_seg,
+        ]
         for name, grade in GRADES_DEG:
             if psi is None:
                 row.append("-")
@@ -150,8 +175,15 @@ print(
     tabulate(
         rows,
         headers=[
-            "thick", "tilt", "E_pk\n[eV]", "intrinsic\nFWHM [eV]", "psi\n[deg]", "segs",
-            "ZYA 0.4\n[eV] (xint)", "ZYB 0.8\n[eV] (xint)", "ZYH 3.5\n[eV] (xint)",
+            "thick",
+            "tilt",
+            "E_pk\n[eV]",
+            "intrinsic\nFWHM [eV]",
+            "psi\n[deg]",
+            "segs",
+            "ZYA 0.4\n[eV] (xint)",
+            "ZYB 0.8\n[eV] (xint)",
+            "ZYH 3.5\n[eV] (xint)",
         ],
         tablefmt="github",
     )

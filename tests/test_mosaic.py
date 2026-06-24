@@ -14,8 +14,8 @@ from cxr_model.montecarlo import (
     mosaic_fwhm_eV,
     mosaic_psi_rad,
 )
-from cxr_model.sweep import Sweep, build_cases
 from cxr_model.results import store_result
+from cxr_model.sweep import Sweep, build_cases
 
 LINE_GRID = np.arange(50.0, 300.0, 5.0)
 BREM_GRID = np.arange(0.0, 1000.0, 100.0)
@@ -108,7 +108,10 @@ def test_store_result_off_matches_eds_plus_aperture_only():
     expected = np.sqrt(
         eds_fwhm_eV(r["E_pk"]) ** 2
         + aperture_fwhm_eV(
-            r["E_pk"], beta_from_keV(30.0), case["theta_obs_rad"], case["dtheta_obs_rad"]
+            r["E_pk"],
+            beta_from_keV(30.0),
+            case["theta_obs_rad"],
+            case["dtheta_obs_rad"],
         )
         ** 2
     )
@@ -136,6 +139,7 @@ def test_store_result_on_broadens_strictly():
 # ---- the comparison plot -----------------------------------------------------
 def test_plot_mosaic_comparison_runs_and_broadens():
     import matplotlib
+
     matplotlib.use("Agg")
     from cxr_model.config import default_settings
     from cxr_model.plots import plot_mosaic_comparison
@@ -155,4 +159,5 @@ def test_plot_mosaic_comparison_runs_and_broadens():
     assert peaks[0] > peaks[-1]  # perfect strictly taller than ZYH 3.5 deg
 
     import matplotlib.pyplot as plt
+
     plt.close(fig)

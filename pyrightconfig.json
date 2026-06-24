@@ -1,0 +1,18 @@
+{
+  "include": ["src", "tests", "dev", "checks"],
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    "checkpoints",
+    "results",
+    "docs/_build",
+    "docs/_autosummary",
+    "**/node_modules",
+    "**/.*",
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.14",
+  "reportMissingTypeStubs": "none"
+}

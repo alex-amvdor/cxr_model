@@ -40,7 +40,7 @@ Lengths in Angstrom, energies in eV (electron energies in keV where noted).
 
 import os
 import warnings
-from functools import lru_cache
+from functools import cache
 
 import numpy as np
 
@@ -79,15 +79,15 @@ REAL = xp.float32 if (_GPU and os.environ.get("CXR_FP64") != "1") else xp.float6
 from . import DATA_DIR
 from .crystallography import (
     ALPHA_FS,
+    CRYSTALS,
     HBARC_EV_ANG,
     M_E_EV,
-    CRYSTALS,
-    chi_g,
     U_g,
-    absorption_length_ang,
-    reciprocal_g_vector,
-    _rotation_between,
     _direct_lattice_vectors,
+    _rotation_between,
+    absorption_length_ang,
+    chi_g,
+    reciprocal_g_vector,
 )
 
 
@@ -164,7 +164,7 @@ def _alpha_from_first_moment(target):
     return 10.0 ** (0.5 * (lo + hi))
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_mott_transport(element):
     """
     NIST SRD 64 relativistic Mott TRANSPORT cross sections
@@ -189,7 +189,7 @@ def _load_mott_transport(element):
     return np.array(E), np.array(sig) * A0_SQ_CM2
 
 
-@lru_cache(maxsize=None)
+@cache
 def _mott_alpha_table(element, Z):
     """
     Screening parameter alpha(E) calibrated so the screened-Rutherford
@@ -235,13 +235,7 @@ def _dEds_keV_per_ang(Z, A, J_keV, rho_g_cm3, E_keV):
     """Joy-Luo modified Bethe stopping power [keV/Angstrom] (negative)."""
     k = 0.731 + 0.0688 * np.log10(Z)
     # 78500 keV/cm -> 7.85e-4 keV/Angstrom prefactor
-    return (
-        -7.85e-4
-        * rho_g_cm3
-        * Z
-        / (A * E_keV)
-        * np.log(1.166 * (E_keV + k * J_keV) / J_keV)
-    )
+    return -7.85e-4 * rho_g_cm3 * Z / (A * E_keV) * np.log(1.166 * (E_keV + k * J_keV) / J_keV)
 
 
 def _normalize_composition(element, n_atoms_per_ang3, composition):
@@ -336,9 +330,7 @@ def _rotate_directions(d, cos_t, phi):
     u /= np.linalg.norm(u, axis=1)[:, None]
     w = np.cross(d, u)
     out = (
-        cos_t[:, None] * d
-        + (sin_t * np.cos(phi))[:, None] * u
-        + (sin_t * np.sin(phi))[:, None] * w
+        cos_t[:, None] * d + (sin_t * np.cos(phi))[:, None] * u + (sin_t * np.sin(phi))[:, None] * w
     )
     return out / np.linalg.norm(out, axis=1)[:, None]
 
@@ -487,8 +479,11 @@ def simulate_trajectories(
     # else a single layer spanning the slab (bit-for-bit the old transport).
     if layers is None:
         layers = [
-            (0.0, float(thickness_ang),
-             _normalize_composition(element, n_atoms_per_ang3, composition))
+            (
+                0.0,
+                float(thickness_ang),
+                _normalize_composition(element, n_atoms_per_ang3, composition),
+            )
         ]
     z_total = float(layers[-1][1])
     n_layers = len(layers)
@@ -503,14 +498,19 @@ def simulate_trajectories(
     def _scatter_rates(Ea, Zs, n_cm3s):
         """Per-element elastic scattering rates [1/cm] at energies Ea (one layer)."""
         rates = []
-        for Z_i, n_i in zip(Zs, n_cm3s):
+        for Z_i, n_i in zip(Zs, n_cm3s, strict=False):
             if elastic_model == "mott":
                 sig_i = _sigma_browning_cm2(Z_i, Ea)
             elif elastic_model == "sr":
                 a = _alpha_sr_joy(Z_i, Ea)
                 sig_i = (
-                    5.21e-21 * Z_i**2 / Ea**2 * 4.0 * np.pi
-                    / (a * (1.0 + a)) * ((Ea + 511.0) / (Ea + 1024.0)) ** 2
+                    5.21e-21
+                    * Z_i**2
+                    / Ea**2
+                    * 4.0
+                    * np.pi
+                    / (a * (1.0 + a))
+                    * ((Ea + 511.0) / (Ea + 1024.0)) ** 2
                 )
             else:
                 raise ValueError("elastic_model must be 'mott' or 'sr'")
@@ -535,7 +535,15 @@ def simulate_trajectories(
     # penetration / electron-lifetime plots (-> fs via c = 2997.92 Ang/fs).
     clock = np.zeros(Ne)
 
-    seg_mid, seg_dir, seg_len, seg_E, seg_t0, seg_id, seg_lay = [], [], [], [], [], [], []
+    seg_mid, seg_dir, seg_len, seg_E, seg_t0, seg_id, seg_lay = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
 
     # Event-driven loop: every iteration is one FREE FLIGHT + one ELASTIC
     # COLLISION for every still-alive electron, executed in lockstep (pure
@@ -554,7 +562,8 @@ def simulate_trajectories(
         else:
             lay_all = np.clip(
                 np.searchsorted(internal_bounds, pos[idx, 2], side="right"),
-                0, n_layers - 1,
+                0,
+                n_layers - 1,
             )
         for L in range(n_layers):
             grp = idx if lay_all is None else idx[lay_all == L]
@@ -847,11 +856,7 @@ def mc_spectrum(
         # -- 2. drop segments whose line misses the spectral window -------------
         # (pad by 20% so sinc tails that reach into the window still count)
         pad = 0.2 * (E_grid[-1] - E_grid[0])
-        keep = (
-            (E_res > float(E_grid[0] - pad))
-            & (E_res > 10.0)
-            & (E_res < E_grid[-1] + pad)
-        )
+        keep = (E_res > float(E_grid[0] - pad)) & (E_res > 10.0) & (E_res < E_grid[-1] + pad)
         if not keep.any():
             return
         idx = xp.flatnonzero(keep)
@@ -870,9 +875,7 @@ def mc_spectrum(
         # GPU from the per-reflection tabulation; chi_g/U_g are complex, so the
         # real and imaginary parts are interpolated separately.
         chi = xp.interp(E_r, E_tab_g, chi_re) + 1j * xp.interp(E_r, E_tab_g, chi_im)
-        eUg_over_m = (
-            xp.interp(E_r, E_tab_g, u_re) + 1j * xp.interp(E_r, E_tab_g, u_im)
-        ) / M_E_EV
+        eUg_over_m = (xp.interp(E_r, E_tab_g, u_re) + 1j * xp.interp(E_r, E_tab_g, u_im)) / M_E_EV
 
         # -- 4. photon kinematics per segment ------------------------------------
         k_vec = om[:, None] * n_hat_d  # photon wavevector omega * n_hat
@@ -897,9 +900,7 @@ def mc_spectrum(
             A_PXR = chi / detuning * (v_dot_kg * g_dot_e - om**2 * v_dot_e)
             braced_ge = g_dot_e - vdg * v_dot_e
             braced_kg = k_dot_g - k_dot_v * vdg
-            A_CBS = (
-                -eUg_over_m / (gamma * vdg) * (braced_ge + v_dot_e * braced_kg / vdg)
-            )
+            A_CBS = -eUg_over_m / (gamma * vdg) * (braced_ge + v_dot_e * braced_kg / vdg)
             A2 += xp.abs(A_PXR + A_CBS) ** 2
             A2_pxr += xp.abs(A_PXR) ** 2
             A2_cbs += xp.abs(A_CBS) ** 2
@@ -963,11 +964,7 @@ def mc_spectrum(
                 )
                 if i1 <= i0:
                     continue
-                x = (
-                    a_width[sel][:, None]
-                    * (E_grid[None, i0:i1] - E_r[sel][:, None])
-                    / xp.pi
-                )
+                x = a_width[sel][:, None] * (E_grid[None, i0:i1] - E_r[sel][:, None]) / xp.pi
                 S = xp.sinc(x) ** 2
                 for w, tgt in targets:
                     tgt[i0:i1] += w[sel] @ S
@@ -975,7 +972,7 @@ def mc_spectrum(
     for hkl in hkl_list:
         # reciprocal vector in the sample frame: construction frame by default
         # ([001] along the slab normal), rotated if beam_uvw given
-        g_vec, g = reciprocal_g_vector(hkl, info["lattice"])
+        g_vec, _g = reciprocal_g_vector(hkl, info["lattice"])
         if R_orient is not None:
             g_vec = R_orient @ g_vec
         # structure-factor couplings depend on hkl + tabulation energy only (NOT on
@@ -1114,10 +1111,7 @@ def mc_brem_spectrum(
     seg_L = xp.asarray(segments["L_ang"], dtype=REAL)
     seg_E = xp.asarray(segments["E_keV"], dtype=REAL)
     z_mid = seg_r[:, 2]
-    if n_hat[2] < 0:
-        L_esc = z_mid / (-n_hat[2])
-    else:
-        L_esc = (thickness - z_mid) / n_hat[2]
+    L_esc = z_mid / -n_hat[2] if n_hat[2] < 0 else (thickness - z_mid) / n_hat[2]
 
     spec = xp.zeros(E_grid.size, dtype=REAL)
     M = seg_E.size
@@ -1127,7 +1121,7 @@ def mc_brem_spectrum(
             T_abs = xp.exp(-L_esc[sl][:, None] * mu[None, :])
         else:
             tau = 0.0
-            for (z_top, z_bot, _), mu_i in zip(layers, layer_mu):
+            for (z_top, z_bot, _), mu_i in zip(layers, layer_mu, strict=False):
                 dz = _layer_dz(z_mid[sl], n_hat[2], float(z_top), float(z_bot))
                 tau = tau + (dz * inv_nz)[:, None] * mu_i[None, :]
             T_abs = xp.exp(-tau)
@@ -1254,8 +1248,12 @@ def _spectrum_case(case, tp):
     brem_chunk = case.get("brem_chunk") or 20000
     if n_lay == 1:
         brem_wide = mc_brem_spectrum(
-            segs_b, E_brem, composition=case["composition"], n_hat=n_hat,
-            chunk=brem_chunk, layers=abs_layers,
+            segs_b,
+            E_brem,
+            composition=case["composition"],
+            n_hat=n_hat,
+            chunk=brem_chunk,
+            layers=abs_layers,
         )
     else:
         brem_wide = np.zeros(E_brem.shape, dtype=float)
@@ -1264,8 +1262,12 @@ def _spectrum_case(case, tp):
             if sL["L_ang"].size == 0:
                 continue
             brem_wide = brem_wide + mc_brem_spectrum(
-                sL, E_brem, composition=abs_layers[L][2], n_hat=n_hat,
-                chunk=brem_chunk, layers=abs_layers,
+                sL,
+                E_brem,
+                composition=abs_layers[L][2],
+                n_hat=n_hat,
+                chunk=brem_chunk,
+                layers=abs_layers,
             )
     brem = np.interp(E_grid, E_brem, brem_wide)  # brem under the lines (line grid)
     # Hand this case's GPU scratch back to the OS so the CuPy memory pool can't
@@ -1389,9 +1391,7 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
 
         prefetch = nw + 2  # keep the transport pool ahead
         with ProcessPoolExecutor(max_workers=nw, initializer=_worker_init) as ex:
-            inflight = {
-                i: ex.submit(_transport_case, cases[i]) for i in range(min(prefetch, n))
-            }
+            inflight = {i: ex.submit(_transport_case, cases[i]) for i in range(min(prefetch, n))}
             for i in _maybe_bar(range(n)):
                 tp = inflight.pop(i).result()  # transport (already overlapped)
                 j = i + prefetch
@@ -1452,9 +1452,7 @@ def load_external_brem(path, E_grid_eV):
     if not rows:
         raise ValueError(f"no numeric (E, intensity) rows found in {path}")
     arr = np.array(sorted(rows))
-    return np.interp(
-        np.asarray(E_grid_eV, dtype=float), arr[:, 0], arr[:, 1], left=0.0, right=0.0
-    )
+    return np.interp(np.asarray(E_grid_eV, dtype=float), arr[:, 0], arr[:, 1], left=0.0, right=0.0)
 
 
 # ---- detector model (SI S3/S4) -----------------------------------------------
@@ -1580,6 +1578,4 @@ def convolve_detector(E_grid_eV, spec, fwhm_eV):
 
     dE = E_grid_eV[1] - E_grid_eV[0]
     sigma_bins = fwhm_eV / (2.0 * np.sqrt(2.0 * np.log(2.0))) / dE
-    return gaussian_filter1d(
-        np.asarray(spec, dtype=float), sigma_bins, mode="constant", cval=0.0
-    )
+    return gaussian_filter1d(np.asarray(spec, dtype=float), sigma_bins, mode="constant", cval=0.0)

@@ -132,11 +132,7 @@ def run_sweep(
             f"resumed {sum(len(v) for v in loaded.values())} {material} cases from {checkpoint_path}"
         )
 
-    todo = [
-        c
-        for c in cases
-        if not (c["name"] in results and c["E0_keV"] in results[c["name"]])
-    ]
+    todo = [c for c in cases if not (c["name"] in results and c["E0_keV"] in results[c["name"]])]
     print(f"{len(todo)} of {len(cases)} cases to run ({len(cases) - len(todo)} cached)")
 
     # all config names in each group (cached + to-run), in first-seen order
@@ -196,9 +192,7 @@ def run_sweep(
 
 
 # ---- brem-only repair --------------------------------------------------------
-def repair_brem_wide(
-    results, only_nonfinite=True, progress=True, save_every=0, save_cb=None
-):
+def repair_brem_wide(results, only_nonfinite=True, progress=True, save_every=0, save_cb=None):
     """Regenerate ``brem_wide`` (and the line-grid ``brem``) for cached records
     using the CURRENT ``mc_brem_spectrum`` -- WITHOUT re-running the expensive
     line spectrum.
@@ -220,9 +214,10 @@ def repair_brem_wide(
     the checkpoint afterwards (or use :func:`repair_checkpoint`).
     """
     import numpy as np
+
     from .montecarlo import (
-        simulate_trajectories,
         mc_brem_spectrum,
+        simulate_trajectories,
         tilted_geometry,
     )
 
@@ -262,9 +257,7 @@ def repair_brem_wide(
             seed=c["seed"] + 1,
             beam_dir=beam,
         )
-        brem_wide = mc_brem_spectrum(
-            segs_b, E_brem, composition=c["composition"], n_hat=n_hat
-        )
+        brem_wide = mc_brem_spectrum(segs_b, E_brem, composition=c["composition"], n_hat=n_hat)
         r["brem_wide"] = brem_wide
         r["E_grid_brem"] = E_brem
         r["brem"] = np.interp(np.asarray(r["E_grid"], float), E_brem, brem_wide)

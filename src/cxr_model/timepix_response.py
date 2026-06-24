@@ -194,14 +194,8 @@ def _split_fractions(x_um, y_um, sigma_um, pitch_um, half=1):
     hi = (k + 0.5) * pitch_um  # each pixel's upper edges
     s2 = np.sqrt(2.0) * sigma_um  # the sqrt(2) sigma in erf
     # broadcast hit positions (n,1) against pixel edges (1,m) -> (n_photon, m)
-    fx = 0.5 * (
-        erf((hi[None, :] - x_um[:, None]) / s2)
-        - erf((lo[None, :] - x_um[:, None]) / s2)
-    )
-    fy = 0.5 * (
-        erf((hi[None, :] - y_um[:, None]) / s2)
-        - erf((lo[None, :] - y_um[:, None]) / s2)
-    )
+    fx = 0.5 * (erf((hi[None, :] - x_um[:, None]) / s2) - erf((lo[None, :] - x_um[:, None]) / s2))
+    fy = 0.5 * (erf((hi[None, :] - y_um[:, None]) / s2) - erf((lo[None, :] - y_um[:, None]) / s2))
     # outer product over the two pixel axes -> (n_photon, m, m), flattened to m*m
     return (fx[:, :, None] * fy[:, None, :]).reshape(x_um.size, -1)
 
@@ -398,9 +392,7 @@ class TimepixResponse:
         coarse-OUTPUT bin (R already carries absorption + counting efficiency);
         dividing by dE_out makes it a density again; interp lifts it back onto
         the fine grid. Total detected photons are conserved through the chain."""
-        spec = np.nan_to_num(
-            np.asarray(spec, dtype=float), nan=0.0, posinf=0.0, neginf=0.0
-        )
+        spec = np.nan_to_num(np.asarray(spec, dtype=float), nan=0.0, posinf=0.0, neginf=0.0)
         if spec.shape != self.E.shape:
             raise ValueError(
                 f"spec length {spec.shape} != response grid {self.E.shape}. "

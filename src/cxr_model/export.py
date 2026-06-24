@@ -54,9 +54,12 @@ def _export(stem=None):
 
     sys.argv = [
         "jupyter-nbconvert",
-        "--to", "webpdf",
-        "--output-dir", "results",
-        "--output", stem,
+        "--to",
+        "webpdf",
+        "--output-dir",
+        "results",
+        "--output",
+        stem,
         NOTEBOOK,
     ]
     nbmain()
@@ -66,7 +69,9 @@ def add_subparser(sub):
     """Register the ``export`` subcommand on an argparse subparsers object."""
     ap = sub.add_parser("export", help="render analysis.ipynb -> results/<stem>.pdf")
     ap.add_argument(
-        "stem", nargs="?", default=None,
+        "stem",
+        nargs="?",
+        default=None,
         help="output filename stem (default: <material>_cxr_<date>)",
     )
     ap.set_defaults(func=lambda args: _export(args.stem))

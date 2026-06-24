@@ -28,14 +28,16 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from cxr_model.sweep import crystal_params  # noqa: E402
-from cxr_model.montecarlo import (  # noqa: E402
-    simulate_trajectories,
+import itertools
+
+from cxr_model.montecarlo import (
     mc_spectrum,
-    tilted_geometry,
-    mosaic_psi_rad,
     mosaic_fwhm_eV,
+    mosaic_psi_rad,
+    simulate_trajectories,
+    tilted_geometry,
 )
+from cxr_model.sweep import crystal_params
 
 E0_KEV = 30.0
 THETA_OBS = np.deg2rad(90.0)
@@ -65,7 +67,7 @@ def _line_fwhm_eV(y, E=E_GRID):
         L -= 1
     eL = float(E[0]) if y[L] > h else _cross(E[L], E[L + 1], y[L], y[L + 1], h)
     R = i
-    while R < len(y) - 1 and y[R] > h:
+    while len(y) - 1 > R and y[R] > h:
         R += 1
     eR = float(E[-1]) if y[R] > h else _cross(E[R - 1], E[R], y[R - 1], y[R], h)
     return float(E[i]), eR - eL
@@ -80,17 +82,26 @@ def main():
     def spec(fwhm_deg=None, nodes=1):
         fwhm_rad = None if fwhm_deg is None else np.deg2rad(fwhm_deg)
         return mc_spectrum(
-            segs, E_GRID, crystal="hopg", hkl_list=cp["hkl_list"], n_hat=n_hat,
-            B_ang2=cp["B_ang2"], composition=COMP, beam_uvw=cp["beam_uvw"],
-            mosaic_fwhm_rad=fwhm_rad, mosaic_nodes=nodes,
+            segs,
+            E_GRID,
+            crystal="hopg",
+            hkl_list=cp["hkl_list"],
+            n_hat=n_hat,
+            B_ang2=cp["B_ang2"],
+            composition=COMP,
+            beam_uvw=cp["beam_uvw"],
+            mosaic_fwhm_rad=fwhm_rad,
+            mosaic_nodes=nodes,
         )
 
     perfect = spec()
     integral = lambda y: float(np.trapezoid(y, E_GRID))  # noqa: E731
     ok = True
 
-    print(f"HOPG (002), {E0_KEV:.0f} keV, theta_obs 90 deg, tilt {TILT_DEG:g} deg, "
-          f"{THICKNESS:.0f} A film, {segs['L_ang'].size} segments\n")
+    print(
+        f"HOPG (002), {E0_KEV:.0f} keV, theta_obs 90 deg, tilt {TILT_DEG:g} deg, "
+        f"{THICKNESS:.0f} A film, {segs['L_ang'].size} segments\n"
+    )
 
     # 1. perfect-crystal bit-for-bit -------------------------------------------
     b1 = np.array_equal(perfect, spec(fwhm_deg=3.5, nodes=1))  # nodes<=1 -> identity
@@ -104,8 +115,10 @@ def main():
     rel = np.max(np.abs(tiny - perfect) / max(perfect.max(), 1e-300))
     conv0 = rel < 1e-5
     ok &= conv0
-    print(f"2. eta -> 0 converges to perfect:                    "
-          f"{'PASS' if conv0 else 'FAIL'}  (max rel {rel:.1e})")
+    print(
+        f"2. eta -> 0 converges to perfect:                    "
+        f"{'PASS' if conv0 else 'FAIL'}  (max rel {rel:.1e})"
+    )
 
     # 3. broadening + peak drop. The half-max CORE width is the physical line width,
     #    but it is lumpy for a broad grade until the orientation nodes resolve it
@@ -116,32 +129,48 @@ def main():
     grades = [("ZYA", 0.4, 9), ("ZYB", 0.8, 13), ("ZYH", 3.5, 41)]
     specs = {name: spec(fwhm_deg=d, nodes=n) for name, d, n in grades}
     cores = [fw_perfect] + [_line_fwhm_eV(specs[n])[1] for n, _, _ in grades]
-    mono_w = all(a < b for a, b in zip(cores, cores[1:]))
+    mono_w = all(a < b for a, b in itertools.pairwise(cores))
     peak_drop = all(perfect.max() > specs[n].max() for n, _, _ in grades)
     big = cores[-1] > 3.0 * cores[0]  # ZYH clearly broadens the core
     ok &= mono_w and peak_drop and big
-    print(f"3. broadens (core width up) + peak drops with grade: "
-          f"{'PASS' if (mono_w and peak_drop and big) else 'FAIL'}")
-    print(f"     core FWHM [eV]  perfect={cores[0]:6.1f} | "
-          + " | ".join(f"{n} {c:6.1f}" for (n, _, _), c in zip(grades, cores[1:])))
+    print(
+        f"3. broadens (core width up) + peak drops with grade: "
+        f"{'PASS' if (mono_w and peak_drop and big) else 'FAIL'}"
+    )
+    print(
+        f"     core FWHM [eV]  perfect={cores[0]:6.1f} | "
+        + " | ".join(f"{n} {c:6.1f}" for (n, _, _), c in zip(grades, cores[1:], strict=False))
+    )
     # the half-max lineshape of a BROAD grade stays lumpy until nodes resolve it:
     hm = [_line_fwhm_eV(spec(fwhm_deg=3.5, nodes=n))[1] for n in (7, 15, 31)] + [cores[-1]]
-    print("     ZYH half-max FWHM at nodes 7/15/31/41: "
-          + " ".join(f"{h:.0f}" for h in hm) + "  (lumpy until node spacing < core)")
+    print(
+        "     ZYH half-max FWHM at nodes 7/15/31/41: "
+        + " ".join(f"{h:.0f}" for h in hm)
+        + "  (lumpy until node spacing < core)"
+    )
 
     # 4. node convergence at the default ---------------------------------------
     i5 = integral(spec(fwhm_deg=3.5, nodes=5))
     i9 = integral(spec(fwhm_deg=3.5, nodes=9))
     conv_n = abs(i5 - i9) / max(abs(i9), 1e-300) < 0.02
     ok &= conv_n
-    print(f"4. quadrature converged (nodes 5 vs 9, ZYH):         "
-          f"{'PASS' if conv_n else 'FAIL'}  (rel {abs(i5 - i9) / abs(i9):.1e})")
+    print(
+        f"4. quadrature converged (nodes 5 vs 9, ZYH):         "
+        f"{'PASS' if conv_n else 'FAIL'}  (rel {abs(i5 - i9) / abs(i9):.1e})"
+    )
 
     # 5. small-eta -> analytic E|tan psi|eta ------------------------------------
     # the added width (quadrature) should track the analytic slope where it is valid
-    case = dict(crystal="hopg", theta_obs_rad=THETA_OBS, tilt_deg=TILT_DEG,
-                tilt_azim_deg=0.0, E0_keV=E0_KEV, hkl_list=cp["hkl_list"],
-                beam_uvw=cp["beam_uvw"], azimuth_rad=0.0)
+    case = dict(
+        crystal="hopg",
+        theta_obs_rad=THETA_OBS,
+        tilt_deg=TILT_DEG,
+        tilt_azim_deg=0.0,
+        E0_keV=E0_KEV,
+        hkl_list=cp["hkl_list"],
+        beam_uvw=cp["beam_uvw"],
+        azimuth_rad=0.0,
+    )
     psi = mosaic_psi_rad(case, E_pk)
     print(f"5. small-eta vs analytic E|tan psi|eta (psi={np.degrees(psi):.0f} deg):")
     band_ok = True
@@ -152,8 +181,10 @@ def main():
         ratio = added / analytic if analytic > 0 else np.nan
         within = 0.6 <= ratio <= 1.5
         band_ok &= within
-        print(f"     eta={d:g} deg: added={added:5.1f}  analytic={analytic:5.1f}  "
-              f"ratio={ratio:.2f}  {'ok' if within else 'OUT'}")
+        print(
+            f"     eta={d:g} deg: added={added:5.1f}  analytic={analytic:5.1f}  "
+            f"ratio={ratio:.2f}  {'ok' if within else 'OUT'}"
+        )
     ok &= band_ok
 
     # 6. yield (reported): the exact average is not an area-preserving convolution,
@@ -164,8 +195,10 @@ def main():
     y_ratio = integral(specs["ZYH"]) / max(integral(perfect), 1e-300)
     sane = 0.5 < y_ratio < 2.0
     ok &= sane
-    print(f"6. integrated yield ZYH/perfect = {y_ratio:.3f} (near-conserved): "
-          f"{'PASS' if sane else 'FAIL'}")
+    print(
+        f"6. integrated yield ZYH/perfect = {y_ratio:.3f} (near-conserved): "
+        f"{'PASS' if sane else 'FAIL'}"
+    )
 
     print("\nALL CHECKS:", "PASS" if ok else "FAIL")
     if not ok:
