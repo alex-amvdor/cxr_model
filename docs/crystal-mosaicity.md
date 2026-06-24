@@ -61,69 +61,103 @@ FWHM, so a record computed with `mosaic=False` can be re-broadened at plot time.
 
 ---
 
-## (2) Monte-Carlo mosaic average — DESIGNED, NOT IMPLEMENTED (the exact route)
+## (2) Monte-Carlo mosaic average — IMPLEMENTED (the exact route)
 
-### Functionality
+### Scoping (do this before reaching for the exact route)
 
-Replace the post-hoc Gaussian with a true incoherent average **inside** `mc_spectrum`:
+`checks/mosaic_scoping_check.py` measures the intrinsic multiple-scattering Doppler
+width vs the analytic mosaic broadening for HOPG, thin → bulk. The finding: for the
+real HOPG grades the line is genuinely **mosaic-broad** — ZYH (3.5°) gives 25–72 eV vs
+a ~5–30 eV Doppler width (1–15× across thin→bulk), and ZYB (0.8°) is comparable
+(0.3–3.5×). So the energy-shift-only analytic model **does** break here, and the steep
+tilts the HOPG grid sweeps drive ψ→90° where `tan ψ` diverges. That justifies the exact
+route. (ZYA 0.4° at low tilt stays Doppler-dominated, where the analytic model is fine.)
 
-1. Draw `K` crystallite orientations from the mosaic distribution: a 2-D Gaussian tilt of
-   the construction-frame normal with per-axis σ = η_FWHM / 2.3548 (the rocking curve is
-   the 1-D projection). HOPG is the simplest case — a single c-axis tilt DOF for the (00l)
-   reflections (in-plane azimuth is a symmetry no-op for g ∥ c).
-2. For each orientation, apply the extra rotation to **g** at the existing `R_orient` hook
-   (`montecarlo._orientation_R`), then recompute the full per-reflection block: the
-   polarization pair `e_s/e_p`, `E_res`, the amplitudes `A_PXR/A_CBS`, and the sinc
-   lineshape. `T_abs` (self-absorption) is **mosaic-independent** — it depends on `n̂` and
-   depth, not on g — so it can be hoisted out of the orientation loop.
-3. Sum the per-orientation spectra incoherently, weighted by the mosaic PDF (or
-   equal-weighted if the K samples are drawn from the distribution). `K = 1` (no tilt)
-   must reproduce today's result bit-for-bit.
+### What it does
 
-### Pros
+`mc_spectrum(..., mosaic_fwhm_rad=<rad>, mosaic_nodes=<n>)` replaces the post-hoc
+Gaussian with a true incoherent average **inside** the spectrum: it sums the
+per-reflection block over a set of crystallite orientations drawn from the mosaic
+distribution, recomputing the polarization pair `e_s/e_p`, `E_res`, the amplitudes
+`A_PXR/A_CBS` and the sinc lineshape at each orientation, weighted by the mosaic PDF.
+The structure-factor tabulations (`chi_g`/`U_g`) depend on hkl + energy, **not**
+orientation, so they are computed once per reflection and reused; the self-absorption
+geometry is mosaic-independent (only its `μ(E_res)` is re-evaluated, cheaply).
 
-- **Exact** within the kinematical mosaic-block model: broadens **both** PXR and CBS,
-  captures the amplitude / polarization variation across the cone, and produces the
-  correct (generally asymmetric) lineshape for any η and geometry.
-- **No grazing divergence** — there is no `tan ψ` linearization.
-- Reproduces the **yield increase** the literature reports (mosaicity opens the
-  diffracted-bremsstrahlung channel; a ~4× increase has been reported), which the
-  energy-only convolution cannot.
-- **Shares machinery** with the detector solid-angle integral
-  ([detector-solid-angle.md](detector-solid-angle.md)) — both are "incoherently sum the
-  spectrum over a distribution of a direction": g for mosaic, n̂ for the aperture. One
-  "sum over (rotated-g, n̂) samples" accumulator serves both.
+`mosaic_fwhm_rad=None` **or** `mosaic_nodes ≤ 1` is the **perfect-crystal fast path** —
+today's single-orientation result **bit-for-bit** — so default runs and old checkpoints
+are unchanged.
 
-### Cons
+### Orientation quadrature — deterministic Gauss-Hermite, not random sampling
 
-- **Cost.** It multiplies the GPU hot loop (the per-reflection sinc² matmul, see the perf
-  note in [CLAUDE.md](https://github.com/alex-amvdor/cxr_model/blob/main/CLAUDE.md)) by `K`. With CuPy present the spectrum runs
-  **serially** on one CUDA context, so `K` is a direct wall-clock multiplier with no
-  parallelism to hide it. Prefer looping orientations (flat device memory) over a stacked
-  g-axis (K× memory). If ever combined with the solid-angle integral the cost is
-  **multiplicative** (`K × N_dir`).
-- **RNG bookkeeping.** Needs a deterministic mosaic sub-stream distinct from the per-case
-  transport `seed` (`sweep.build_cases`), or mosaic sampling couples to transport noise.
-- **A true `K = 1` fast path** must be preserved so default runs and old checkpoints are
-  unchanged.
+The mosaic average is a 2-D integral of a *smooth* integrand (spectrum vs crystallite
+tilt) against a Gaussian weight — textbook **Gauss-Hermite**. The shipped code
+(`montecarlo._mosaic_quadrature`) uses a 2-D product Gauss-Hermite rule over the tilt of
+the crystallite normal: per-axis σ = η_FWHM / 2.3548 (the rocking curve is the 1-D
+projection), `mosaic_nodes` nodes per axis, **K = mosaic_nodes² orientations**, weights
+summing to 1. Each node's tilt rotates **g** by a Rodrigues rotation (`_small_tilt_R`) at
+the existing `_orientation_R` hook.
 
-### Effort
+This is a deliberate departure from the original "draw K random orientations" sketch.
+Deterministic quadrature **converges in far fewer evaluations** for a smooth integrand
+and needs **no RNG sub-stream** (so it never couples to the transport `seed`) — and the
+single-node (K=1) rule sits exactly at zero tilt, which is what makes the perfect-crystal
+path bit-for-bit.
 
-≈ **5–7 engineer-days**: the orientation loop + per-orientation recompute (keeping the
-chunked-sinc and `sinc_cutoff` paths working), the RNG sub-stream, the `K = 1`
-byte-identical guard, and a convergence/regression suite.
+### Convergence — moments vs lineshape (read before choosing `mosaic_nodes`)
 
-### When it is worth it
+The **moments converge fast.** Integrated yield, mean energy and the second-moment width
+are converged by `mosaic_nodes ~ 5` (nodes 5 vs 9 agree to a few × 10⁻⁶ on the HOPG ZYH
+line integral). For a width-vs-rocking-curve comparison this is enough.
 
-Only where the analytic model breaks: **broad lines / large η** (HOPG ZYH, steep tilt
-near grazing) where the amplitude variation and asymmetry matter. For narrow lines the
-analytic Gaussian already captures the width, and the Doppler skirt frequently dominates
-both. Run a thin-vs-bulk linewidth comparison before committing.
+The **detailed lineshape converges slowly when the mosaic spread ≫ the intrinsic line
+width.** Each node contributes a shifted copy of the (narrow) intrinsic line; for HOPG
+(00l) the energy shift is essentially 1-D in the in-plane tilt, so a handful of nodes
+gives a handful of discrete copies and the summed line is *lumpy* until the node spacing
+in energy drops below the intrinsic core width. A smooth broad lineshape needs
+`mosaic_nodes` scaling with (mosaic width / intrinsic width): HOPG ZYH (3.5°) on a thin
+film needs ~30–40 nodes/axis for a smooth core; ZYA/ZYB (0.4/0.8°) are smooth by ~9–13.
+Cost is K = `mosaic_nodes²` evaluations of the line hot loop, **serial under CuPy**, so
+the broad-lineshape regime is genuinely expensive. The `Sweep` default
+(`mosaic_nodes=5`) targets converged moments; raise it for a publication-quality broad
+lineshape.
 
-### Validation plan
+### API / where it lives
 
-- `K → 1` and η → 0 reproduce the current spectrum bit-for-bit.
-- Integrated line FWHM scales with η and converges to the analytic `E·|tan ψ|·η` in the
-  small-η limit (away from grazing).
-- Cross-check against the 2026 PXR-mosaicity paper: η 0.4° → 3.5° broadens the HOPG (002)
-  rocking curve and lowers the peak by the reported factors.
+- `montecarlo._mosaic_quadrature(fwhm_rad, nodes)` / `_small_tilt_R(dx, dy)` — the
+  quadrature and the tilt rotation.
+- `montecarlo.mc_spectrum(..., mosaic_fwhm_rad, mosaic_nodes)` — the orientation loop.
+- `montecarlo.run_case` / `_spectrum_case` — read `case["mosaic_mc_fwhm_rad"]` /
+  `case["mosaic_mc_nodes"]`.
+- `sweep.Sweep(mosaic=True, mosaic_route="mc", mosaic_nodes=…)` → `build_cases` sets the
+  `mosaic_mc_*` case keys **and turns the analytic `store_result` term off** — the two
+  routes are mutually exclusive (applying both double-counts the broadening).
+- Validation: `checks/mosaic_mc_check.py`; scoping: `checks/mosaic_scoping_check.py`;
+  synthetic unit tests (quadrature + wiring): `tests/test_mosaic_mc.py`.
+
+```python
+material_sweep("hopg", mosaic=True, mosaic_route="mc")                       # default nodes (moments)
+material_sweep("hopg", mosaic=True, mosaic_route="mc",
+               mosaic_fwhm_deg=3.5, mosaic_nodes=35)                         # ZYH, smooth lineshape
+```
+
+### Validated (`checks/mosaic_mc_check.py`; HOPG (002), 30 keV, θ_obs 90°)
+
+- K=1 / `fwhm=None` reproduce the perfect crystal **bit-for-bit**; η→0 converges.
+- The line **broadens** monotonically with grade (core FWHM 10 → 12 → 17 → 53 eV for
+  perfect / ZYA / ZYB / ZYH) and the peak drops.
+- The added width matches the analytic `E·|tan ψ|·η` to within ~10% in the small-η limit
+  — the two routes agree where the analytic one is valid.
+- The integrated **yield is near-conserved** (ZYH/perfect = 0.999) for this
+  fixed-detector, whole-line observable: here the *broadening*, not a yield change,
+  dominates. (The larger mosaic yield gains reported in the literature are for other
+  geometries / observables — fixed narrow-window or divergent-beam setups; the
+  energy-shift-only analytic route cannot reproduce *any* yield change.)
+
+### Still to do
+
+- Validate the broadened **line widths against a measured HOPG rocking-curve / EDS
+  dataset** — the headline reason the exact route exists.
+- Shares the "incoherently sum over a distribution of a direction" pattern with the
+  detector solid-angle integral ([detector-solid-angle.md](detector-solid-angle.md)): g
+  for mosaic, n̂ for the aperture. If ever combined, the cost is multiplicative (K × N_dir).

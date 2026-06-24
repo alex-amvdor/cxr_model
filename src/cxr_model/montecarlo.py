@@ -385,6 +385,49 @@ def _orientation_R(lattice, beam_uvw, azimuth_rad):
     return R
 
 
+def _small_tilt_R(dx_rad, dy_rad):
+    """Rotation that tilts the slab normal by the rotation vector (dx, dy, 0) [rad]
+    via Rodrigues -- exact for any angle, exactly the identity at (0, 0). Used to
+    misorient a mosaic crystallite's reciprocal vectors about the mean orientation."""
+    ang = float(np.hypot(dx_rad, dy_rad))
+    if ang < 1e-15:
+        return np.eye(3)
+    kx, ky = dx_rad / ang, dy_rad / ang
+    K = np.array([[0.0, 0.0, ky], [0.0, 0.0, -kx], [-ky, kx, 0.0]])  # skew of axis
+    return np.eye(3) + np.sin(ang) * K + (1.0 - np.cos(ang)) * (K @ K)
+
+
+def _mosaic_quadrature(fwhm_rad, nodes):
+    """Gauss-Hermite product quadrature over a 2-D Gaussian mosaic tilt of the
+    crystallite normal (per-axis sigma = FWHM / 2.3548 -- the rocking curve is the
+    1-D projection). Returns a list of (rotation matrix, weight) with weights
+    summing to 1, used by mc_spectrum to INCOHERENTLY average a reflection's
+    spectrum over crystallite orientations (the exact mosaic route,
+    docs/crystal-mosaicity.md (2)).
+
+    Returns None -- the perfect-crystal fast path, today's result bit-for-bit --
+    when there is nothing to average: ``fwhm_rad`` falsy, or ``nodes`` <= 1 (the
+    single Gauss-Hermite node sits at zero tilt, i.e. the identity, so the loop is
+    skipped entirely).
+
+    This is the DETERMINISTIC counterpart to drawing K random orientations: the
+    integrand (spectrum vs crystallite tilt) is smooth, so product Gauss-Hermite
+    converges in far fewer evaluations than random sampling and needs no RNG
+    sub-stream. Cost is K = nodes**2 evaluations of the per-reflection block, a
+    direct wall-clock multiplier on the (serial, with CuPy) GPU hot loop."""
+    if not fwhm_rad or nodes is None or nodes <= 1:
+        return None
+    x, w = np.polynomial.hermite.hermgauss(int(nodes))
+    sigma = float(fwhm_rad) / 2.3548200450309493  # FWHM -> Gaussian sigma
+    tilt = np.sqrt(2.0) * sigma * x  # quadrature nodes as tilt angles [rad]
+    wt = w / np.sqrt(np.pi)  # per-axis weights, sum to 1
+    return [
+        (_small_tilt_R(tilt[j], tilt[k]), float(wt[j] * wt[k]))
+        for j in range(len(tilt))
+        for k in range(len(tilt))
+    ]
+
+
 def simulate_trajectories(
     E0_keV,
     Ne,
@@ -600,6 +643,8 @@ def mc_spectrum(
     sinc_cutoff=None,
     components=False,
     layers=None,
+    mosaic_fwhm_rad=None,
+    mosaic_nodes=1,
 ):
     """
     Per-electron CXR spectrum d2N/dE dOmega [photons / eV / sr / electron]
@@ -641,6 +686,19 @@ def mc_spectrum(
     times faster on wide grids. Tail loss is ~1/(pi C) of each line's
     integral (0.3% at C = 100); peak heights are unaffected. Requires a
     UNIFORM E_grid.
+
+    mosaic_fwhm_rad / mosaic_nodes: the EXACT crystal-mosaicity route
+    (docs/crystal-mosaicity.md (2)). None / nodes<=1 (the default) is a perfect
+    crystal -- today's single-orientation result bit-for-bit. Otherwise the
+    spectrum is incoherently averaged over crystallite orientations drawn from a
+    Gaussian mosaic of rocking-curve FWHM ``mosaic_fwhm_rad`` [rad], via a 2-D
+    Gauss-Hermite product quadrature of ``mosaic_nodes`` nodes per tilt axis (so
+    K = mosaic_nodes**2 evaluations of the per-reflection block). Unlike the
+    analytic mosaic_fwhm_eV (energy-shift only, applied at detector convolution),
+    this broadens BOTH PXR and CBS, captures the amplitude/polarization variation
+    across the cone, and yields the correct (generally asymmetric) lineshape and
+    integrated yield. Do NOT also apply the analytic term to the result (double
+    count); build_cases handles that mutual exclusion.
     """
     if B_ang2 is None:
         raise ValueError(
@@ -696,17 +754,23 @@ def mc_spectrum(
     E_tab = np.unique(np.concatenate(_grids))
     E_tab_g = xp.asarray(E_tab, dtype=REAL)
 
-    for hkl in hkl_list:
-        # reciprocal vector in the sample frame: construction frame by
-        # default ([001] along the slab normal), rotated if beam_uvw given
-        g_vec, g = reciprocal_g_vector(hkl, info["lattice"])
-        if R_orient is not None:
-            g_vec = R_orient @ g_vec
-        # sigma/pi polarization unit vectors: constants per reflection, since
-        # both the detector direction n_hat and g are fixed (only v varies)
+    n_hat_d = xp.asarray(n_hat, dtype=REAL)  # detector dir is g-independent: hoist
+    # mosaic crystallite-orientation quadrature: None -> perfect crystal (default;
+    # today's single-orientation result bit-for-bit). Otherwise a list of
+    # (rotation, weight) tilting g across the Gaussian mosaic cone, summed
+    # incoherently below (docs/crystal-mosaicity.md route 2).
+    mosaic_quad = _mosaic_quadrature(mosaic_fwhm_rad, mosaic_nodes)
+
+    def _accumulate(g_vec, chi_re, chi_im, u_re, u_im, wm):
+        """Add one reflection's contribution for crystallite reciprocal vector
+        ``g_vec``, scaled by the mosaic-quadrature weight ``wm``, into spec /
+        spec_pxr / spec_cbs in place. The structure-factor tabulations (chi/u on
+        E_tab_g) are precomputed per reflection -- they depend on hkl and energy,
+        NOT on the mosaic orientation; everything else depends on g and so is
+        recomputed per orientation. wm = 1.0 for the perfect-crystal path."""
+        # sigma/pi polarization unit vectors: fixed once n_hat and g are fixed
         e_s, e_p = _polarization_pair(n_hat, g_vec)
         g_vec_d = xp.asarray(g_vec, dtype=REAL)
-        n_hat_d = xp.asarray(n_hat, dtype=REAL)
 
         # -- 1. per-segment resonance energy (Eq. 10) ---------------------------
         #   omega_res = v.g / (1 - v.n)   [1/Ang]   (>0 required to radiate)
@@ -724,7 +788,7 @@ def mc_spectrum(
             & (E_res < E_grid[-1] + pad)
         )
         if not keep.any():
-            continue
+            return
         idx = xp.flatnonzero(keep)
 
         E_r = E_res[idx]  # line energy per kept segment [eV]
@@ -737,17 +801,12 @@ def mc_spectrum(
 
         # -- 3. couplings AT each segment's resonance energy --------------------
         # (amplitudes vary slowly across the narrow line; freezing them at E_res
-        # is accurate to the linewidth/E_res level). Tabulated on E_tab (CPU, a
-        # few ms) and interpolated at E_res ON THE GPU; chi_g/U_g are complex, so
-        # interpolate real and imaginary parts separately.
-        chi_tab = np.asarray(chi_g(crystal, hkl, E_tab, B_ang2, use_henke))
-        u_tab = np.asarray(U_g(crystal, hkl, E_tab, B_ang2, use_henke))
-        chi = xp.interp(
-            E_r, E_tab_g, xp.asarray(chi_tab.real, dtype=REAL)
-        ) + 1j * xp.interp(E_r, E_tab_g, xp.asarray(chi_tab.imag, dtype=REAL))
+        # is accurate to the linewidth/E_res level). Interpolated at E_res ON THE
+        # GPU from the per-reflection tabulation; chi_g/U_g are complex, so the
+        # real and imaginary parts are interpolated separately.
+        chi = xp.interp(E_r, E_tab_g, chi_re) + 1j * xp.interp(E_r, E_tab_g, chi_im)
         eUg_over_m = (
-            xp.interp(E_r, E_tab_g, xp.asarray(u_tab.real, dtype=REAL))
-            + 1j * xp.interp(E_r, E_tab_g, xp.asarray(u_tab.imag, dtype=REAL))
+            xp.interp(E_r, E_tab_g, u_re) + 1j * xp.interp(E_r, E_tab_g, u_im)
         ) / M_E_EV
 
         # -- 4. photon kinematics per segment ------------------------------------
@@ -783,7 +842,9 @@ def mc_spectrum(
         # -- 6. Beer-Lambert escape factor from the segment midpoint -------------
         # straight path along n_hat to whichever face the photon exits. With a
         # LAYERED absorber (layers) the optical depth sums mu_i*dz_i across the
-        # film-on-substrate stack; otherwise it's the single-slab path.
+        # film-on-substrate stack; otherwise it's the single-slab path. The
+        # geometric path is mosaic-independent; the optical depth uses E_r (the
+        # orientation-shifted line energy), so it is recomputed per orientation.
         z_mid = seg_r[idx, 2]
         if layers is None:
             if n_hat[2] < 0:
@@ -798,13 +859,13 @@ def mc_spectrum(
         # -- 7. accumulate the finite-segment lineshape ---------------------------
         # d2N/dE dOmega = alpha*omega/(4 pi^2 hbar c) |A|^2 t_L^2
         #                  * sinc^2[(1 - v.n)(omega - omega_res) t_L / 2] * T_abs
-        # weight = everything except the sinc^2; a_width converts (E - E_res)
-        # to the sinc argument: P t_L = a_width * (E - E_res).
+        # weight = everything except the sinc^2 (times the mosaic weight wm);
+        # a_width converts (E - E_res) to the sinc argument: P t_L = a_width(E - E_res).
         pref = ALPHA_FS * om / (4.0 * xp.pi**2 * HBARC_EV_ANG) * t_L**2 * T_abs
-        weight = pref * A2
+        weight = pref * A2 * wm
         targets = [(weight, spec)]
         if components:
-            targets += [(pref * A2_pxr, spec_pxr), (pref * A2_cbs, spec_cbs)]
+            targets += [(pref * A2_pxr * wm, spec_pxr), (pref * A2_cbs * wm, spec_cbs)]
         a_width = dnm * t_L / (2.0 * HBARC_EV_ANG)
         good = xp.isfinite(weight) & (weight > 0)
 
@@ -845,6 +906,28 @@ def mc_spectrum(
                 S = xp.sinc(x) ** 2
                 for w, tgt in targets:
                     tgt[i0:i1] += w[sel] @ S
+
+    for hkl in hkl_list:
+        # reciprocal vector in the sample frame: construction frame by default
+        # ([001] along the slab normal), rotated if beam_uvw given
+        g_vec, g = reciprocal_g_vector(hkl, info["lattice"])
+        if R_orient is not None:
+            g_vec = R_orient @ g_vec
+        # structure-factor couplings depend on hkl + tabulation energy only (NOT on
+        # the mosaic orientation), so tabulate once per reflection (CPU, a few ms)
+        # and reuse across the orientation quadrature; push real/imag to the device.
+        chi_tab = np.asarray(chi_g(crystal, hkl, E_tab, B_ang2, use_henke))
+        u_tab = np.asarray(U_g(crystal, hkl, E_tab, B_ang2, use_henke))
+        chi_re = xp.asarray(chi_tab.real, dtype=REAL)
+        chi_im = xp.asarray(chi_tab.imag, dtype=REAL)
+        u_re = xp.asarray(u_tab.real, dtype=REAL)
+        u_im = xp.asarray(u_tab.imag, dtype=REAL)
+
+        if mosaic_quad is None:  # perfect crystal: one orientation, weight 1
+            _accumulate(g_vec, chi_re, chi_im, u_re, u_im, 1.0)
+        else:  # incoherent average over the mosaic crystallite orientations
+            for R_m, wm in mosaic_quad:
+                _accumulate(R_m @ g_vec, chi_re, chi_im, u_re, u_im, wm)
 
     if components:
         return _to_cpu(spec / Ne), _to_cpu(spec_pxr / Ne), _to_cpu(spec_cbs / Ne)
@@ -1014,6 +1097,9 @@ def run_case(case):
                 sinc_cutoff (None = exact lineshapes; windowing buys nothing
                 for bulk targets, where scattering Doppler-spreads the lines
                 across the whole grid),
+                mosaic_mc_fwhm_rad (None) / mosaic_mc_nodes (1): the exact
+                Monte-Carlo crystal-mosaicity average (mc_spectrum); None/1 ->
+                perfect crystal,
                 brem_step_eV (10; legacy single-E_grid fallback only)
 
     Returns dict(E_grid, spec, brem [on E_grid], E_grid_brem, brem_wide [the
@@ -1081,6 +1167,8 @@ def _spectrum_case(case, tp):
         sinc_cutoff=case.get("sinc_cutoff"),
         chunk=case.get("spec_chunk") or 40000,
         layers=abs_layers,
+        mosaic_fwhm_rad=case.get("mosaic_mc_fwhm_rad"),  # None -> perfect crystal
+        mosaic_nodes=case.get("mosaic_mc_nodes", 1),
     )
     brem_wide = mc_brem_spectrum(
         segs_b,

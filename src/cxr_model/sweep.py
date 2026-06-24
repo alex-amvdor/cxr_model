@@ -270,6 +270,17 @@ class Sweep:
     #       crystal that has none. Ignored unless mosaic=True.
     mosaic: bool = False
     mosaic_fwhm_deg: Optional[float] = None
+    # how the mosaic broadening (when mosaic=True) is applied:
+    #   "analytic" (default) -> the cheap energy-shift Gaussian added in quadrature
+    #       at detector convolution (results.store_result); the intrinsic spectrum is
+    #       untouched, so one record re-broadens to any grade (plot_mosaic_comparison).
+    #   "mc"                  -> the EXACT per-orientation average INSIDE mc_spectrum
+    #       (broadens PXR+CBS, captures the amplitude variation + asymmetric lineshape
+    #       and the mosaic yield change); the analytic term is then suppressed so the
+    #       broadening is not double-counted. Costs mosaic_nodes**2 x the line hot loop
+    #       (serial under CuPy). See docs/crystal-mosaicity.md.
+    mosaic_route: str = "analytic"
+    mosaic_nodes: int = 5  # Gauss-Hermite nodes/tilt-axis for mosaic_route="mc" (K=nodes^2)
     # film-on-substrate stack (optional, FIRST SLICE of the multilayer feature --
     # docs/multilayer-materials.md). substrate=None -> free-standing film
     # (unchanged). Otherwise the film's emitted lines + brem are attenuated by the
@@ -324,6 +335,16 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
             else CRYSTALS[cp["crystal"]].get("mosaic_fwhm_deg")
         )
     mosaic_fwhm_rad = float(np.deg2rad(mosaic_deg)) if mosaic_deg else None
+    if sweep.mosaic_route not in ("analytic", "mc"):
+        raise ValueError(
+            f"mosaic_route must be 'analytic' or 'mc', got {sweep.mosaic_route!r}"
+        )
+    # exact MC route: do the broadening INSIDE mc_spectrum and turn the analytic
+    # store_result term OFF (mutually exclusive -- applying both double-counts).
+    # Both are None when there is no mosaic to apply.
+    mosaic_mc = mosaic_fwhm_rad is not None and sweep.mosaic_route == "mc"
+    mosaic_analytic_rad = None if mosaic_mc else mosaic_fwhm_rad
+    mosaic_mc_rad = mosaic_fwhm_rad if mosaic_mc else None
 
     def _triple(g):
         """(start, stop, step) so np.arange(*triple) reproduces grid g."""
@@ -365,7 +386,9 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     tilt_deg=float(tilt),
                     tilt_azim_deg=float(azim),
                     beam_uvw=beam_uvw,
-                    mosaic_fwhm_rad=mosaic_fwhm_rad,  # None -> perfect crystal
+                    mosaic_fwhm_rad=mosaic_analytic_rad,  # analytic term (None if route="mc")
+                    mosaic_mc_fwhm_rad=mosaic_mc_rad,  # exact MC route (None if route="analytic")
+                    mosaic_mc_nodes=sweep.mosaic_nodes,
                     abs_layers=abs_layers,  # None -> single slab; else film-on-substrate stack
                     brem_file=None,
                     Ne=n_electrons,

@@ -134,6 +134,12 @@ a missing element falls back to analytic screened-Rutherford with a one-time war
 - **GPU ⇒ serial:** with CuPy present, `run_cases` runs serially (one CUDA
   context). Multiprocessing speedups apply only CPU-side. Workers run BELOW_NORMAL
   priority with BLAS pinned to 1 thread.
+- **Mosaic MC nodes — moments converge, lineshape doesn't (yet):** `mosaic_route="mc"`
+  averages `mc_spectrum` over `mosaic_nodes²` crystallite orientations (serial under
+  CuPy, so a direct K× cost). Yield / second-moment width converge by ~5 nodes, but a
+  *smooth broad lineshape* needs nodes scaling with mosaic/intrinsic width (HOPG ZYH ~35);
+  too few → a lumpy multi-peak line, not a bug. Don't also apply the analytic term
+  (`build_cases` makes the two routes mutually exclusive). See `docs/crystal-mosaicity.md`.
 - **`apply_detector_qe` defaults False:** intrinsic spectra are shown unfiltered;
   the Timepix3 / Eagle XO views apply their own QE downstream.
 - **Benign `divide by zero`:** the wide brem grid starts at 0 eV (λ→∞ at E=0), so

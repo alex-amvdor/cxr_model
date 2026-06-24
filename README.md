@@ -219,31 +219,36 @@ Adding a new material (or element) touches several non-colocated registries
 so there is no per-element table to edit. The full checklist lives in
 [`CLAUDE.md`](CLAUDE.md) under *"Adding a material"*.
 
-### Crystal mosaicity (optional, analytic — off by default)
+### Crystal mosaicity (optional — off by default)
 
 Real crystals are mosaic: an incoherent ensemble of misoriented crystallites with a
 Gaussian *mosaic spread* η (rocking-curve FWHM; e.g. HOPG ZYA 0.4° / ZYB 0.8° / ZYH 3.5°).
-The simulation ships an **initial analytic model** of the resulting line broadening, **off
-by default**:
+Mosaicity is **off by default**; `mosaic=True` enables it via one of two routes
+(`mosaic_route`):
 
 ```python
-material_sweep("hopg", mosaic=True)                       # use the per-crystal value
-material_sweep("hopg", mosaic=True, mosaic_fwhm_deg=3.5)  # override (e.g. ZYH grade)
+material_sweep("hopg", mosaic=True)                       # "analytic" (default route)
+material_sweep("hopg", mosaic=True, mosaic_fwhm_deg=3.5)  # ZYH grade override
+material_sweep("hopg", mosaic=True, mosaic_route="mc")    # exact per-orientation MC average
 ```
 
-A mosaic tilt rotates **g**, broadening the line by `FWHM_mosaic = E·|tan ψ|·η`
-(ψ = ∠(v, g)), added in quadrature with the EDS / aperture widths in the same
-`convolve_detector` pass. The **intrinsic** spectrum is untouched (so
-`plot_mosaic_comparison` overlays several grades from one record), and `mosaic=False` is an
-exact no-op. The per-crystal η is an optional `mosaic_fwhm_deg` in
-`crystal_structures.toml` (only HOPG carries one today).
+- **`"analytic"` (default)** — a mosaic tilt rotates **g**, broadening the line by
+  `FWHM_mosaic = E·|tan ψ|·η` (ψ = ∠(v, g)), added in quadrature with the EDS / aperture
+  widths in the same `convolve_detector` pass. The **intrinsic** spectrum is untouched (so
+  `plot_mosaic_comparison` overlays several grades from one record). Cheap, but
+  energy-shift only: amplitudes are held fixed across the cone and `tan ψ` diverges as
+  ψ → 90° (capped at the peak energy).
+- **`"mc"` (exact)** — a true incoherent average over crystallite orientations **inside
+  `mc_spectrum`** (2-D Gauss-Hermite quadrature, `mosaic_nodes` per axis). Broadens **both
+  PXR and CBS**, captures the amplitude variation and the (asymmetric) lineshape, and has
+  **no grazing divergence**. The scoping check shows this matters for HOPG's real grades
+  (the line is mosaic-broad, not Doppler-dominated). Costs `mosaic_nodes²` × the line hot
+  loop; the moments converge by ~5 nodes, a smooth broad lineshape needs more —
+  [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
 
-**Limits.** Energy-shift only (amplitudes fixed across the cone), diverges as ψ → 90°
-(capped at the peak energy), usually sub-dominant to the multiple-scattering Doppler width
-except in thin / near-perfect / high-mosaic cases, and **not yet validated** against
-measured line widths (see *Validation*). The exact Monte-Carlo route (a per-orientation
-incoherent sum that broadens PXR+CBS, not just shifts the energy) is designed but
-unimplemented — [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
+`mosaic=False` is an exact no-op for both routes. The per-crystal η is an optional
+`mosaic_fwhm_deg` in `crystal_structures.toml` (only HOPG carries one today). Neither route
+is **yet validated against measured line widths** (see *Validation*).
 
 ---
 
@@ -297,9 +302,10 @@ soft lines.
 These are known approximations or unvalidated additions — read before quoting absolute
 numbers:
 
-- **Crystal mosaicity** (the analytic model above) is **not** checked against measured HOPG
-  rocking-curve / line widths; it is energy-shift only and unreliable near grazing, and the
-  exact Monte-Carlo route is unimplemented — [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
+- **Crystal mosaicity** — both the analytic broadening and the exact Monte-Carlo
+  orientation average (`mosaic_route="mc"`) are implemented and cross-checked against each
+  other (`checks/mosaic_mc_check.py`), but **neither is yet validated against a measured HOPG
+  rocking-curve / line-width dataset** — [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
 - **Detector solid angle** is treated as a single observation direction `n̂` with a flat Ω
   flux scale and an analytic Gaussian polar-aperture broadening (`aperture_fwhm_eV`),
   exactly as the source papers do. A first-principles integral over the detector face is

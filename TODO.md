@@ -9,15 +9,19 @@ publication's validation story) against effort and risk.
 
 ## P1 — high value (physics accuracy + publication validation)
 
-1. **Crystal mosaicity — exact Monte-Carlo route.** *(feature)* An incoherent sum
-   over Gaussian-spread crystallite orientations inside `mc_spectrum`, broadening
-   PXR+CBS per orientation. The shipped analytic route is *energy-shift only* and
-   **unvalidated**; this is the physically correct upgrade for the large-mosaic /
-   broad-line regime (HOPG ZYH, ψ→90°) and the path to validating line widths
-   against measured rocking curves. Shares machinery with the detector
-   solid-angle integration (P2 #4). Caveat: the electron multiple-scattering
-   Doppler width often dominates, so mosaic is visible mainly in thin /
-   near-perfect crystals. Design: [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
+1. **Crystal mosaicity — exact Monte-Carlo route.** *(feature — IMPLEMENTED; measured-data
+   validation remains)* The incoherent per-orientation average inside `mc_spectrum`
+   (`Sweep(mosaic_route="mc")`, 2-D Gauss-Hermite quadrature over crystallite tilt) is
+   done: it broadens PXR+CBS, captures the asymmetric lineshape, has no `tan ψ` grazing
+   divergence, and keeps the perfect-crystal path bit-for-bit. Cross-checked in
+   `checks/mosaic_mc_check.py` (bit-for-bit, η→0, small-η→analytic, broadening, yield) and
+   `tests/test_mosaic_mc.py`. The scoping check (`checks/mosaic_scoping_check.py`) showed
+   the line is genuinely mosaic-broad for HOPG's real grades — ZYB/ZYH ≳ the
+   multiple-scattering Doppler width even in bulk — which **corrects the earlier "Doppler
+   dominates" caveat**. **Remaining:** validate the broadened line widths against a measured
+   HOPG rocking-curve / EDS dataset (the headline reason it exists; data-dependent). Still
+   shares the orientation-average pattern with the detector solid-angle integration (P2 #4).
+   Design: [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
 
 2. **Physics-anchor comparison plots.** *(feature)* Make the `checks/`
    Feranchuk/Zhai anchors emit figures versus the literature (especially **Zhai
