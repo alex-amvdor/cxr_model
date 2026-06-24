@@ -479,7 +479,7 @@ wheels = [
 [[package]]
 name = "cxr-model"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "cupy-cuda13x" },
     { name = "datashader" },

@@ -36,34 +36,38 @@ Bias toward caution over speed; for trivial tasks use judgment.
   masking cupy, e.g.
   `uv run python -c "import sys;sys.modules['cupy']=None;sys.path.insert(0,'checks');import runpy;runpy.run_path('checks/feranchuk_vs_zhai_check.py',run_name='__main__')"`
   (the 29 nm A/B ratio must stay **1.00**; same pattern for `checks/multilayer_check.py`).
-- **Sweep (headless):** `uv run python scan.py <material> [--quick] [--workers N]`
+- **Sweep (headless):** `cxr scan <material> [--quick] [--workers N]` (installed
+  console script; or `uv run python scan.py <material> …` via the root shim)
   → writes `checkpoints/<material>.pkl`.
-- **Remote compute, local viz:** `uv run python remote.py {scan|start|pull|attach|status|logs|stop} …`
-  (runs `scan.py` on the `qlmc` GPU box over ssh, pulls the checkpoint back; see
-  README → *Remote compute*). Don't render PDFs on the box — pull and render locally.
+- **Remote compute, local viz:** `uv run python dev/remote.py {scan|start|pull|attach|status|logs|stop} …`
+  — a *personal* author helper that runs `scan.py` on the `qlmc` GPU box over ssh and
+  pulls the checkpoint back (host configurable via `CXR_REMOTE_*`; not shipped in the
+  package). For a generic cluster, see README → *Running on a cluster*. Don't render
+  PDFs on the box — pull and render locally.
 - **Notebooks:** `scan.ipynb` (run a sweep) → `analysis.ipynb` (all viz). Both
-  share the per-material grids in `src/config.py` — edit a grid there once and
+  share the per-material grids in `src/cxr_model/config.py` — edit a grid there once and
   both pick it up. Notebooks are output-stripped on commit by `nbstripout`.
 - **Windows:** the Bash tool mangles `C:\…` paths and `&&` chains — use forward
   slashes (`C:/Users/…`) or prefer the dedicated Glob / Read / Grep / Edit tools.
 
 ## Code map
 
-`src/` holds the importable modules (notebooks do `sys.path.insert(0, "src")`);
-the README has the per-module responsibility table. Data paths resolve relative
-to `src/`, so imports work from any cwd. `*.pkl` / `*.png` are gitignored.
+`src/cxr_model/` is the importable package (installable via `uv sync` / `pip
+install -e .`; notebooks add `src/` to the path then `from cxr_model … import`);
+the README has the per-module responsibility table. Packaged data resolves via
+`cxr_model.DATA_DIR`, so imports work from any cwd. `*.pkl` / `*.png` are gitignored.
 
 | Need to change… | Go to |
 |---|---|
-| crystal DB, structure factor, χ_g/U_g, reflections, constants | `src/crystallography.py` |
-| electron transport + radiation + detector helpers + drivers | `src/montecarlo.py` |
-| sweep definition (knobs → Cartesian product of cases) | `src/sweep.py` |
-| per-material grids, default settings, sweep builders | `src/config.py` |
-| checkpointed/resumable sweep driver, checkpoint loaders | `src/run.py` |
-| result records, metrics, ranking/selection | `src/results.py` |
-| all plotting | `src/plots.py` |
-| Timepix3 / Eagle XO forward models | `src/timepix_response.py`, `src/eaglexo_response.py` |
-| atomic form factors (xraydb-backed) | `src/atomic_form_factors.py` |
+| crystal DB, structure factor, χ_g/U_g, reflections, constants | `src/cxr_model/crystallography.py` |
+| electron transport + radiation + detector helpers + drivers | `src/cxr_model/montecarlo.py` |
+| sweep definition (knobs → Cartesian product of cases) | `src/cxr_model/sweep.py` |
+| per-material grids, default settings, sweep builders | `src/cxr_model/config.py` |
+| checkpointed/resumable sweep driver, checkpoint loaders | `src/cxr_model/run.py` |
+| result records, metrics, ranking/selection | `src/cxr_model/results.py` |
+| all plotting | `src/cxr_model/plots.py` |
+| Timepix3 / Eagle XO forward models | `src/cxr_model/timepix_response.py`, `src/cxr_model/eaglexo_response.py` |
+| atomic form factors (xraydb-backed) | `src/cxr_model/atomic_form_factors.py` |
 
 ## Adding a material (or element)
 
@@ -72,22 +76,22 @@ in a worker), not at import. For a material reusing present elements, only the
 (*) sites; a NEW ELEMENT needs all of them. Verify the whole chain with a single
 `run_case` at tiny `Ne`.
 
-1. (*) `data/crystal_structures.toml` — the `[material]` block (system, lattice,
+1. (*) `src/cxr_model/data/crystal_structures.toml` — the `[material]` block (system, lattice,
    basis). 2H TMDs are isostructural with MoSe₂ (metal on 2c, chalcogen on 4f
    z=0.621 → δ=0.129 from the metal plane); sanity-check the M–X bond
    `sqrt((a/√3)² + (δc)²)` against the literature value.
-2. (*) `src/config.py` — add to `_MATERIAL_GRIDS` (`MATERIALS` auto-derives).
-3. (*) `src/sweep.py` — `MATERIAL_LABELS` **and** a `crystal_params()` branch
+2. (*) `src/cxr_model/config.py` — add to `_MATERIAL_GRIDS` (`MATERIALS` auto-derives).
+3. (*) `src/cxr_model/sweep.py` — `MATERIAL_LABELS` **and** a `crystal_params()` branch
    (composition, `hkl_list`, `beam_uvw`, `B_ang2`).
-4. `src/crystallography.py` — add to `_EDGE_PRONE` if any absorption edge lands
+4. `src/cxr_model/crystallography.py` — add to `_EDGE_PRONE` if any absorption edge lands
    in the ≤4.5 keV line grid (forces the complex resonant f0+f′+if″).
-5. `src/montecarlo.py` — `TRANSPORT_ELEMENTS` (Z, A, `J_keV` = ICRU/NIST mean
+5. `src/cxr_model/montecarlo.py` — `TRANSPORT_ELEMENTS` (Z, A, `J_keV` = ICRU/NIST mean
    excitation energy in keV; e.g. Te = 0.485).
 6. README — append the key to the materials table.
 
 Atomic scattering data (Z, f0, f′, f″) comes from **xraydb** for any element —
 no table to edit (see [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md)).
-NIST Mott transport tables (`data/mott_transport_cross_sections/`) are OPTIONAL:
+NIST Mott transport tables (`src/cxr_model/data/mott_transport_cross_sections/`) are OPTIONAL:
 a missing element falls back to analytic screened-Rutherford with a one-time warning.
 
 ## Physics conventions (read before touching geometry or amplitudes)
@@ -129,7 +133,7 @@ a missing element falls back to analytic screened-Rutherford with a one-time war
 - **Benign `divide by zero`:** the wide brem grid starts at 0 eV (λ→∞ at E=0), so
   `absorption_length_ang` is called at E=0; values are `nan_to_num`-clamped. Not a
   bug — don't "fix" it (the warning is suppressed in-function via `np.errstate`).
-- **`remote.py` line endings:** the tar-sync normalizes CRLF→LF for text files so
+- **`dev/remote.py` line endings:** the tar-sync normalizes CRLF→LF for text files so
   the box stays `git status`-clean.
 - **MoSe₂ structure:** Se z-fractional δ=0.129 (not 0.121 — a Wyckoff misread),
   verified by the 2.53 Å Mo–Se bond. A known ~×2 normalization source vs the paper.

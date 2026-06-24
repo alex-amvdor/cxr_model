@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, peak_widths
 
-from montecarlo import (
+from .montecarlo import (
     beta_from_keV,
     eds_fwhm_eV,
     aperture_fwhm_eV,
@@ -34,7 +34,7 @@ from montecarlo import (
     detector_efficiency,
     load_external_brem,
 )
-from sweep import fmt_thickness, MATERIAL_LABELS
+from .sweep import fmt_thickness, MATERIAL_LABELS
 
 PER_NA = 6.2415e9  # electrons/s at 1 nA
 

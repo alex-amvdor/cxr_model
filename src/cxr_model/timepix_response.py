@@ -85,7 +85,7 @@ quoted front-end figures convert as:
 import numpy as np
 from scipy.special import erf
 
-from crystallography import absorption_length_ang
+from .crystallography import absorption_length_ang
 
 # ---- silicon sensor physics (fixed material constants) -----------------------
 W_EHP_EV = 3.65  # mean energy to make one electron-hole pair [eV]

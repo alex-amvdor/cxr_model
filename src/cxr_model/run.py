@@ -27,8 +27,8 @@ import pickle
 import time
 from collections import defaultdict
 
-from montecarlo import run_cases
-from results import store_result
+from .montecarlo import run_cases
+from .results import store_result
 
 
 def checkpoint_path_for(material, checkpoint_dir="checkpoints"):
@@ -111,8 +111,8 @@ def run_sweep(
     # the crystal and keep them together in their own subdir.
     material = cases[0]["crystal"] if cases else "mixed"
     if checkpoint_path is None:
-        os.makedirs(checkpoint_dir, exist_ok=True)
         checkpoint_path = os.path.join(checkpoint_dir, f"{material}.pkl")
+    os.makedirs(os.path.dirname(checkpoint_path) or ".", exist_ok=True)
 
     def _crystal_of(rec_map):
         return next(iter(rec_map.values()))["case"]["crystal"]
@@ -220,7 +220,7 @@ def repair_brem_wide(
     the checkpoint afterwards (or use :func:`repair_checkpoint`).
     """
     import numpy as np
-    from montecarlo import (
+    from .montecarlo import (
         simulate_trajectories,
         mc_brem_spectrum,
         tilted_geometry,

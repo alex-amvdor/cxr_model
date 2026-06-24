@@ -6,16 +6,16 @@ All synthetic (a Gaussian line, no Monte-Carlo transport) so it stays fast."""
 import numpy as np
 import pytest
 
-from crystallography import CRYSTALS
-from montecarlo import (
+from cxr_model.crystallography import CRYSTALS
+from cxr_model.montecarlo import (
     aperture_fwhm_eV,
     beta_from_keV,
     eds_fwhm_eV,
     mosaic_fwhm_eV,
     mosaic_psi_rad,
 )
-from sweep import Sweep, build_cases
-from results import store_result
+from cxr_model.sweep import Sweep, build_cases
+from cxr_model.results import store_result
 
 LINE_GRID = np.arange(50.0, 300.0, 5.0)
 BREM_GRID = np.arange(0.0, 1000.0, 100.0)
@@ -137,8 +137,8 @@ def test_store_result_on_broadens_strictly():
 def test_plot_mosaic_comparison_runs_and_broadens():
     import matplotlib
     matplotlib.use("Agg")
-    from config import default_settings
-    from plots import plot_mosaic_comparison
+    from cxr_model.config import default_settings
+    from cxr_model.plots import plot_mosaic_comparison
 
     case = build_cases(_sweep("hopg"))[0]  # mosaic OFF; the plot re-derives grades
     res = {}

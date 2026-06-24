@@ -76,7 +76,8 @@ except Exception:
 # fallback, where fp32 buys no speed, always stays double.
 REAL = xp.float32 if (_GPU and os.environ.get("CXR_FP64") != "1") else xp.float64
 
-from crystallography import (
+from . import DATA_DIR
+from .crystallography import (
     ALPHA_FS,
     HBARC_EV_ANG,
     M_E_EV,
@@ -97,12 +98,7 @@ def _to_cpu(a):
     return np.asarray(a)
 
 
-MOTT_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "..",
-    "data",
-    "mott_transport_cross_sections",
-)
+MOTT_DIR = str(DATA_DIR / "mott_transport_cross_sections")
 A0_SQ_CM2 = 2.8002852e-17  # Bohr radius squared [cm^2] (NIST SRD 64 unit)
 
 # ---- element data for transport ---------------------------------------------
@@ -686,7 +682,7 @@ def mc_spectrum(
     # the basis elements' native Henke energies, which densely sample the edges --
     # a plain uniform mesh mis-resolves the edge jumps (tens of % at e.g. the
     # C K-edge). Window matches the keep mask below.
-    from atomic_form_factors import load_henke
+    from .atomic_form_factors import load_henke
 
     _pad = 0.2 * (float(E_grid_eV[-1]) - float(E_grid_eV[0]))
     _lo, _hi = float(E_grid_eV[0]) - _pad, float(E_grid_eV[-1]) + _pad

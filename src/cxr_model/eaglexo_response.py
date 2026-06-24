@@ -83,11 +83,10 @@ is W_Si = 3.65 eV/pair (each absorbed photon of energy E makes E/W_Si electrons)
 ### distance_m=) to your geometry before trusting absolute rates.
 """
 
-from pathlib import Path
-
 import numpy as np
 
-from crystallography import absorption_length_ang
+from . import DATA_DIR
+from .crystallography import absorption_length_ang
 
 # ---- silicon sensor physics (fixed material constants) -----------------------
 W_EHP_EV = 3.65  # mean energy to make one electron-hole pair [eV]
@@ -125,7 +124,7 @@ DARK_CURRENT_E_PER_S = 0.0005  # dark current [e-/pixel/s], deep-cooled (<0.0005
 FULL_WELL_E = 100_000.0  # full-well capacity [e-] (100 ke- typical)
 
 # QE table: digitized datasheet curve (energy_eV, QE_BN_%, QE_BEN_%)
-_QE_PATH = Path(__file__).parent.parent / "data" / "eaglexo_qe.csv"
+_QE_PATH = DATA_DIR / "eaglexo_qe.csv"
 
 
 # ---- geometry: the solid angle (knob 1) --------------------------------------
@@ -315,7 +314,7 @@ class EagleResponse:
             )
         det = spec * self.qe
         if self.resolve_energy:
-            from montecarlo import convolve_detector
+            from .montecarlo import convolve_detector
 
             dE = self.E[1] - self.E[0]
             fwhm = float(np.median(energy_fwhm_eV(self.E, self.n_pix)))

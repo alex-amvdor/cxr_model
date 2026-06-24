@@ -73,22 +73,23 @@ delta-function of the closed-form theory.
 ```
 scan.ipynb         RUNNER:  pick MATERIAL → Sweep → run_sweep → checkpoints/<material>.pkl
 analysis.ipynb     VIZ:     load that checkpoint → all figures (no sweeps here)
-scan.py            headless twin of scan.ipynb (guarded; runs a sweep non-interactively)
-remote.py          orchestrator: run scan.py on a GPU box over ssh, pull the checkpoint back
-export_pdf.py      headless analysis.ipynb → PDF export (run locally)
-src/               importable modules (both notebooks do sys.path.insert(0, "src"))
-data/              crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
+scan.py            root shim → cxr_model.scan (guarded; python scan.py, or cxr scan)
+export_pdf.py      root shim → cxr_model.export (analysis.ipynb → PDF, or cxr export)
+src/cxr_model/     importable package: physics modules + the cxr CLI entry point
+src/cxr_model/data/  crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
 checks/            validation scripts + notebooks (Feranchuk anchor, Zhai Fig 1c, kinematic audit)
+dev/               author-only helpers (remote.py — run scan.py on a personal GPU box over ssh)
 docs/              design notes & decision records (deferred features, library choices)
 checkpoints/       per-material results pickles (gitignored)
 results/           exported figures / PDFs (PNGs gitignored)
 ```
 
-Data paths resolve **relative to `src/`**, so imports work from any working
-directory. `*.pkl` checkpoints and `*.png` images are gitignored; notebooks are
-output-stripped on commit by `nbstripout` via `.gitattributes`.
+Packaged data resolves via `cxr_model.DATA_DIR`, so imports work from any working
+directory and the data travels with an installed wheel. `*.pkl` checkpoints and
+`*.png` images are gitignored; notebooks are output-stripped on commit by
+`nbstripout` via `.gitattributes`.
 
-### The `src/` modules
+### The `cxr_model` package modules
 
 | Module | Responsibility |
 |---|---|
@@ -113,11 +114,13 @@ lockfile (`uv.lock`) and requires **Python ≥ 3.14**.
 ```bash
 git clone https://github.com/alex-amvdor/cxr_model.git
 cd cxr_model
-uv sync          # creates .venv and installs the locked dependencies
+uv sync          # .venv + locked deps + an editable install of cxr_model (the cxr CLI)
 ```
 
 Run anything with `uv run …` (or activate `.venv`). Note that a bare `python` on
 your PATH will **not** have the dependencies — always use `uv run python …`.
+`uv sync` installs the package, so `import cxr_model` works with no path hacks and
+the `cxr` console script is on the venv PATH (`uv run cxr --help`).
 
 **GPU is optional.** `cupy-cuda13x` (CUDA 13) is a dependency, but it imports
 cleanly even with no usable GPU and the code **falls back to CPU automatically**
@@ -152,33 +155,32 @@ notebooks pick it up.
 ### Headless / non-interactive
 
 ```bash
-uv run python scan.py <material> [--quick] [--workers N]
+cxr scan <material> [--quick] [--workers N]      # installed console script
+uv run python scan.py <material> [--quick]       # identical, via the root shim
 ```
 
 `--quick` runs a tiny smoke-test grid into an isolated `<material>_quick.pkl`.
-(`scan.py` has the required `if __name__ == "__main__"` guard — see *Notes*.)
+(The entry point has the required `if __name__ == "__main__"` guard — see *Notes*.)
 
-### Remote compute, local viz
+### Running on a cluster
 
-If you have a GPU box for the sweeps and a laptop for the matplotlib/PDF
-toolchain, `remote.py` syncs the code up, runs `scan.py` on the box over ssh, and
-pulls the checkpoint back:
+`cxr scan` is headless and writes a single `checkpoints/<material>.pkl`, so it
+drops into any batch scheduler — install once, then submit one job per material.
+See [`docs/running-on-a-cluster.md`](docs/running-on-a-cluster.md) for a SLURM
+`sbatch` template (including a job-array sweep over several materials). Pull the
+checkpoints back and do all the matplotlib/PDF work locally.
 
-```bash
-uv run python remote.py scan <material>          # run on the box, pull the checkpoint
-uv run python remote.py scan <material> --quick  # tiny smoke test
-uv run python remote.py pull <material>          # just fetch an existing checkpoint
-```
-
-Then open `analysis.ipynb` (same `MATERIAL`) or run `export_pdf.py` locally. The
-box defaults to ssh host `qlmc`; override with `CXR_REMOTE_{HOST,DIR,UV}`. Don't
-render PDFs on the box — pull the checkpoint and render locally.
+> The author's own loop uses a small personal helper,
+> [`dev/remote.py`](dev/remote.py), to push the working tree to one GPU box (ssh
+> host `qlmc`, overridable via `CXR_REMOTE_{HOST,DIR,UV}`) and pull the checkpoint
+> back. It is **not** part of the installed package and is specific to that setup;
+> the cluster recipe above is the portable path.
 
 ---
 
 ## Materials
 
-Crystals are defined in [`data/crystal_structures.toml`](data/crystal_structures.toml)
+Crystals are defined in [`src/cxr_model/data/crystal_structures.toml`](src/cxr_model/data/crystal_structures.toml)
 (lattice + basis). Current catalog (TOML keys):
 
 | Key | Material | Structure |
@@ -277,7 +279,7 @@ soft lines.
 - `feranchuk_vs_zhai_check.py` — analytic vs. MC pipeline agreement.
 - `kinematic_validity_check.py` — DYN/recoil audit + van-der-Waals merit table.
 - `zhai_fig1c_check.ipynb`, `cxr_analysis_feranchuk.ipynb` — figure reproductions.
-- `src/_compile_nb.py` — compiles every notebook's code cells (syntax smoke test).
+- `src/cxr_model/_compile_nb.py` — compiles every notebook's code cells (syntax smoke test).
 
 ### What remains to be validated / approximated
 
@@ -306,14 +308,14 @@ numbers:
 
 - **Atomic scattering:** Waasmaier–Kirfel `f0` + Chantler/FFAST `f', f''`, supplied on
   demand by **xraydb** for any element (no per-element table to maintain). The legacy
-  Henke/CXRO `.nff` CSVs in `data/atomic_scattering_factors/` are now unused (kept for
+  Henke/CXRO `.nff` CSVs in `src/cxr_model/data/atomic_scattering_factors/` are now unused (kept for
   provenance / A-B comparison) — [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md).
 - **Elastic transport:** NIST SRD 64 relativistic Mott *transport* cross sections
-  (`data/mott_transport_cross_sections/`) calibrate the screened-Rutherford
+  (`src/cxr_model/data/mott_transport_cross_sections/`) calibrate the screened-Rutherford
   α(E) per element; free paths from the Browning fit. Elements without a NIST
   table fall back to the analytic screening with a one-time warning.
-- **Crystal structures:** `data/crystal_structures.toml` (lattice + basis).
-- **Detector QE:** `data/eaglexo_qe.csv`; Timepix Si response computed from Henke `f2`.
+- **Crystal structures:** `src/cxr_model/data/crystal_structures.toml` (lattice + basis).
+- **Detector QE:** `src/cxr_model/data/eaglexo_qe.csv`; Timepix Si response computed from Henke `f2`.
 
 ---
 

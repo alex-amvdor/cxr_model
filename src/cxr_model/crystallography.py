@@ -28,7 +28,8 @@ from pathlib import Path
 
 import numpy as np
 
-from atomic_form_factors import (
+from . import DATA_DIR
+from .atomic_form_factors import (
     cromer_mann_f0,
     atomic_form_factor,
     henke_dispersion,
@@ -148,7 +149,7 @@ def reciprocal_g_vector(hkl, lattice):
 
 # ---- crystal database (crystal_structures.toml) ------------------------------
 def load_crystals(
-    path=Path(__file__).parent.parent / "data" / "crystal_structures.toml",
+    path=DATA_DIR / "crystal_structures.toml",
 ):
     """
     Load the crystal database. Each entry becomes

@@ -20,8 +20,8 @@ notebooks pick it up.
 
 import numpy as np
 
-from sweep import Sweep
-from results import Settings
+from .sweep import Sweep
+from .results import Settings
 
 # When the azimuth is swept, collapse it: for each (polar tilt, energy) keep only
 # the azimuth with the highest spectral peak. False -> show every azimuth.

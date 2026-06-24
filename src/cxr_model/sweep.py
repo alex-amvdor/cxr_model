@@ -26,7 +26,7 @@ from typing import Optional, Sequence, Union
 
 import numpy as np
 
-from crystallography import CRYSTALS, dominant_reflections
+from .crystallography import CRYSTALS, dominant_reflections
 
 # ---- Timepix3 quad geometry (fixed hardware) --------------------------------
 TIMEPIX3_PIXEL_PITCH_M = 55e-6

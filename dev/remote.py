@@ -10,23 +10,23 @@ files, and you never need a PDF toolchain on the lab box.
 
 One-shot (foreground, holds the ssh session open until the sweep finishes):
 
-    python remote.py scan mose2               # sync code up, run sweep, pull checkpoint
-    python remote.py scan mose2 --quick       # tiny grid smoke test
-    python remote.py scan mose2 --no-sync     # skip the code upload (code unchanged)
-    python remote.py pull mose2 wse2          # fetch one or more existing checkpoints
-    python remote.py sync                     # only push the current code
+    python dev/remote.py scan mose2               # sync code up, run sweep, pull checkpoint
+    python dev/remote.py scan mose2 --quick       # tiny grid smoke test
+    python dev/remote.py scan mose2 --no-sync     # skip the code upload (code unchanged)
+    python dev/remote.py pull mose2 wse2          # fetch one or more existing checkpoints
+    python dev/remote.py sync                     # only push the current code
 
 Detached QUEUE (survives ssh disconnect -- launch, walk away, reconnect later):
 
-    python remote.py start mose2 wse2 mos2    # queue several materials, run detached
-    python remote.py start mose2 --follow     # launch, then track it live
-    python remote.py start mose2 --quick      # detached quick smoke test
-    python remote.py attach [JOBID]           # (re)connect + track live (default: latest)
-    python remote.py jobs                     # list jobs on the box + their state
-    python remote.py status [JOBID]           # one job: meta + state + log tail (default: latest)
-    python remote.py logs [JOBID] --follow    # tail the remote log (live)
-    python remote.py stop JOBID               # SIGTERM a running job's process group
-    python remote.py pull mose2 wse2 mos2     # fetch the finished checkpoints
+    python dev/remote.py start mose2 wse2 mos2    # queue several materials, run detached
+    python dev/remote.py start mose2 --follow     # launch, then track it live
+    python dev/remote.py start mose2 --quick      # detached quick smoke test
+    python dev/remote.py attach [JOBID]           # (re)connect + track live (default: latest)
+    python dev/remote.py jobs                     # list jobs on the box + their state
+    python dev/remote.py status [JOBID]           # one job: meta + state + log tail (default: latest)
+    python dev/remote.py logs [JOBID] --follow    # tail the remote log (live)
+    python dev/remote.py stop JOBID               # SIGTERM a running job's process group
+    python dev/remote.py pull mose2 wse2 mos2     # fetch the finished checkpoints
 
 `start` returns immediately: it ships the code, writes a small runner under
 <remote>/jobs/<jobid>/ and launches it with `nohup setsid` so it keeps running
@@ -60,7 +60,10 @@ from pathlib import Path
 HOST = os.environ.get("CXR_REMOTE_HOST", "qlmc")
 REMOTE_DIR = os.environ.get("CXR_REMOTE_DIR", "/home/aamador/dev/cxr_model")
 REMOTE_UV = os.environ.get("CXR_REMOTE_UV", "/home/aamador/.local/bin/uv")
-LOCAL_ROOT = Path(__file__).resolve().parent
+# repo root = two levels up from dev/remote.py. remote.py orchestrates the
+# *checkout* (it tars the working tree up to the box), so it resolves paths
+# against the repo root, not its own dev/ dir.
+LOCAL_ROOT = Path(__file__).resolve().parents[1]
 
 # detached-job bookkeeping lives under <REMOTE_DIR>/jobs/<jobid>/ on the box
 # (gitignored there): run.sh, meta, pid, state, log. One subdir per `start`.
@@ -71,8 +74,9 @@ JOBS_SUBDIR = "jobs"
 # injection through the material argument.
 _MATERIAL_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
-# what `sync` ships up: the code that changes, not data/ (static, already there)
-# or checkpoints/ (the output we pull back the other way).
+# what `sync` ships up: the code that changes (the src/ package now also carries
+# data/, so it travels too), plus the root scan.py shim the box invokes and
+# pyproject.toml. Not checkpoints/ (the output we pull back the other way).
 SYNC_PATHS = ["src", "scan.py", "pyproject.toml"]
 
 # text extensions whose CRLF is normalized to LF before tarring (see _add_to_tar):
@@ -261,9 +265,9 @@ def start_queue(materials, quick=False, workers=None, no_sync=False, dry_run=Fal
     print(
         f"\nstarted job {jobid} on {HOST}: {' '.join(materials)}"
         f"{' (quick)' if quick else ''}\n"
-        f"  watch:  python remote.py status {jobid}\n"
-        f"  logs:   python remote.py logs {jobid} --follow\n"
-        f"  pull:   python remote.py pull {' '.join(stems)}   (when state is 'done')"
+        f"  watch:  python dev/remote.py status {jobid}\n"
+        f"  logs:   python dev/remote.py logs {jobid} --follow\n"
+        f"  pull:   python dev/remote.py pull {' '.join(stems)}   (when state is 'done')"
     )
     return jobid
 
@@ -335,9 +339,9 @@ def _latest_jobid():
 def _disconnect_hint(jobid):
     print(
         f"\n\ndisconnected from job {jobid} -- it keeps running on {HOST}.\n"
-        f"  reconnect: python remote.py attach {jobid}\n"
-        f"  status:    python remote.py status {jobid}\n"
-        f"  stop:      python remote.py stop   {jobid}"
+        f"  reconnect: python dev/remote.py attach {jobid}\n"
+        f"  status:    python dev/remote.py status {jobid}\n"
+        f"  stop:      python dev/remote.py stop   {jobid}"
     )
 
 
@@ -388,8 +392,8 @@ def stop_job(jobid):
     _run(["ssh", HOST, remote])
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="remote.py", description=__doc__.splitlines()[1])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser(
@@ -437,7 +441,7 @@ def main():
 
     sub.add_parser("sync", help="push the current code to the box only")
 
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.cmd == "sync":
         sync_code()
     elif args.cmd == "pull":

@@ -32,7 +32,7 @@ Everything takes ``results`` + a :class:`results.Settings` explicitly.
 import numpy as np
 import matplotlib.pyplot as plt
 
-from montecarlo import (
+from .montecarlo import (
     convolve_detector,
     detector_efficiency,
     simulate_trajectories,
@@ -43,7 +43,7 @@ from montecarlo import (
     mosaic_fwhm_eV,
     mosaic_psi_rad,
 )
-from results import (
+from .results import (
     detected_background,
     records,
     best_azimuth,
@@ -52,8 +52,8 @@ from results import (
     selection_score,
     PER_NA,
 )
-import timepix_response as tpx
-import eaglexo_response as eag
+from . import timepix_response as tpx
+from . import eaglexo_response as eag
 
 COLORS = ["r", "y", "g", "b", "m", "c", "k", "orange", "purple", "brown"]
 
