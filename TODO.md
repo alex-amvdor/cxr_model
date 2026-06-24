@@ -1,8 +1,8 @@
 # TODO / Backlog
 
-Durable backlog for `cxr_model`. The publication-readiness refinement epic (the
-PI's "public-ready codes" request) is tracked separately in the internal
-[`REFINEMENT_PLAN.md`](REFINEMENT_PLAN.md) (delete that file once the repo is published).
+Durable backlog for `cxr_model`. The publication-readiness refinement epic
+(Phases A–E) is **complete** — see [`REFINEMENT_PLAN.md`](REFINEMENT_PLAN.md) (an
+internal record; delete it when the repo is published).
 
 Items are kept on branches, not `main`, until finished — the PI publishes
 *finished* code. Roughly ordered by value to the project goal.
@@ -19,12 +19,12 @@ Items are kept on branches, not `main`, until finished — the PI publishes
   and full-stack self-absorption. Status: **slice 1 (cross-stack self-absorption)
   is on `main`**; **slice 2 (multilayer electron transport)** is on branch
   `feature/multilayer-materials`. Remaining: **slice 3** (coherent lines from a
-  *crystalline* substrate) + quantitative validation vs a measured dataset. Only
-  1T′-MoTe₂ exact coordinates remain blocked on a reliable CIF. Full design:
-  [`docs/multilayer-materials.md`](docs/multilayer-materials.md).
+  *crystalline* substrate) + quantitative validation vs a measured dataset. Full
+  design: [`docs/multilayer-materials.md`](docs/multilayer-materials.md).
 
 - **pyelsepa / ELSEPA transport.** Evaluate replacing the hardcoded NIST Mott
-  transport tables in `data/mott_transport_cross_sections/` with on-demand ELSEPA.
+  transport tables in `src/cxr_model/data/mott_transport_cross_sections/` with
+  on-demand ELSEPA.
   A docker image is built locally at `C:\dev\pyelsepa\`
   ([github.com/eScatter/pyelsepa](https://github.com/eScatter/pyelsepa)). NB: this
   is *electron*-scattering data — separate from the xraydb (photon) migration;

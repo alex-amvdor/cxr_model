@@ -1,11 +1,10 @@
 # CLAUDE.md
 
-Agent / contributor operating guide for `cxr_model`. The user-facing
-documentation — what the code does, the physics, installation, materials,
-detectors, validation, provenance, references — lives in
-[`README.md`](README.md). Design notes are in [`docs/`](docs/); the feature
-backlog is in [`TODO.md`](TODO.md). This file holds only working conventions:
-how to build/test/run, how to extend the code, and the non-obvious pitfalls.
+Agent / contributor operating guide for `cxr_model`. User-facing docs (physics,
+install, materials, detectors, validation, provenance) live in
+[`README.md`](README.md); design notes in [`docs/`](docs/); the backlog in
+[`TODO.md`](TODO.md). This file holds only working conventions: build/test/run,
+how to extend the code, and the non-obvious pitfalls.
 
 ## Behavioral guidelines
 

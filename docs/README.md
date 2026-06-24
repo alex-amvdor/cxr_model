@@ -1,21 +1,19 @@
 # Design notes & decision records
 
-In-depth notes on **deferred features** and **technology choices** for `cxr_model`.
-These complement, not duplicate, the two top-level docs:
+In-depth "why / how / trade-offs" write-ups that would bloat the top-level docs.
+They complement:
 
-- [`../README.md`](../README.md) — user-facing overview, how to run, current physics, and
-  **what remains to be validated**.
-- [`../CLAUDE.md`](../CLAUDE.md) — contributor conventions, module responsibilities, the
-  "adding a material" checklist, and the TODO / Done log.
-
-This folder is for the longer "why / how / pros / cons / effort" write-ups that would
-bloat those files.
+- [`../README.md`](../README.md) — user-facing overview, physics, install, validation.
+- [`../CLAUDE.md`](../CLAUDE.md) — contributor conventions, the module map, and the
+  "adding a material" checklist.
+- [`../TODO.md`](../TODO.md) — the feature / patch backlog.
 
 | Note | Topic | Status |
 |---|---|---|
-| [crystal-mosaicity.md](crystal-mosaicity.md) | The analytic mosaic broadening (shipped) and the exact Monte-Carlo route (designed, not implemented) | analytic ✅ · MC ⏳ |
-| [detector-solid-angle.md](detector-solid-angle.md) | Single-angle approximation (shipped) vs. a first-principles solid-angle integral (designed, not implemented) | ⏳ |
-| [multilayer-materials.md](multilayer-materials.md) | Film-on-substrate stacks: cross-stack self-absorption, per-layer radiation, multilayer electron transport (designed, not implemented) | ⏳ |
-| [atomic-data-sources.md](atomic-data-sources.md) | Hard-coded Henke + Cromer-Mann data vs. an external library (xraydb / xraylib / …); evaluation + recommendation | evaluated, not adopted |
+| [running-on-a-cluster.md](running-on-a-cluster.md) | Headless `cxr scan` under SLURM (`sbatch` + job-array templates) | guide |
+| [crystal-mosaicity.md](crystal-mosaicity.md) | Analytic mosaic line-broadening (shipped) vs. the exact Monte-Carlo route | analytic ✅ · MC ⏳ |
+| [detector-solid-angle.md](detector-solid-angle.md) | Single-direction approximation (shipped) vs. a first-principles solid-angle integral | ⏳ |
+| [multilayer-materials.md](multilayer-materials.md) | Film-on-substrate stacks: cross-stack self-absorption, per-layer radiation, multilayer transport | slice 1 ✅ (main) · 2 ✅ (branch) · 3 ⏳ |
+| [atomic-data-sources.md](atomic-data-sources.md) | Hard-coded Henke/Cromer–Mann tables vs. an external library (xraydb) | adopted ✅ |
 
 Legend: ✅ implemented · ⏳ designed, not implemented.
