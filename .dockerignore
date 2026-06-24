@@ -1,0 +1,32 @@
+# Keep the build context small and reproducible — the image is built from the
+# lockfile, not from host state.
+.git
+.gitignore
+.venv
+**/__pycache__/
+*.py[codz]
+*.so
+
+# Generated artifacts / run outputs
+checkpoints/
+*.pkl
+*.png
+*.pdf
+*.html
+docs/_build/
+docs/_autosummary/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+**/.ipynb_checkpoints/
+jobs/
+
+# Editor / agent / CI cruft
+.claude/
+.vscode/
+.idea/
+
+# Don't ship these into the image
+Dockerfile
+.dockerignore
+REFINEMENT_PLAN.md

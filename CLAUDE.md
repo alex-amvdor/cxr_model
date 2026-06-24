@@ -47,6 +47,13 @@ Bias toward caution over speed; for trivial tasks use judgment.
 - **Notebooks:** `scan.ipynb` (run a sweep) → `analysis.ipynb` (all viz). Both
   share the per-material grids in `src/cxr_model/config.py` — edit a grid there once and
   both pick it up. Notebooks are output-stripped on commit by `nbstripout`.
+- **Docs site (optional):** `uv run --group docs sphinx-build -b html docs docs/_build/html`
+  → open `docs/_build/html/index.html`. MyST renders `docs/*.md`; autosummary builds
+  the API from docstrings (config in `docs/conf.py`). The `docs` dependency-group is
+  not installed by default.
+- **Docker (CPU):** `docker build -t cxr-model .` then
+  `docker run --rm cxr-model pytest -q`. CPU-only (uv base + locked deps); the
+  `Dockerfile` header documents the GPU base-swap.
 - **Windows:** the Bash tool mangles `C:\…` paths and `&&` chains — use forward
   slashes (`C:/Users/…`) or prefer the dedicated Glob / Read / Grep / Edit tools.
 

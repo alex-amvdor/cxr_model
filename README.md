@@ -134,6 +134,21 @@ Launch the notebooks with:
 uv run jupyter lab
 ```
 
+### Docker (CPU)
+
+A `Dockerfile` builds a CPU-only image (uv + the locked deps), so you can run the
+sweeps and the test suite without setting up a local environment:
+
+```bash
+docker build -t cxr-model .
+docker run --rm cxr-model pytest -q                                   # CPU safety net
+docker run --rm -v "$PWD/checkpoints:/app/checkpoints" cxr-model cxr scan silicon --quick
+```
+
+The container falls back to CPU automatically. A GPU image (NVIDIA runtime +
+matching CUDA/cupy) is more involved and not shipped yet; the `Dockerfile` is
+structured so a GPU build is a base-image swap (see its header comment).
+
 ---
 
 ## Quickstart

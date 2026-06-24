@@ -97,7 +97,7 @@ Replace the post-hoc Gaussian with a true incoherent average **inside** `mc_spec
 ### Cons
 
 - **Cost.** It multiplies the GPU hot loop (the per-reflection sinc² matmul, see the perf
-  note in [../CLAUDE.md](../CLAUDE.md)) by `K`. With CuPy present the spectrum runs
+  note in [CLAUDE.md](https://github.com/alex-amvdor/cxr_model/blob/main/CLAUDE.md)) by `K`. With CuPy present the spectrum runs
   **serially** on one CUDA context, so `K` is a direct wall-clock multiplier with no
   parallelism to hide it. Prefer looping orientations (flat device memory) over a stacked
   g-axis (K× memory). If ever combined with the solid-angle integral the cost is
