@@ -115,6 +115,9 @@ TRANSPORT_ELEMENTS = {
     "Zr": {"Z": 40, "A": 91.224, "J_keV": 0.393},
     "Hf": {"Z": 72, "A": 178.49, "J_keV": 0.705},
     "Pt": {"Z": 78, "A": 195.08, "J_keV": 0.790},
+    # substrate elements (SiO2 / Al2O3); J = ICRU 37 mean excitation energy
+    "O": {"Z": 8, "A": 15.999, "J_keV": 0.095},
+    "Al": {"Z": 13, "A": 26.982, "J_keV": 0.166},
 }
 
 
@@ -440,6 +443,7 @@ def simulate_trajectories(
     elastic_model="mott",
     beam_dir=None,
     composition=None,
+    layers=None,
 ):
     """
     Transport Ne electrons of energy E0_keV [keV] into a slab 0<=z<=thickness.
@@ -464,13 +468,54 @@ def simulate_trajectories(
     additive over elements; the scattering element at each collision is
     chosen with probability n_i sigma_i / sum.
 
+    layers: optional film-on-substrate stack
+    [(z_top, z_bot, composition), ...] (top/entrance first, contiguous, deepest
+    z_bot = total thickness). Each electron's free path / stopping / scattering
+    element switch by the layer it is currently in; a flight is truncated at an
+    internal boundary (no collision -- the electron continues into the neighbor),
+    so the substrate's higher-Z backscatter feeds electron path back into the
+    film. None -> a single layer over [0, thickness_ang] (the old single-material
+    transport, BIT-FOR-BIT). When given, thickness_ang is superseded by the
+    stack's total thickness.
+
     Returns dict of per-segment arrays:
-      "r_mid" (M,3) [Ang], "v_hat" (M,3), "L_ang" (M,), "E_keV" (M,)
-    and diagnostics: "n_backscattered", "n_transmitted", "n_stopped".
+      "r_mid" (M,3) [Ang], "v_hat" (M,3), "L_ang" (M,), "E_keV" (M,),
+      "t_ang" (M,), "elec_id" (M,), "layer" (M,) [emitting layer index]
+    and diagnostics: "n_backscattered", "n_transmitted", "n_stopped", "n_layers".
     """
-    comp = _normalize_composition(element, n_atoms_per_ang3, composition)
-    Zs = [TRANSPORT_ELEMENTS[el]["Z"] for el, _ in comp]
-    n_cm3s = [n_i * 1e24 for _, n_i in comp]
+    # Build the layer stack: explicit `layers` (film-on-substrate) overrides;
+    # else a single layer spanning the slab (bit-for-bit the old transport).
+    if layers is None:
+        layers = [
+            (0.0, float(thickness_ang),
+             _normalize_composition(element, n_atoms_per_ang3, composition))
+        ]
+    z_total = float(layers[-1][1])
+    n_layers = len(layers)
+    L_comp = [[(el, float(n)) for el, n in lc] for (_, _, lc) in layers]
+    L_Zs = [[TRANSPORT_ELEMENTS[el]["Z"] for el, _ in lc] for lc in L_comp]
+    L_ncm3 = [[n * 1e24 for _, n in lc] for lc in L_comp]
+    L_top = [float(a) for (a, _, _) in layers]
+    L_bot = [float(b) for (_, b, _) in layers]
+    internal_bounds = np.array(L_bot[:-1], dtype=float)  # between consecutive layers
+    EPS = 1e-6  # nudge across an internal boundary so the layer lookup is unambiguous
+
+    def _scatter_rates(Ea, Zs, n_cm3s):
+        """Per-element elastic scattering rates [1/cm] at energies Ea (one layer)."""
+        rates = []
+        for Z_i, n_i in zip(Zs, n_cm3s):
+            if elastic_model == "mott":
+                sig_i = _sigma_browning_cm2(Z_i, Ea)
+            elif elastic_model == "sr":
+                a = _alpha_sr_joy(Z_i, Ea)
+                sig_i = (
+                    5.21e-21 * Z_i**2 / Ea**2 * 4.0 * np.pi
+                    / (a * (1.0 + a)) * ((Ea + 511.0) / (Ea + 1024.0)) ** 2
+                )
+            else:
+                raise ValueError("elastic_model must be 'mott' or 'sr'")
+            rates.append(n_i * sig_i)
+        return np.array(rates)  # (n_elements, m)
 
     rng = np.random.default_rng(seed)
     pos = np.zeros((Ne, 3))
@@ -490,113 +535,115 @@ def simulate_trajectories(
     # penetration / electron-lifetime plots (-> fs via c = 2997.92 Ang/fs).
     clock = np.zeros(Ne)
 
-    seg_mid, seg_dir, seg_len, seg_E, seg_t0, seg_id = [], [], [], [], [], []
+    seg_mid, seg_dir, seg_len, seg_E, seg_t0, seg_id, seg_lay = [], [], [], [], [], [], []
 
     # Event-driven loop: every iteration is one FREE FLIGHT + one ELASTIC
     # COLLISION for every still-alive electron, executed in lockstep (pure
     # vectorization -- electrons are independent, so synchronizing them is
     # exact). There is no time step and no discretization parameter: flight
-    # lengths are sampled from the physical free-path distribution.
+    # lengths are sampled from the physical free-path distribution. With a
+    # multilayer stack the alive electrons are grouped by their CURRENT layer
+    # each iteration so each uses that layer's free path / stopping / scattering;
+    # a single layer is one group, so that path stays bit-for-bit identical.
     for _ in range(max_steps):
         if not alive.any():
             break
         idx = np.flatnonzero(alive)  # indices of electrons still in play
-        Ea = E[idx]  # their kinetic energies [keV]
+        if n_layers == 1:
+            lay_all = None  # everyone is in layer 0
+        else:
+            lay_all = np.clip(
+                np.searchsorted(internal_bounds, pos[idx, 2], side="right"),
+                0, n_layers - 1,
+            )
+        for L in range(n_layers):
+            grp = idx if lay_all is None else idx[lay_all == L]
+            if grp.size == 0:
+                continue
+            comp = L_comp[L]
+            Zs = L_Zs[L]
+            n_cm3s = L_ncm3[L]
+            z_top_L, z_bot_L = L_top[L], L_bot[L]
+            Ea = E[grp]  # kinetic energies [keV]
 
-        # -- 1. distance to the next elastic collision -------------------------
-        # Exponential free path: P(s) = exp(-s/lambda)/lambda, with the total
-        # rate additive over elements: 1/lambda = sum_i n_i sigma_i(E).
-        rates = []  # per-element scattering rates [1/cm]
-        for (el_i, _), Z_i, n_i in zip(comp, Zs, n_cm3s):
-            if elastic_model == "mott":
-                sig_i = _sigma_browning_cm2(Z_i, Ea)  # Browning fit to Mott
-            elif elastic_model == "sr":
-                a = _alpha_sr_joy(Z_i, Ea)
-                sig_i = (
-                    5.21e-21
-                    * Z_i**2
-                    / Ea**2
-                    * 4.0
-                    * np.pi
-                    / (a * (1.0 + a))
-                    * ((Ea + 511.0) / (Ea + 1024.0)) ** 2
-                )
-            else:
-                raise ValueError("elastic_model must be 'mott' or 'sr'")
-            rates.append(n_i * sig_i)
-        rates = np.array(rates)  # (n_elements, m)
-        lam_ang = 1e8 / rates.sum(axis=0)  # mean free path [Ang]
-        step = -lam_ang * np.log(rng.random(idx.size))  # sampled flight [Ang]
+            # -- 1. distance to the next elastic collision (this layer) ---------
+            # Exponential free path P(s)=exp(-s/lambda)/lambda, total rate
+            # additive over the layer's elements: 1/lambda = sum_i n_i sigma_i(E).
+            rates = _scatter_rates(Ea, Zs, n_cm3s)  # (n_elements, m) [1/cm]
+            lam_ang = 1e8 / rates.sum(axis=0)  # mean free path [Ang]
+            step = -lam_ang * np.log(rng.random(grp.size))  # sampled flight [Ang]
 
-        d = dirs[idx]  # current unit direction of each electron
-        p = pos[idx]  # current position [Ang]
+            d = dirs[grp]  # current unit direction of each electron
+            p = pos[grp]  # current position [Ang]
+            dz = d[:, 2]
+            pz = p[:, 2]
 
-        # -- 2. slab-boundary truncation ----------------------------------------
-        # The flight is the ray r(s') = p + s' d. It crosses the entrance face
-        # z=0 at s'_top = p_z / (-d_z)   (only reachable if d_z < 0), and the
-        # back face z=thickness at s'_bot = (t - p_z)/d_z (only if d_z > 0).
-        # If the sampled flight overshoots a face, truncate it there and flag
-        # the electron as exited (vacuum outside -> no re-entry).
-        exit_top = (d[:, 2] < 0) & (p[:, 2] + step * d[:, 2] < 0.0)
-        exit_bot = (d[:, 2] > 0) & (p[:, 2] + step * d[:, 2] > thickness_ang)
-        s_top = np.where(d[:, 2] < 0, p[:, 2] / (-d[:, 2] + 1e-300), np.inf)
-        s_bot = np.where(
-            d[:, 2] > 0, (thickness_ang - p[:, 2]) / (d[:, 2] + 1e-300), np.inf
-        )
-        step = np.where(exit_top, s_top, step)
-        step = np.where(exit_bot, s_bot, step)
+            # -- 2. truncate at THIS layer's faces ------------------------------
+            # The entrance face (z_top==0) and back face (z_bot==z_total) are
+            # exits (vacuum -> no re-entry); an INTERNAL boundary instead hands
+            # the electron to the neighbor layer with NO collision (it continues
+            # straight and re-samples its free path in that layer next iteration).
+            cross_up = (dz < 0) & (pz + step * dz < z_top_L)
+            cross_dn = (dz > 0) & (pz + step * dz > z_bot_L)
+            s_up = np.where(dz < 0, (pz - z_top_L) / (-dz + 1e-300), np.inf)
+            s_dn = np.where(dz > 0, (z_bot_L - pz) / (dz + 1e-300), np.inf)
+            step = np.where(cross_up, s_up, step)
+            step = np.where(cross_dn, s_dn, step)
+            exit_top = cross_up & (z_top_L <= 0.0)  # exited entrance (backscatter)
+            exit_bot = cross_dn & (z_bot_L >= z_total)  # exited back (transmit)
 
-        # -- 3. record the segment (the radiation source list) ------------------
-        # midpoint -> escape-absorption path; direction -> v.g, v.n in the
-        # amplitudes; length -> interaction time t_L; START energy -> beta
-        # (biases beta high by at most the per-segment loss, <0.5%).
-        seg_mid.append(p + 0.5 * step[:, None] * d)
-        seg_dir.append(d.copy())
-        seg_len.append(step)
-        seg_E.append(Ea.copy())
-        seg_t0.append(clock[idx].copy())  # age at segment START [Ang, c=1]
-        seg_id.append(idx.copy())  # which electron emitted this segment
+            # -- 3. record the segment (the radiation source list) --------------
+            # midpoint -> escape-absorption path; direction -> v.g, v.n in the
+            # amplitudes; length -> interaction time t_L; START energy -> beta.
+            seg_mid.append(p + 0.5 * step[:, None] * d)
+            seg_dir.append(d.copy())
+            seg_len.append(step)
+            seg_E.append(Ea.copy())
+            seg_t0.append(clock[grp].copy())  # age at segment START [Ang, c=1]
+            seg_id.append(grp.copy())  # which electron emitted this segment
+            seg_lay.append(np.full(grp.size, L, dtype=np.int16))  # emitting layer
 
-        # -- 4. advance: straight line + continuous slowing-down ----------------
-        # Positions move the full flight; energy drains deterministically along
-        # it (CSDA: Joy-Luo modified Bethe, additive over elements; no
-        # straggling, no fast secondaries). The clock advances by L/beta at the
-        # segment's start speed (the <0.5% per-segment energy loss is negligible).
-        pos[idx] = p + step[:, None] * d
-        E[idx] = Ea + _dEds_compound(comp, Ea) * step
-        clock[idx] += step / beta_from_keV(Ea)
+            # -- 4. advance: straight line + continuous slowing-down ------------
+            # Energy drains deterministically along the flight (CSDA: Joy-Luo
+            # modified Bethe for THIS layer's composition; no straggling). The
+            # clock advances by L/beta at the segment's start speed.
+            pos[grp] = p + step[:, None] * d
+            E[grp] = Ea + _dEds_compound(comp, Ea) * step
+            clock[grp] += step / beta_from_keV(Ea)
 
-        # -- 5. kill exited / exhausted electrons --------------------------------
-        died = exit_top | exit_bot | (E[idx] < E_cut_keV)
-        n_back += int(exit_top.sum())  # exited the entrance face (backscattered)
-        n_trans += int(exit_bot.sum())  # punched through the back face
-        alive[idx[died]] = False
+            # -- 5. kill exited / exhausted; pass internal crossers on ----------
+            died = exit_top | exit_bot | (E[grp] < E_cut_keV)
+            n_back += int(exit_top.sum())  # exited the entrance face
+            n_trans += int(exit_bot.sum())  # punched through the back face
+            alive[grp[died]] = False
+            crossed_internal = (cross_up | cross_dn) & ~died  # reached a layer seam
+            if crossed_internal.any():
+                ci = grp[crossed_internal]
+                pos[ci, 2] += np.sign(dirs[ci, 2]) * EPS  # nudge just into neighbor
 
-        # -- 6. elastic collision: new direction for the survivors ---------------
-        # The scattering ELEMENT is chosen with probability n_i sigma_i / sum
-        # (energy-dependent, evaluated at the pre-flight energy); then the
-        # polar angle comes from that element's screened-Rutherford inversion
-        # (alpha(E) Mott-calibrated or analytic). Azimuth uniform; energy
-        # unchanged (elastic).
-        srv_mask = ~died
-        srv = idx[srv_mask]
-        if srv.size:
-            cos_t = np.empty(srv.size)
-            if len(comp) == 1:
-                cos_t = _sample_cos_theta(Zs[0], E[srv], rng, elastic_model, comp[0][0])
-            else:
-                p_el = rates[:, srv_mask] / rates[:, srv_mask].sum(axis=0)
-                u = rng.random(srv.size)
-                cum = np.cumsum(p_el, axis=0)
-                which = (u[None, :] > cum).sum(axis=0)  # element index
-                for i_el, (el_i, _) in enumerate(comp):
-                    m = which == i_el
-                    if m.any():
-                        cos_t[m] = _sample_cos_theta(
-                            Zs[i_el], E[srv][m], rng, elastic_model, el_i
-                        )
-            phi = 2.0 * np.pi * rng.random(srv.size)
-            dirs[srv] = _rotate_directions(dirs[srv], cos_t, phi)
+            # -- 6. elastic collision: scatter the FULL-FLIGHT survivors --------
+            # (truncated flights did not collide). The scattering ELEMENT is
+            # chosen with probability n_i sigma_i / sum; the polar angle from that
+            # element's screened-Rutherford inversion; azimuth uniform; E unchanged.
+            full = ~(cross_up | cross_dn) & ~died
+            srv = grp[full]
+            if srv.size:
+                cos_t = np.empty(srv.size)
+                if len(comp) == 1:
+                    cos_t = _sample_cos_theta(Zs[0], E[srv], rng, elastic_model, comp[0][0])
+                else:
+                    p_el = rates[:, full] / rates[:, full].sum(axis=0)
+                    u = rng.random(srv.size)
+                    cum = np.cumsum(p_el, axis=0)
+                    which = (u[None, :] > cum).sum(axis=0)  # element index
+                    for i_el, (el_i, _) in enumerate(comp):
+                        m = which == i_el
+                        if m.any():
+                            cos_t[m] = _sample_cos_theta(
+                                Zs[i_el], E[srv][m], rng, elastic_model, el_i
+                            )
+                phi = 2.0 * np.pi * rng.random(srv.size)
+                dirs[srv] = _rotate_directions(dirs[srv], cos_t, phi)
 
     return {
         "r_mid": np.concatenate(seg_mid),
@@ -605,15 +652,33 @@ def simulate_trajectories(
         "E_keV": np.concatenate(seg_E),
         "t_ang": np.concatenate(seg_t0),  # segment-start age sum(L/beta) [Ang, c=1]
         "elec_id": np.concatenate(seg_id),  # emitting electron index in [0, Ne)
+        "layer": np.concatenate(seg_lay),  # emitting layer index in [0, n_layers)
         "n_backscattered": n_back,
         "n_transmitted": n_trans,
         "n_stopped": int(Ne - n_back - n_trans),
         "Ne": Ne,
-        "thickness_ang": thickness_ang,
+        "thickness_ang": z_total,
+        "n_layers": n_layers,
     }
 
 
 # ---- segment-sum CXR spectrum ------------------------------------------------
+_SEG_ARRAYS = ("r_mid", "v_hat", "L_ang", "E_keV", "t_ang", "elec_id", "layer")
+
+
+def _segments_in_layer(segments, L):
+    """A view of `segments` restricted to those emitted in layer index L, keeping
+    the scalar fields (Ne, thickness_ang, ...) so the per-electron normalization
+    and geometry are unchanged. For a single-layer stack, layer 0 returns all
+    segments (same values), so the single-material path is unaffected."""
+    mask = segments["layer"] == L
+    out = dict(segments)
+    for k in _SEG_ARRAYS:
+        if k in out:
+            out[k] = out[k][mask]
+    return out
+
+
 def _polarization_pair(k_hat, g_vec):
     n_plane = np.cross(k_hat, g_vec)
     npl = np.linalg.norm(n_plane)
@@ -1125,6 +1190,9 @@ def _transport_case(case):
         np.deg2rad(case.get("tilt_deg", 0.0)),
         np.deg2rad(case.get("tilt_azim_deg", 0.0)),
     )
+    # film-on-substrate stack drives multilayer transport too (substrate
+    # backscatter / substrate brem); None -> single-material slab (unchanged).
+    layers = case.get("abs_layers")
     segs = simulate_trajectories(
         case["E0_keV"],
         case["Ne"],
@@ -1133,6 +1201,7 @@ def _transport_case(case):
         E_cut_keV=case.get("E_cut_lines_keV", 5.0),
         seed=case["seed"],
         beam_dir=beam,
+        layers=layers,
     )
     segs_b = simulate_trajectories(
         case["E0_keV"],
@@ -1142,6 +1211,7 @@ def _transport_case(case):
         E_cut_keV=case.get("E_cut_brem_keV", 1.0),
         seed=case["seed"] + 1,
         beam_dir=beam,
+        layers=layers,
     )
     return dict(E_grid=E_grid, E_brem=E_brem, n_hat=n_hat, segs=segs, segs_b=segs_b)
 
@@ -1152,10 +1222,17 @@ def _spectrum_case(case, tp):
     CUDA context ever touches the device."""
     E_grid, E_brem, n_hat = tp["E_grid"], tp["E_brem"], tp["n_hat"]
     segs, segs_b = tp["segs"], tp["segs_b"]
-    # optional film-on-substrate absorber stack (None -> single slab, unchanged)
+    # optional film-on-substrate stack (None -> single slab, unchanged)
     abs_layers = case.get("abs_layers")
+    n_lay = int(segs.get("n_layers", 1))
+
+    # LINES: only the entrance crystal (layer 0 = the film) radiates the coherent
+    # PXR/CBS lines; an amorphous substrate has none. Restrict to its segments
+    # (a single-layer stack returns all, so the single-material path is unchanged),
+    # and self-absorb through the whole stack (layers=abs_layers).
+    film_segs = segs if n_lay == 1 else _segments_in_layer(segs, 0)
     spec = mc_spectrum(
-        segs,
+        film_segs,
         E_grid,
         crystal=case["crystal"],
         hkl_list=case["hkl_list"],
@@ -1170,14 +1247,26 @@ def _spectrum_case(case, tp):
         mosaic_fwhm_rad=case.get("mosaic_mc_fwhm_rad"),  # None -> perfect crystal
         mosaic_nodes=case.get("mosaic_mc_nodes", 1),
     )
-    brem_wide = mc_brem_spectrum(
-        segs_b,
-        E_brem,
-        composition=case["composition"],
-        n_hat=n_hat,
-        chunk=case.get("brem_chunk") or 20000,
-        layers=abs_layers,
-    )
+
+    # BREM: EVERY layer radiates with its OWN composition (each Z^2 cross
+    # section); each layer's brem self-absorbs through the whole stack. Summed
+    # over layers; a single layer is exactly the old single-material brem.
+    brem_chunk = case.get("brem_chunk") or 20000
+    if n_lay == 1:
+        brem_wide = mc_brem_spectrum(
+            segs_b, E_brem, composition=case["composition"], n_hat=n_hat,
+            chunk=brem_chunk, layers=abs_layers,
+        )
+    else:
+        brem_wide = np.zeros(E_brem.shape, dtype=float)
+        for L in range(n_lay):
+            sL = _segments_in_layer(segs_b, L)
+            if sL["L_ang"].size == 0:
+                continue
+            brem_wide = brem_wide + mc_brem_spectrum(
+                sL, E_brem, composition=abs_layers[L][2], n_hat=n_hat,
+                chunk=brem_chunk, layers=abs_layers,
+            )
     brem = np.interp(E_grid, E_brem, brem_wide)  # brem under the lines (line grid)
     # Hand this case's GPU scratch back to the OS so the CuPy memory pool can't
     # accumulate (and fragment) across a long sweep until it fills the card.

@@ -281,11 +281,13 @@ class Sweep:
     #       (serial under CuPy). See docs/crystal-mosaicity.md.
     mosaic_route: str = "analytic"
     mosaic_nodes: int = 5  # Gauss-Hermite nodes/tilt-axis for mosaic_route="mc" (K=nodes^2)
-    # film-on-substrate stack (optional, FIRST SLICE of the multilayer feature --
-    # docs/multilayer-materials.md). substrate=None -> free-standing film
-    # (unchanged). Otherwise the film's emitted lines + brem are attenuated by the
-    # substrate via each case's abs_layers; transport + radiation still use the
-    # film material (substrate backscatter / substrate emission are deferred).
+    # film-on-substrate stack (optional; multilayer feature, docs/multilayer-materials.md).
+    # substrate=None -> free-standing film (unchanged). Otherwise each case gets an
+    # abs_layers stack that drives BOTH multilayer electron transport (substrate
+    # backscatter into the film + substrate bremsstrahlung) AND cross-stack
+    # self-absorption of the film's lines/brem. The film (layer 0) radiates the
+    # coherent lines; an amorphous substrate adds only brem + absorption (coherent
+    # lines from a crystalline substrate remain deferred -- per-layer radiation).
     substrate: Optional[str] = None  # "sio2" | "al2o3" | a crystal key e.g. "silicon"
     substrate_thickness_ang: float = 5e6  # 0.5 mm default
 

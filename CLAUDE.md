@@ -1,33 +1,20 @@
 # CLAUDE.md
 
-Agent / contributor operating guide for `cxr_model`. User-facing docs (physics,
-install, materials, detectors, validation, provenance) live in
-[`README.md`](README.md); design notes in [`docs/`](docs/); the backlog in
-[`TODO.md`](TODO.md). This file holds only working conventions: build/test/run,
-how to extend the code, and the non-obvious pitfalls.
+## Project Overview: Monte Carlo-based Coherent X-ray Radiation (CXR) Simulation
 
-## Behavioral guidelines
+Physics project conducting Monte Carlo simulations of the coherent and incoherent
+X-ray radiation produced by electron beams impinging upon crystalline materials.
+The coherent processes include Parametric X-ray Radiation (PXR) and Coherent
+Bremsstrahlung (CBS), while the incoherent process is standard Bremsstrahlung.
 
-Bias toward caution over speed; for trivial tasks use judgment.
-
-1. **Think before coding.** State assumptions explicitly; ask if uncertain. If
-   multiple interpretations exist, surface them — don't pick silently. Push back
-   when a simpler approach exists.
-2. **Simplicity first.** Minimum code that solves the problem, nothing
-   speculative. No abstractions for single-use code, no unrequested
-   "flexibility," no error handling for impossible scenarios.
-3. **Surgical changes.** Touch only what you must. Don't "improve" adjacent code
-   or refactor what isn't broken; match existing style. Remove only the
-   imports/variables your own changes orphaned — mention pre-existing dead code,
-   don't delete it. Every changed line should trace to the request.
-4. **Goal-driven execution.** Turn tasks into verifiable goals (a failing test
-   to make pass, an anchor that must stay 1.00), then loop until verified.
+User-facing docs (physics, install, materials, detectors, validation, provenance) live in
+[`README.md`](README.md); design notes in [`docs/`](docs/); the backlog in [`TODO.md`](TODO.md). This file holds only
+working conventions: build/test/run, how to extend the code, and the non-obvious pitfalls.
 
 ## Build / test / run
 
 - Dependencies live in the project venv managed by **uv**. Always run with
-  `uv run python …`; a bare `python` on PATH has **no numpy** (a misleading
-  "the code is broken" signal when it's just the wrong interpreter).
+  `uv run python …`
 - **Tests:** `uv run python -m pytest -q` (CPU-only, fast; heavy MC physics
   validation lives in `checks/`, not here).
 - **Analytic anchor:** `uv run python checks/feranchuk_check_script.py` (LiF, CPU).
@@ -41,11 +28,9 @@ Bias toward caution over speed; for trivial tasks use judgment.
 - **Remote compute, local viz:** `uv run python dev/remote.py {scan|start|pull|attach|status|logs|stop} …`
   — a *personal* author helper that runs `scan.py` on the `qlmc` GPU box over ssh and
   pulls the checkpoint back (host configurable via `CXR_REMOTE_*`; not shipped in the
-  package). For a generic cluster, see README → *Running on a cluster*. Don't render
-  PDFs on the box — pull and render locally.
-- **Notebooks:** `scan.ipynb` (run a sweep) → `analysis.ipynb` (all viz). Both
-  share the per-material grids in `src/cxr_model/config.py` — edit a grid there once and
-  both pick it up. Notebooks are output-stripped on commit by `nbstripout`.
+  package). For a generic cluster, see README → *Running on a cluster*.
+- **Notebooks:** `scan.ipynb` (run a sweep) → `analysis.ipynb` (all viz). Notebooks are
+  output-stripped on commit by `nbstripout`.
 - **Docs site (optional):** `uv run --group docs sphinx-build -b html docs docs/_build/html`
   → open `docs/_build/html/index.html`. MyST renders `docs/*.md`; autosummary builds
   the API from docstrings (config in `docs/conf.py`). The `docs` dependency-group is
@@ -54,26 +39,27 @@ Bias toward caution over speed; for trivial tasks use judgment.
   `docker run --rm cxr-model pytest -q`. CPU-only (uv base + locked deps); the
   `Dockerfile` header documents the GPU base-swap.
 - **Windows:** the Bash tool mangles `C:\…` paths and `&&` chains — use forward
-  slashes (`C:/Users/…`) or prefer the dedicated Glob / Read / Grep / Edit tools.
+  slashes (`C:/Users/…`), double back slashes (`C:\\Users\\…`) or prefer the
+  dedicated Glob / Read / Grep / Edit tools.
 
 ## Code map
 
-`src/cxr_model/` is the importable package (installable via `uv sync` / `pip
-install -e .`; notebooks add `src/` to the path then `from cxr_model … import`);
+`src/cxr_model/` is the importable package (installable via `uv sync` / `pip install -e .`; notebooks add `src/` to the path then `from cxr_model … import`);
 the README has the per-module responsibility table. Packaged data resolves via
 `cxr_model.DATA_DIR`, so imports work from any cwd. `*.pkl` / `*.png` are gitignored.
 
-| Need to change… | Go to |
-|---|---|
-| crystal DB, structure factor, χ_g/U_g, reflections, constants | `src/cxr_model/crystallography.py` |
-| electron transport + radiation + detector helpers + drivers | `src/cxr_model/montecarlo.py` |
-| sweep definition (knobs → Cartesian product of cases) | `src/cxr_model/sweep.py` |
-| per-material grids, default settings, sweep builders | `src/cxr_model/config.py` |
-| checkpointed/resumable sweep driver, checkpoint loaders | `src/cxr_model/run.py` |
-| result records, metrics, ranking/selection | `src/cxr_model/results.py` |
-| all plotting | `src/cxr_model/plots.py` |
-| Timepix3 / Eagle XO forward models | `src/cxr_model/timepix_response.py`, `src/cxr_model/eaglexo_response.py` |
-| atomic form factors (xraydb-backed) | `src/cxr_model/atomic_form_factors.py` |
+
+| Need to change…                                               | Go to                                                                    |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| crystal DB, structure factor, χ_g/U_g, reflections, constants | `src/cxr_model/crystallography.py`                                       |
+| electron transport + radiation + detector helpers + drivers    | `src/cxr_model/montecarlo.py`                                            |
+| sweep definition (knobs → Cartesian product of cases)         | `src/cxr_model/sweep.py`                                                 |
+| per-material grids, default settings, sweep builders           | `src/cxr_model/config.py`                                                |
+| checkpointed/resumable sweep driver, checkpoint loaders        | `src/cxr_model/run.py`                                                   |
+| result records, metrics, ranking/selection                     | `src/cxr_model/results.py`                                               |
+| all plotting                                                   | `src/cxr_model/plots.py`                                                 |
+| Timepix3 / Eagle XO forward models                             | `src/cxr_model/timepix_response.py`, `src/cxr_model/eaglexo_response.py` |
+| atomic form factors (xraydb-backed)                            | `src/cxr_model/atomic_form_factors.py`                                   |
 
 ## Adding a material (or element)
 
