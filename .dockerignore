@@ -29,4 +29,3 @@ jobs/
 # Don't ship these into the image
 Dockerfile
 .dockerignore
-REFINEMENT_PLAN.md
