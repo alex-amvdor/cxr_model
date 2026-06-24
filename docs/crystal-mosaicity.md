@@ -27,12 +27,13 @@ therefore broadens the line by a Gaussian of energy width
 FWHM_mosaic = E · |tan ψ| · η
 ```
 
-added **in quadrature** with the EDS-resolution and detector-aperture widths and applied
-through the same Gaussian convolution path. The **intrinsic** spectrum is untouched —
-mosaicity enters only the detector-convolution FWHM, so a record computed with
-`mosaic=False` can be re-broadened at plot time.
+added **in quadrature** with the energy-dispersive spectrometer (EDS) resolution and
+detector-aperture widths and applied through the same Gaussian convolution path.
+The **intrinsic** spectrum is untouched — mosaicity enters only the detector-convolution
+FWHM, so a record computed with `mosaic=False` can be re-broadened at plot time.
 
 **Where it lives.**
+
 - `montecarlo.mosaic_fwhm_eV(E, ψ, η_rad)` — the formula above.
 - `montecarlo.mosaic_psi_rad(case, E_pk)` — ψ for the reflection whose nominal
   (unscattered-beam) resonance is nearest the peak; uses the shared
@@ -44,7 +45,8 @@ mosaicity enters only the detector-convolution FWHM, so a record computed with
 - `plots.plot_mosaic_comparison` — overlay grades from one record.
 - Tests: `tests/test_mosaic.py`.
 
-**Limits (this is why it is the "initial" model):**
+**Model Limitations:**
+
 - **Energy-shift only.** It holds the amplitudes (polarization projection `g·e`, the PXR
   detuning `|k+g|²−ω²`, the CBS braced products) fixed across the mosaic cone — these all
   depend on g *direction*. Good while the line is narrow; approximate once it is broad.
