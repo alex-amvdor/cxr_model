@@ -8,7 +8,14 @@ the model must represent that stack: each crystalline layer radiates its own lin
 every photon is attenuated by the **whole stack** on its way to the detector.
 
 Today the pipeline models exactly **one** single-crystal slab. This note specifies the
-upgrade to an ordered stack of layers. **(Status: designed, not implemented.)**
+upgrade to an ordered stack of layers.
+
+> **Implementation status.** **Slice 1 — cross-stack self-absorption (§1 below) — is
+> implemented and on `main`** (opt-in: `substrate=None` is bit-for-bit the old single-material
+> path, regression-anchored). **Slice 2** — multilayer electron transport (substrate
+> backscatter + material-aware bremsstrahlung) — lives on branch
+> `feature/multilayer-materials`. **Remaining:** slice 3 (coherent lines from a *crystalline*
+> substrate) and quantitative validation against a measured film-on-substrate dataset.
 
 ---
 

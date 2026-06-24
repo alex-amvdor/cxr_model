@@ -101,7 +101,7 @@ output-stripped on commit by `nbstripout` via `.gitattributes`.
 | `plots.py` | All plotting: `browse`, `plot_heatmaps`, `plot_metric_vs`, `plot_best_spectra`, `plot_material_comparison`, and the electron-penetration figures. |
 | `timepix_response.py` | Per-photon forward model of the Timepix3 (Si sensor): photoabsorption, e–h pairs, charge sharing, and the **~1.9 keV counting threshold** (the headline effect — it eats sub-2 keV line flux). |
 | `eaglexo_response.py` | Raptor Eagle XO CCD: a clean `solid_angle × QE(E)` operator (windowless direct-detection CCD). |
-| `atomic_form_factors.py` | `f0` (Cromer–Mann) + `f', f''` (Henke/CXRO), `Z_TABLE`. |
+| `atomic_form_factors.py` | Complex atomic form factor `F(g,E) = f0(g) + f'(E) + i·f''(E)` via **xraydb** (Waasmaier–Kirfel `f0` + Chantler/FFAST `f', f''`); no hard-coded tables. |
 
 ---
 
@@ -187,7 +187,7 @@ Crystals are defined in [`data/crystal_structures.toml`](data/crystal_structures
 | `silicon` | silicon | cubic |
 | `lif` | LiF | cubic (rock salt) |
 | `hopg` | highly-oriented pyrolytic graphite | hexagonal (fiber-textured) |
-| `mose2`, `wse2` | 2H-MoSe₂, 2H-WSe₂ | hexagonal (2H TMD) |
+| `mose2`, `wse2`, `mote2` | 2H-MoSe₂, 2H-WSe₂, 2H-MoTe₂ | hexagonal (2H TMD) |
 | `mos2`, `ws2` | 2H-MoS₂, 2H-WS₂ | hexagonal (2H TMD) |
 | `ptse2`, `hfse2`, `zrse2` | PtSe₂, HfSe₂, ZrSe₂ | hexagonal (1T TMD) |
 
@@ -197,9 +197,10 @@ Crystals are defined in [`data/crystal_structures.toml`](data/crystal_structures
 > not via `dominant_reflections`.
 
 Adding a new material (or element) touches several non-colocated registries
-(the TOML, `Z_TABLE` + Cromer–Mann coefficients, `TRANSPORT_ELEMENTS`, an edge
-flag, a Henke `.csv`, the config grid, and the `sweep.py` wiring). The full
-checklist lives in [`CLAUDE.md`](CLAUDE.md) under *"Adding a material"*.
+(the TOML, `TRANSPORT_ELEMENTS`, an edge flag, the config grid, and the
+`sweep.py` wiring). Atomic scattering data comes from **xraydb** for any element,
+so there is no per-element table to edit. The full checklist lives in
+[`CLAUDE.md`](CLAUDE.md) under *"Adding a material"*.
 
 ### Crystal mosaicity (optional, analytic — off by default)
 
@@ -291,9 +292,9 @@ numbers:
   exactly as the source papers do. A first-principles integral over the detector face is
   unimplemented; it matters for the wide SEM/TEM detectors (≈12–17°), not the small Timepix
   Ω — [`docs/detector-solid-angle.md`](docs/detector-solid-angle.md).
-- **Atomic data** (Henke/CXRO f1/f2 + Cromer–Mann f0) is validated against the
-  Feranchuk/Zhai anchors. Swapping to a library (xraydb/xraylib) would shift the resonant
-  amplitudes a few percent (and more at edges) and require re-validation —
+- **Atomic data** is sourced from **xraydb** (Waasmaier–Kirfel `f0` + Chantler/FFAST
+  `f', f''`); the migration from the legacy Henke/CXRO + Cromer–Mann tables was adopted and
+  re-validated against the Feranchuk/Zhai anchors —
   [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md).
 - **Timepix3 hardware** parameters (`SENSOR_THICKNESS_UM`, `BIAS_VOLTAGE_V`,
   `TEMPERATURE_K` in `timepix_response.py`) are **placeholders** pending the real quad
@@ -303,10 +304,10 @@ numbers:
 
 ## Data provenance
 
-- **Atomic scattering:** Cromer–Mann `f0` + Henke/CXRO `f', f''`
-  (`data/atomic_scattering_factors/*.csv`, CXRO `.nff` format, 10 eV–30 keV). A library
-  alternative (xraydb / xraylib) was evaluated but not adopted —
-  [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md).
+- **Atomic scattering:** Waasmaier–Kirfel `f0` + Chantler/FFAST `f', f''`, supplied on
+  demand by **xraydb** for any element (no per-element table to maintain). The legacy
+  Henke/CXRO `.nff` CSVs in `data/atomic_scattering_factors/` are now unused (kept for
+  provenance / A-B comparison) — [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md).
 - **Elastic transport:** NIST SRD 64 relativistic Mott *transport* cross sections
   (`data/mott_transport_cross_sections/`) calibrate the screened-Rutherford
   α(E) per element; free paths from the Browning fit. Elements without a NIST
