@@ -17,8 +17,10 @@ upgrade to an ordered stack of layers.
 > substrate emits its own lines, §2) live in `montecarlo.simulate_trajectories` /
 > `_spectrum_case` and `sweep.build_cases`. Validated in `checks/multilayer_check.py`
 > (slices 1–2) and `checks/multilayer_slice3_check.py` (slice 3); single-layer stays
-> bit-for-bit (Feranchuk/Zhai 29 nm A/B = 1.00). **Remaining:** quantitative validation
-> against a measured film-on-substrate dataset.
+> bit-for-bit (Feranchuk/Zhai 29 nm A/B = 1.00). The analytic validation plan below is
+> also complete (`checks/multilayer_validation_check.py`: closed-form cross-stack
+> absorption + depth-dose vs the Kanaya-Okayama range). **Remaining:** quantitative
+> validation against a *measured* film-on-substrate dataset.
 
 ---
 
@@ -221,17 +223,34 @@ delivers the dominant substrate-attenuation physics on its own.
 
 ## Validation plan
 
-- **Regression:** a one-layer stack reproduces the current `spec`/`brem` **bit-for-bit**
-  (the hard anchor); `mosaic`/`tilt`/checkpoint paths unchanged.
-- **Film-on-vacuum == film-only:** a substrate of zero thickness (or vacuum) must equal the
-  present single-film result.
-- **Cross-stack absorption vs analytic:** for a film line at energy E, the integrated flux
-  ratio (with vs without substrate) must equal `exp(−μ_sub(E)·t_sub/|n̂_z|)` for a thin
-  film (all emission at ~one depth) — a closed-form check of the path integral.
-- **Depth-dose (phase A):** the per-layer energy deposition vs depth matches a CASINO /
-  Kanaya-Okayama range estimate across the film/substrate interface.
-- **Geometry sign:** negative tilt (entrance face toward detector) still gives the high-flux
-  branch; the substrate attenuation must *increase* as the exit path through it lengthens.
+All the analytic (data-free) checks below are **done**; only the measured-data comparison
+remains.
+
+- **Regression — DONE:** a one-layer stack reproduces the current `spec`/`brem`
+  **bit-for-bit** (the hard anchor); `mosaic`/`tilt`/checkpoint paths unchanged.
+  `checks/multilayer_check.py` (check 1) + `tests/test_multilayer.py`.
+- **Film-on-vacuum == film-only — DONE:** an amorphous substrate adds no lines and, on a
+  front (high-flux) exit, does not attenuate the film segments, so the result is the
+  film-only spectrum **bit-for-bit**. `checks/multilayer_slice3_check.py` (check 3) +
+  `checks/multilayer_check.py` (front-exit transparency).
+- **Cross-stack absorption vs analytic — DONE:** the integrated film-line flux ratio (with
+  vs without substrate) equals `exp(−μ_sub(E)·t_sub/|n̂_z|)` at the line energy. The escape
+  factor is applied at each line's resonance energy `E_res`, so the closed form is cleanest
+  at a hard, isolated line (MoSe₂ (-1,0,3) ≈ 1438 eV → ~0.2 %).
+  `checks/multilayer_validation_check.py` (A); the per-segment identity
+  `τ_stack − τ_film = μ_sub·t_sub/|n̂_z|` is pinned in
+  `tests/test_multilayer.py::test_stack_tau_back_exit_substrate_closed_form`.
+- **Depth-dose vs Kanaya-Okayama (phase A) — DONE:** the dose centroid is a sane fraction of
+  R_KO and the maximum penetration `z_max ≈ R_KO`, following K-O's `E^1.67` energy scaling
+  (carbon, 20→30 keV) and its `A/(Z^0.889 ρ)` material scaling (C vs Al), each to ~2 %.
+  `checks/multilayer_validation_check.py` (B).
+- **Geometry sign — DONE:** negative tilt (entrance face toward the detector) gives the
+  high-flux branch and leaves the film lines unattenuated by the substrate; positive tilt
+  (back exit) attenuates them — and more as the exit path lengthens.
+  `checks/multilayer_check.py`.
+- **Measured-data — REMAINING:** quantitative comparison of the predicted broadened /
+  substrate-attenuated line ratios against a real film-on-substrate spectrum (EDS / Timepix /
+  Eagle XO). Data-dependent — no in-repo dataset yet.
 
 ---
 

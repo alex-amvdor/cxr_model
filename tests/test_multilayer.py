@@ -70,6 +70,23 @@ def test_stack_tau_substrate_adds_depth_on_back_exit():
     assert np.all(tau_stack > tau_film)
 
 
+def test_stack_tau_back_exit_substrate_closed_form():
+    # closed form of the slice-1 path integral: on a BACK exit a substrate behind
+    # the film adds EXACTLY mu_sub * t_sub / |n_z| to the optical depth of every
+    # film segment, independent of emission depth (the film escape path is shared).
+    # This is what checks/multilayer_validation_check.py confirms end-to-end as the
+    # integrated film-line flux ratio through mc_spectrum.
+    z = np.array([50.0, 200.0, 480.0])  # all inside the film [0, 500]
+    E = np.full(3, 1438.0)
+    film = [("Mo", 0.019), ("Se", 0.038)]
+    sub = substrate_composition("sio2")
+    t_film, t_sub, n_z = 500.0, 1.5e4, 0.7
+    tau_film = _stack_tau([(0.0, t_film, film)], z, n_z, E)
+    tau_stack = _stack_tau([(0.0, t_film, film), (t_film, t_film + t_sub, sub)], z, n_z, E)
+    mu_sub = _mu_total_inv_ang(sub, E)
+    assert np.allclose(tau_stack - tau_film, mu_sub * t_sub / abs(n_z))
+
+
 def test_substrate_composition_presets_and_crystal():
     sio2 = dict(substrate_composition("sio2"))
     assert sio2["Si"] == pytest.approx(0.02205)

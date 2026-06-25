@@ -36,8 +36,10 @@ publication's validation story) against effort and risk.
    transport — substrate backscatter + material-aware brem), and slice 3 (per-layer coherent
    radiation — a *crystalline* substrate emits its own lines via `Sweep(substrate="silicon")`)
    are done: bit-for-bit single-layer, cross-checked in `checks/multilayer_check.py` (slices
-   1–2) and `checks/multilayer_slice3_check.py` (slice 3). **Remaining:** quantitative
-   validation against a measured film-on-substrate dataset (data-dependent). Design:
+   1–2), `checks/multilayer_slice3_check.py` (slice 3), and `checks/multilayer_validation_check.py`
+   (the analytic validation plan: closed-form cross-stack absorption + depth-dose vs the
+   Kanaya-Okayama range). **Remaining:** quantitative validation against a *measured*
+   film-on-substrate dataset (data-dependent — no in-repo dataset yet). Design:
    [`docs/multilayer-materials.md`](docs/multilayer-materials.md).
 
 ## P2 — medium (experiment match + usability)
