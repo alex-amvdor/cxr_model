@@ -235,3 +235,6 @@ zhai_run_checkpoint.pkl
 
 # remote.py detached-job bookkeeping (created on the GPU box under <repo>/jobs/)
 jobs/
+
+# Local session logs (full conversation transcripts written by the /compress skill)
+CC-Session-Logs/
