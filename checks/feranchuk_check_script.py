@@ -23,7 +23,7 @@ from feranchuk_spence import (
     flux_per_second,
 )
 
-from cxr_model.crystallography import (
+from cxr_mc.crystallography import (
     CRYSTALS,
     Z_TABLE,
     absorption_length_ang,

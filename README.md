@@ -1,4 +1,4 @@
-# cxr_model
+# cxr-mc
 
 **Coherent X-ray radiation (PXR + coherent bremsstrahlung) from table-top electron beams in crystals.**
 
@@ -73,10 +73,10 @@ delta-function of the closed-form theory.
 ```
 scan.ipynb         RUNNER:  pick MATERIAL → Sweep → run_sweep → checkpoints/<material>.pkl
 analysis.ipynb     VIZ:     load that checkpoint → all figures (no sweeps here)
-scan.py            root shim → cxr_model.scan (guarded; python scan.py, or cxr scan)
-export_pdf.py      root shim → cxr_model.export (analysis.ipynb → PDF, or cxr export)
-src/cxr_model/     importable package: physics modules + the cxr CLI entry point
-src/cxr_model/data/  crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
+scan.py            root shim → cxr_mc.scan (guarded; python scan.py, or cxr scan)
+export_pdf.py      root shim → cxr_mc.export (analysis.ipynb → PDF, or cxr export)
+src/cxr_mc/     importable package: physics modules + the cxr CLI entry point
+src/cxr_mc/data/  crystal_structures.toml, atomic_scattering_factors/, mott_transport_cross_sections/, *_qe.csv
 checks/            validation scripts + notebooks (Feranchuk anchor, Zhai Fig 1c, kinematic audit)
 dev/               author-only helpers (remote.py — run scan.py on a personal GPU box over ssh)
 docs/              design notes & decision records (deferred features, library choices)
@@ -84,12 +84,12 @@ checkpoints/       per-material results pickles (gitignored)
 results/           exported figures / PDFs (PNGs gitignored)
 ```
 
-Packaged data resolves via `cxr_model.DATA_DIR`, so imports work from any working
+Packaged data resolves via `cxr_mc.DATA_DIR`, so imports work from any working
 directory and the data travels with an installed wheel. `*.pkl` checkpoints and
 `*.png` images are gitignored; notebooks are output-stripped on commit by
 `nbstripout` via `.gitattributes`.
 
-### The `cxr_model` package modules
+### The `cxr_mc` package modules
 
 | Module | Responsibility |
 |---|---|
@@ -112,14 +112,14 @@ The project is managed by [**uv**](https://docs.astral.sh/uv/) with a committed
 lockfile (`uv.lock`) and requires **Python ≥ 3.14**.
 
 ```bash
-git clone https://github.com/alex-amvdor/cxr_model.git
-cd cxr_model
-uv sync          # .venv + locked deps + an editable install of cxr_model (the cxr CLI)
+git clone https://github.com/Quantum-Light-Matter-Cooperative-QLMC/cxr-mc.git
+cd cxr-mc
+uv sync          # .venv + locked deps + an editable install of cxr_mc (the cxr CLI)
 ```
 
 Run anything with `uv run …` (or activate `.venv`). Note that a bare `python` on
 your PATH will **not** have the dependencies — always use `uv run python …`.
-`uv sync` installs the package, so `import cxr_model` works with no path hacks and
+`uv sync` installs the package, so `import cxr_mc` works with no path hacks and
 the `cxr` console script is on the venv PATH (`uv run cxr --help`).
 
 **GPU is optional.** `cupy-cuda13x` (CUDA 13) is a dependency, but it imports
@@ -140,9 +140,9 @@ A `Dockerfile` builds a CPU-only image (uv + the locked deps), so you can run th
 sweeps and the test suite without setting up a local environment:
 
 ```bash
-docker build -t cxr-model .
-docker run --rm cxr-model pytest -q                                   # CPU safety net
-docker run --rm -v "$PWD/checkpoints:/app/checkpoints" cxr-model cxr scan silicon --quick
+docker build -t cxr-mc .
+docker run --rm cxr-mc pytest -q                                   # CPU safety net
+docker run --rm -v "$PWD/checkpoints:/app/checkpoints" cxr-mc cxr scan silicon --quick
 ```
 
 The container falls back to CPU automatically. A GPU image (NVIDIA runtime +
@@ -195,7 +195,7 @@ checkpoints back and do all the matplotlib/PDF work locally.
 
 ## Materials
 
-Crystals are defined in [`src/cxr_model/data/crystal_structures.toml`](src/cxr_model/data/crystal_structures.toml)
+Crystals are defined in [`src/cxr_mc/data/crystal_structures.toml`](src/cxr_mc/data/crystal_structures.toml)
 (lattice + basis). Current catalog (TOML keys):
 
 | Key | Material | Structure |
@@ -295,7 +295,7 @@ soft lines.
 - `feranchuk_vs_zhai_check.py` — analytic vs. MC pipeline agreement.
 - `kinematic_validity_check.py` — DYN/recoil audit + van-der-Waals merit table.
 - `zhai_fig1c_check.ipynb`, `cxr_analysis_feranchuk.ipynb` — figure reproductions.
-- `src/cxr_model/_compile_nb.py` — compiles every notebook's code cells (syntax smoke test).
+- `src/cxr_mc/_compile_nb.py` — compiles every notebook's code cells (syntax smoke test).
 
 ### What remains to be validated / approximated
 
@@ -325,14 +325,14 @@ numbers:
 
 - **Atomic scattering:** Waasmaier–Kirfel `f0` + Chantler/FFAST `f', f''`, supplied on
   demand by **xraydb** for any element (no per-element table to maintain). The legacy
-  Henke/CXRO `.nff` CSVs in `src/cxr_model/data/atomic_scattering_factors/` are now unused (kept for
+  Henke/CXRO `.nff` CSVs in `src/cxr_mc/data/atomic_scattering_factors/` are now unused (kept for
   provenance / A-B comparison) — [`docs/atomic-data-sources.md`](docs/atomic-data-sources.md).
 - **Elastic transport:** NIST SRD 64 relativistic Mott *transport* cross sections
-  (`src/cxr_model/data/mott_transport_cross_sections/`) calibrate the screened-Rutherford
+  (`src/cxr_mc/data/mott_transport_cross_sections/`) calibrate the screened-Rutherford
   α(E) per element; free paths from the Browning fit. Elements without a NIST
   table fall back to the analytic screening with a one-time warning.
-- **Crystal structures:** `src/cxr_model/data/crystal_structures.toml` (lattice + basis).
-- **Detector QE:** `src/cxr_model/data/eaglexo_qe.csv`; Timepix Si response computed from Henke `f2`.
+- **Crystal structures:** `src/cxr_mc/data/crystal_structures.toml` (lattice + basis).
+- **Detector QE:** `src/cxr_mc/data/eaglexo_qe.csv`; Timepix Si response computed from Henke `f2`.
 
 ---
 

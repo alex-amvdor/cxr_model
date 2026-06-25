@@ -1,11 +1,11 @@
-# cxr_model
+# cxr-mc
 
 Coherent X-ray radiation — parametric X-ray radiation (PXR) plus coherent
 bremsstrahlung — from table-top electron beams in crystals.
 
 This site renders the **design notes** and the **API reference**. For the
 scientific overview, installation, materials, detectors, and the validation
-story, see the [project README](https://github.com/alex-amvdor/cxr_model#readme).
+story, see the [project README](https://github.com/Quantum-Light-Matter-Cooperative-QLMC/cxr-mc#readme).
 
 ```{toctree}
 :caption: Guides

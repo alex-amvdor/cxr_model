@@ -39,7 +39,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from cxr_model.montecarlo import (  # noqa: E402
+from cxr_mc.montecarlo import (  # noqa: E402
     TRANSPORT_ELEMENTS,
     _dEds_compound,
     _mu_total_inv_ang,
@@ -47,7 +47,7 @@ from cxr_model.montecarlo import (  # noqa: E402
     simulate_trajectories,
     tilted_geometry,
 )
-from cxr_model.sweep import crystal_params, substrate_composition  # noqa: E402
+from cxr_mc.sweep import crystal_params, substrate_composition  # noqa: E402
 
 _N_A = 6.02214076e23  # rho[g/cm^3] = n[1/Ang^3] * A[g/mol] * 1e24 / N_A
 

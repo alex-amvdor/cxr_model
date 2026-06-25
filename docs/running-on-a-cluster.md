@@ -14,9 +14,9 @@ checkpoints back and do all the (matplotlib / PDF) visualization locally.
 The project is uv-managed with a committed lockfile. On the login node:
 
 ```bash
-git clone https://github.com/alex-amvdor/cxr_model.git
-cd cxr_model
-uv sync                       # .venv + locked deps + the cxr_model package
+git clone https://github.com/Quantum-Light-Matter-Cooperative-QLMC/cxr-mc.git
+cd cxr-mc
+uv sync                       # .venv + locked deps + the cxr_mc package
 uv run cxr --help             # sanity check
 ```
 
@@ -78,7 +78,7 @@ uv run cxr scan "${MATERIALS[$SLURM_ARRAY_TASK_ID]}"
 The checkpoints are the only output you need off the cluster:
 
 ```bash
-rsync -avz login-node:~/cxr_model/checkpoints/ ./checkpoints/
+rsync -avz login-node:~/cxr-mc/checkpoints/ ./checkpoints/
 ```
 
 Then open `analysis.ipynb` (set the same `MATERIAL`) or run `cxr export` locally —

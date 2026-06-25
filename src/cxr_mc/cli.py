@@ -1,7 +1,7 @@
 """``cxr`` command-line entry point.
 
 A single console script with subcommands, wired in pyproject.toml as
-``cxr = "cxr_model.cli:main"``:
+``cxr = "cxr_mc.cli:main"``:
 
     cxr scan <material> [--quick] [--workers N]   # run a sweep -> checkpoint
     cxr export [stem]                             # analysis.ipynb -> results/<stem>.pdf
@@ -17,7 +17,7 @@ def main(argv=None):
         prog="cxr",
         description="Coherent X-ray radiation (PXR + coherent bremsstrahlung) toolkit.",
     )
-    ap.add_argument("--version", action="version", version=f"cxr_model {__version__}")
+    ap.add_argument("--version", action="version", version=f"cxr-mc {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
     scan.add_subparser(sub)
     export.add_subparser(sub)

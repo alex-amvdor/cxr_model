@@ -1,4 +1,4 @@
-"""Sphinx configuration for the cxr_model documentation site.
+"""Sphinx configuration for the cxr-mc documentation site.
 
 Lightweight by design: MyST renders the existing Markdown design notes and
 autosummary/autodoc pull the API straight from the package docstrings. Build
@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.abspath("../src"))
 
 # -- Project -----------------------------------------------------------------
-project = "cxr_model"
+project = "cxr-mc"
 author = "Alex Amador"
 copyright = "2026, Alex Amador"
 release = "0.1.0"
@@ -75,4 +75,4 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
 
 # -- HTML output -------------------------------------------------------------
 html_theme = "furo"
-html_title = "cxr_model"
+html_title = "cxr-mc"

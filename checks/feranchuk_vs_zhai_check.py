@@ -60,13 +60,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from feranchuk_spence import photons_per_electron
 
-from cxr_model.crystallography import (
+from cxr_mc.crystallography import (
     CRYSTALS,
     HBARC_EV_ANG,
     absorption_length_ang,
     reciprocal_g_vector,
 )
-from cxr_model.montecarlo import (
+from cxr_mc.montecarlo import (
     aperture_fwhm_eV,
     beta_from_keV,
     convolve_detector,

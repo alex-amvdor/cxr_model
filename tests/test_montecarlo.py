@@ -9,7 +9,7 @@ full sweep is run (that lives in checks/)."""
 import numpy as np
 import pytest
 
-from cxr_model.montecarlo import (
+from cxr_mc.montecarlo import (
     TRANSPORT_ELEMENTS,
     _normalize_composition,
     mc_spectrum,

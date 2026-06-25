@@ -37,14 +37,14 @@ from tabulate import tabulate
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from cxr_model.montecarlo import (
+from cxr_mc.montecarlo import (
     mc_spectrum,
     mosaic_fwhm_eV,
     mosaic_psi_rad,
     simulate_trajectories,
     tilted_geometry,
 )
-from cxr_model.sweep import crystal_params
+from cxr_mc.sweep import crystal_params
 
 # ---- setup (HOPG, the mosaic case; Timepix3 theta_obs = 90 deg) ---------------
 E0_KEV = 30.0

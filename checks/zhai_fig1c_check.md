@@ -37,14 +37,14 @@ import matplotlib.pyplot as plt
 
 %matplotlib inline
 
-from cxr_model.crystallography import (
+from cxr_mc.crystallography import (
     HBARC_EV_ANG,
     ALPHA_FS,
     CRYSTALS,
     reciprocal_g_vector,
 )
 from feranchuk_spence import amplitudes_PXR_CBS_both, bremsstrahlung_background
-from cxr_model.montecarlo import (
+from cxr_mc.montecarlo import (
     simulate_trajectories,
     mc_spectrum,
     mc_brem_spectrum,

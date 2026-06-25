@@ -8,13 +8,13 @@ checks/multilayer_check.py. These pin the escape-path math and the wiring."""
 import numpy as np
 import pytest
 
-from cxr_model.montecarlo import (
+from cxr_mc.montecarlo import (
     _layer_dz,
     _mu_total_inv_ang,
     _stack_tau,
     simulate_trajectories,
 )
-from cxr_model.sweep import (
+from cxr_mc.sweep import (
     Sweep,
     build_cases,
     film_on_substrate_layers,

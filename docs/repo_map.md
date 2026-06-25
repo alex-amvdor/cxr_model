@@ -1,6 +1,6 @@
 # Repository map
 
-Navigation aid for `src/cxr_model/` — the importable package. Read this before
+Navigation aid for `src/cxr_mc/` — the importable package. Read this before
 exploring source. For *why* (physics, validation, provenance) see
 [`README.md`](../README.md) and the design notes in [`docs/`](.); for the backlog
 see [`TODO.md`](../TODO.md). Regenerate with the `docs:update-repo-map` command.
@@ -25,7 +25,7 @@ cli     ◄── scan, export          (the `cxr` console script)
 ```
 
 `timepix_response` / `eaglexo_response` depend only on `crystallography`.
-Packaged data resolves via `cxr_model.DATA_DIR`, so imports work from any cwd.
+Packaged data resolves via `cxr_mc.DATA_DIR`, so imports work from any cwd.
 
 ## Entry points
 

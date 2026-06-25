@@ -9,8 +9,8 @@ needs no Monte-Carlo run."""
 import numpy as np
 import pytest
 
-from cxr_model.config import default_settings
-from cxr_model.results import line_metrics
+from cxr_mc.config import default_settings
+from cxr_mc.results import line_metrics
 
 
 def _record(E, spec, brem):

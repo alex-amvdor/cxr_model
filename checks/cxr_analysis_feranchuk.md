@@ -356,7 +356,7 @@ sys.path.insert(0, "src")
 import numpy as np
 import time
 from scipy import constants as const
-from cxr_model.crystallography import CRYSTALS, reciprocal_g_vector
+from cxr_mc.crystallography import CRYSTALS, reciprocal_g_vector
 
 reflections = {
     # NOTE: MoSe2 previously used a d = 6.0 A placeholder with unknown indices;
@@ -381,8 +381,8 @@ for key, sel in reflections.items():
 ```{code-cell} ipython3
 import numpy as np
 import matplotlib.pyplot as plt
-from cxr_model.atomic_form_factors import atomic_form_factor
-from cxr_model.crystallography import (
+from cxr_mc.atomic_form_factors import atomic_form_factor
+from cxr_mc.crystallography import (
     beta_from_Ee,
     absorption_length_ang,
     reciprocal_g_vector,
@@ -764,7 +764,7 @@ for Ee_overlay_eV in [30e3, 45e3, 60e3]:
 # configured g is the minimal-rotation convention (out-of-plane line
 # positions depend on it).
 # ============================================================================
-from cxr_model.crystallography import Z_TABLE
+from cxr_mc.crystallography import Z_TABLE
 from feranchuk_spence import cxr_lines_fixed, bremsstrahlung_background
 
 Ee_spec_eV = 120e3

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small cross-platform developer command runner for cxr_model.
+"""Small cross-platform developer command runner for cxr_mc.
 
 This keeps Claude and humans out of shell one-liner hell on Windows.
 Run via:
@@ -50,7 +50,7 @@ def iter_notebooks() -> list[Path]:
 
 def cmd_repo_map(_: argparse.Namespace) -> None:
     interesting = [
-        "src/cxr_model",
+        "src/cxr_mc",
         "tests",
         "checks",
         "docs",
@@ -58,7 +58,7 @@ def cmd_repo_map(_: argparse.Namespace) -> None:
         ".claude",
         "scripts",
     ]
-    print("cxr_model repo map")
+    print("cxr_mc repo map")
     for rel in interesting:
         path = ROOT / rel
         if not path.exists():

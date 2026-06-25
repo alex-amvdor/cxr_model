@@ -8,17 +8,17 @@ functions and classes, with `[source]` links into the code.
    :toctree: _autosummary
    :recursive:
 
-   cxr_model.atomic_form_factors
-   cxr_model.config
-   cxr_model.crystallography
-   cxr_model.eaglexo_response
-   cxr_model.montecarlo
-   cxr_model.plots
-   cxr_model.results
-   cxr_model.run
-   cxr_model.sweep
-   cxr_model.timepix_response
-   cxr_model.cli
-   cxr_model.scan
-   cxr_model.export
+   cxr_mc.atomic_form_factors
+   cxr_mc.config
+   cxr_mc.crystallography
+   cxr_mc.eaglexo_response
+   cxr_mc.montecarlo
+   cxr_mc.plots
+   cxr_mc.results
+   cxr_mc.run
+   cxr_mc.sweep
+   cxr_mc.timepix_response
+   cxr_mc.cli
+   cxr_mc.scan
+   cxr_mc.export
 ```

@@ -1,10 +1,10 @@
-"""cxr_model -- coherent X-ray radiation (PXR + coherent bremsstrahlung) from
+"""cxr_mc -- coherent X-ray radiation (PXR + coherent bremsstrahlung) from
 table-top electron beams in crystals.
 
-The package is intentionally light at import time: ``import cxr_model`` pulls in
+The package is intentionally light at import time: ``import cxr_mc`` pulls in
 no heavy dependencies (matplotlib / cupy / the MC pipeline). Import submodules
-explicitly, e.g. ``from cxr_model import crystallography`` or
-``from cxr_model.montecarlo import run_cases``.
+explicitly, e.g. ``from cxr_mc import crystallography`` or
+``from cxr_mc.montecarlo import run_cases``.
 
 See the README for the scientific overview and CLAUDE.md for working conventions.
 """

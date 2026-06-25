@@ -1,5 +1,5 @@
 [project]
-name = "cxr-model"
+name = "cxr-mc"
 version = "0.1.0"
 description = "Coherent X-ray radiation (PXR + coherent bremsstrahlung) from table-top electron beams in crystals"
 readme = "README.md"
@@ -31,14 +31,14 @@ dependencies = [
 ]
 
 [project.scripts]
-cxr = "cxr_model.cli:main"
+cxr = "cxr_mc.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cxr_model"]
+packages = ["src/cxr_mc"]
 
 [dependency-groups]
 dev = [
@@ -53,7 +53,7 @@ docs = [
 ]
 
 [tool.pytest.ini_options]
-# Put src/ on the path so `import cxr_model` resolves without requiring an install
+# Put src/ on the path so `import cxr_mc` resolves without requiring an install
 # (an editable install via `uv sync` also works); dev/ lets test_remote.py import
 # the demoted remote.py helper. Tests stay CPU-only/fast -- the heavy MC physics
 # validation lives in checks/, not here.

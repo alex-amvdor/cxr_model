@@ -5,7 +5,7 @@ load_henke must still return a finite, physical (E, f1, f2) table per element.""
 import numpy as np
 import pytest
 
-from cxr_model.atomic_form_factors import (
+from cxr_mc.atomic_form_factors import (
     Z_TABLE,
     atomic_form_factor,
     cromer_mann_f0,

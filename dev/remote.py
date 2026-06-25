@@ -58,7 +58,7 @@ import tempfile
 from pathlib import Path
 
 HOST = os.environ.get("CXR_REMOTE_HOST", "qlmc")
-REMOTE_DIR = os.environ.get("CXR_REMOTE_DIR", "/home/aamador/dev/cxr_model")
+REMOTE_DIR = os.environ.get("CXR_REMOTE_DIR", "/home/aamador/dev/cxr-mc")
 REMOTE_UV = os.environ.get("CXR_REMOTE_UV", "/home/aamador/.local/bin/uv")
 # repo root = two levels up from dev/remote.py. remote.py orchestrates the
 # *checkout* (it tars the working tree up to the box), so it resolves paths

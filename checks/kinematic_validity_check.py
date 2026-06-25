@@ -79,7 +79,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 
-from cxr_model.crystallography import (
+from cxr_mc.crystallography import (
     CRYSTALS,
     HBARC_EV_ANG,
     M_E_EV,
@@ -89,7 +89,7 @@ from cxr_model.crystallography import (
     chi_g,
     reciprocal_g_vector,
 )
-from cxr_model.montecarlo import _sigma_browning_cm2, beta_from_keV
+from cxr_mc.montecarlo import _sigma_browning_cm2, beta_from_keV
 
 THETA_OBS = np.deg2rad(119.0)
 

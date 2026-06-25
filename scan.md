@@ -27,10 +27,10 @@ import sys
 
 sys.path.insert(0, "src")
 
-from cxr_model.sweep import build_cases, geometry_table
-from cxr_model.config import default_settings, material_sweep, COLLAPSE_AZIMUTH
-from cxr_model.plots import stream_chunk
-from cxr_model.run import run_sweep
+from cxr_mc.sweep import build_cases, geometry_table
+from cxr_mc.config import default_settings, material_sweep, COLLAPSE_AZIMUTH
+from cxr_mc.plots import stream_chunk
+from cxr_mc.run import run_sweep
 from IPython.display import display
 ```
 

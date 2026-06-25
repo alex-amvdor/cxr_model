@@ -1,4 +1,4 @@
-# cxr_model Claude notes
+# cxr-mc Claude notes
 
 Keep this file short.
 
@@ -50,7 +50,7 @@ Claude should always prefer these commands.
 
 ## Working rules
 
-- Prefer edits in `src/cxr_model/` over notebook logic.
+- Prefer edits in `src/cxr_mc/` over notebook logic.
 - Notebook changes should stay output-free on commit.
 - Do not duplicate README or TODO content here.
 - When asked to locate something, use `scripts/dev.py repo-map` first.

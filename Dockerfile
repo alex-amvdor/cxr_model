@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 #
-# CPU-only image for cxr_model: a reproducible environment from uv + the
+# CPU-only image for cxr_mc: a reproducible environment from uv + the
 # committed lockfile, no local setup. The MC code falls back to CPU
 # automatically (cupy imports but finds no GPU), so the sweeps, the `cxr` CLI,
 # and the test suite all run here.
 #
-#   docker build -t cxr-model .
-#   docker run --rm cxr-model pytest -q                                   # CPU safety net
-#   docker run --rm -v "$PWD/checkpoints:/app/checkpoints" cxr-model cxr scan silicon --quick
+#   docker build -t cxr-mc .
+#   docker run --rm cxr-mc pytest -q                                   # CPU safety net
+#   docker run --rm -v "$PWD/checkpoints:/app/checkpoints" cxr-mc cxr scan silicon --quick
 #
 # ---------------------------------------------------------------------------
 # GPU image (future): everything below the base layer is shared with a GPU
@@ -47,8 +47,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen
 
 # `uv run` is the entrypoint, so the container behaves like the local dev env:
-#   docker run cxr-model                       -> cxr --help            (CMD below)
-#   docker run cxr-model pytest -q             -> the CPU test suite
-#   docker run cxr-model cxr scan silicon --quick
+#   docker run cxr-mc                       -> cxr --help            (CMD below)
+#   docker run cxr-mc pytest -q             -> the CPU test suite
+#   docker run cxr-mc cxr scan silicon --quick
 ENTRYPOINT ["uv", "run", "--frozen"]
 CMD ["cxr", "--help"]

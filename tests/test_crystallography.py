@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from cxr_model.crystallography import (
+from cxr_mc.crystallography import (
     CRYSTALS,
     chi_g,
     debye_waller,

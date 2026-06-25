@@ -2,7 +2,7 @@
 
 Runs the Monte-Carlo CXR parameter sweep for one material and writes the
 per-material checkpoint (checkpoints/<material>.pkl). Use this to run sweeps
-non-interactively -- in particular over SSH on the GPU box; see cxr_model.remote,
+non-interactively -- in particular over SSH on the GPU box; see cxr_mc.remote,
 which drives this and pulls the checkpoint back so the (matplotlib / PDF)
 data-vis can stay on the laptop.
 

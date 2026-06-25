@@ -598,7 +598,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cxr-model"
+name = "cxr-mc"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

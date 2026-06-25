@@ -72,8 +72,8 @@ CAVEATS:
 
 import numpy as np
 
-from cxr_model.atomic_form_factors import Z_TABLE, atomic_form_factor, cromer_mann_f0
-from cxr_model.crystallography import (
+from cxr_mc.atomic_form_factors import Z_TABLE, atomic_form_factor, cromer_mann_f0
+from cxr_mc.crystallography import (
     _EDGE_PRONE,
     ALPHA_FS,
     CRYSTALS,

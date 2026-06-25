@@ -26,13 +26,13 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from cxr_model.montecarlo import (  # noqa: E402
+from cxr_mc.montecarlo import (  # noqa: E402
     _segments_in_layer,
     _spectrum_case,
     _transport_case,
     mc_spectrum,
 )
-from cxr_model.sweep import Sweep, build_cases, substrate_radiator  # noqa: E402
+from cxr_mc.sweep import Sweep, build_cases, substrate_radiator  # noqa: E402
 
 E0 = 30.0
 TILT = -30.0  # front exit (high flux); thin substrate so its lines escape

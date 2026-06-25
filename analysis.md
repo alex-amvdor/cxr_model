@@ -46,17 +46,17 @@ except Exception:
 import matplotlib.pyplot as plt
 from IPython.display import display
 
-from cxr_model.config import default_settings, trajectory_sweep
-from cxr_model.sweep import build_cases
-from cxr_model.results import (
+from cxr_mc.config import default_settings, trajectory_sweep
+from cxr_mc.sweep import build_cases
+from cxr_mc.results import (
     records,
     show_top,
     filter_results,
     select_results,
     sweep_values,
 )
-from cxr_model.run import load_checkpoint, cases_from_results
-from cxr_model.plots import (
+from cxr_mc.run import load_checkpoint, cases_from_results
+from cxr_mc.plots import (
     browse,
     plot_scan,
     plot_metric_vs,
@@ -305,7 +305,7 @@ brightest well-defined line, and where," for comparison against the paper's
 catalogue. (Needs the scans to have been run for several materials.)
 
 ```{code-cell} ipython3
-from cxr_model.sweep import MATERIAL_LABELS
+from cxr_mc.sweep import MATERIAL_LABELS
 
 # load every material checkpoint that exists; skip the empties
 by_material = {}

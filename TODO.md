@@ -52,7 +52,7 @@ publication's validation story) against effort and risk.
    `sweep_values` slice a loaded checkpoint in-memory — but the on-disk pickle is
    still the full union, so the transfer-size problem itself is unsolved.)
 6. **pyelsepa / ELSEPA transport.** *(feature)* Evaluate replacing the hardcoded
-   NIST Mott transport tables in `src/cxr_model/data/mott_transport_cross_sections/`
+   NIST Mott transport tables in `src/cxr_mc/data/mott_transport_cross_sections/`
    with on-demand ELSEPA (a docker image is built locally at `C:\dev\pyelsepa\`,
    [github.com/eScatter/pyelsepa](https://github.com/eScatter/pyelsepa)). NB: this
    is *electron*-scattering data — separate from the xraydb (photon) migration;
@@ -89,6 +89,6 @@ publication's validation story) against effort and risk.
     they are extremely bloated. `montecarlo.py` especially has multiple discrete
     logical blocks which can be easily discretized.
 13. **Notebook/Repo Reorg.** User does not like having analysis/scan/export notebooks
-    and scripts cluttering the root. Move them either somewhere into /src/cxr_model
+    and scripts cluttering the root. Move them either somewhere into /src/cxr_mc
     (post-rename), or create new subdirs. Consider a restructuring of /src/*;
     if that is decided to be worthwhile, triage into main priorities in TODO.md

@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from cxr_model.config import MATERIALS
-from cxr_model.sweep import MATERIAL_LABELS, Sweep, build_cases, crystal_params
+from cxr_mc.config import MATERIALS
+from cxr_mc.sweep import MATERIAL_LABELS, Sweep, build_cases, crystal_params
 
 ALL = [
     "mose2",

@@ -29,7 +29,7 @@ even though the data is now Waasmaier/Chantler), so everything downstream
 The CXRO `.nff` CSVs in `data/atomic_scattering_factors/` are now **legacy / unused by the
 code** (kept for provenance and any future A/B against Henke).
 
-**Why a library:** the "adding an element" chore in [CLAUDE.md](https://github.com/alex-amvdor/cxr_model/blob/main/CLAUDE.md) touched ~8
+**Why a library:** the "adding an element" chore in [CLAUDE.md](https://github.com/Quantum-Light-Matter-Cooperative-QLMC/cxr-mc/blob/main/CLAUDE.md) touched ~8
 non-colocated registries, ~4 of them atomic data. The swap eliminates the two worst
 (typing Cromer–Mann coefficients, downloading a CXRO `.nff` per element) — a new element is
 now free for f0/f′/f″/Z. **The cost:** xraydb is Chantler, not Henke, so numbers shift a
