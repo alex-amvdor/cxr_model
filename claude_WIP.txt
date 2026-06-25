@@ -1,0 +1,39 @@
+Claude WIP summary before running out of tokens:
+
+    I'll handle this carefully — publishing to main is hard to reverse and it cuts against the "PI publishes, never merge to main yourself" convention, plus "ready-to-go" excludes at least one branch I know you flagged (the grating physics is unreviewed). So let me first establish the exact git state read-only, then confirm the set with you before any push.
+
+    One clarification I can answer up front: the consolidation work this session was to your local memory store at C:\Users\alexa\.claude\projects\C--dev-cxr-model\memory\, which lives outside the git repo — so there's nothing repo-side from this session to push. Let me verify that and map the branches.
+
+
+    Ran 2 commands
+    Good — that's a clean picture. Let me check one more thing before I bring you a recommendation: which files each branch touches, so I know whether they stack onto main cleanly or collide (a few touch shared files like results.py and repo_map.md).
+
+    Found per-branch changed files and cross-branch file overlaps
+    Here's the full picture. main (and origin/main) sit at b2982ab. All seven overnight branches are exactly one clean commit on top of that base. The relevant overlaps if I stack them: TODO.md (all, different sections), docs/repo_map.md (3 branches), and src/cxr_model/results.py (2 branches) — all additive, so any conflicts will be trivial "keep both" resolutions, which I'll verify with uv run pytest before pushing.
+
+    My read on what's genuinely ready-to-go vs. not:
+
+    Branch	Item	Ready?
+    anchor-figures	P1 #2 figures + tests	✅ ready
+    detector-solid-angle	P2 #4 opt-in tool + tests	✅ ready (opt-in, no behavior change)
+    checkpoint-transfer	P2 #5 cxr slim + tests	✅ ready
+    sweep-faceting	P3 #9 dataframe/faceting + tests	✅ ready
+    units-evaluation	P3 #7 Pint eval	✅ ready (docs-only decision record)
+    grazing-grating	P3 #8 grating model	⚠️ hold — physics UNREVIEWED (your flag)
+    elsepa-transport	P2 #6 ELSEPA adapter	⚠️ hold — gated PoC, BLOCKED on the paywalled docker image, unvalidated
+    multilayer-materials	old slice-2	❌ exclude — stale pre-restructure branch, already ported to main
+    Two notes: there's nothing repo-side from this session to push (the memory consolidation was outside the repo, confirmed). And the main repo worktree has two unrelated local edits (.claude/commands/physics/derive.md deleted, .claude/skills/scientific-library/SKILL.md modified) — not part of any branch and not mine, so I'll leave them alone.
+
+    Since publishing to main is hard to reverse and cuts against the "never merge to main yourself" convention, let me confirm the exact set:
+
+    Asked
+    Publish set
+    Answers
+
+    Which branches should I publish to main as "ready-to-go"? (I'll merge the chosen set preserving each branch's reviewed commit, run the fast test suite, and only push if green.) The 5 ready ones (Recommended)
+
+    You chose the 5 ready branches — holding grazing-grating and elsepa-transport, excluding stale multilayer-materials. Let me execute: I'll build main up to those five (preserving each branch's reviewed commit), run the fast test suite, and push only if green.
+
+    First, verify this worktree is clean so I can safely use it to assemble main:
+
+    Verified worktree clean and located main checkout
