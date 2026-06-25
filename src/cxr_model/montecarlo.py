@@ -1220,27 +1220,59 @@ def _spectrum_case(case, tp):
     abs_layers = case.get("abs_layers")
     n_lay = int(segs.get("n_layers", 1))
 
-    # LINES: only the entrance crystal (layer 0 = the film) radiates the coherent
-    # PXR/CBS lines; an amorphous substrate has none. Restrict to its segments
-    # (a single-layer stack returns all, so the single-material path is unchanged),
-    # and self-absorb through the whole stack (layers=abs_layers).
-    film_segs = segs if n_lay == 1 else _segments_in_layer(segs, 0)
-    spec = mc_spectrum(
-        film_segs,
-        E_grid,
-        crystal=case["crystal"],
-        hkl_list=case["hkl_list"],
-        n_hat=n_hat,
-        B_ang2=case["B_ang2"],
-        composition=case["composition"],
-        beam_uvw=case.get("beam_uvw"),
-        azimuth_rad=case.get("azimuth_rad", 0.0),
-        sinc_cutoff=case.get("sinc_cutoff"),
-        chunk=case.get("spec_chunk") or 40000,
-        layers=abs_layers,
+    # LINES: each CRYSTALLINE layer radiates its own PXR/CBS lines, summed
+    # INCOHERENTLY (separate crystals -> no cross-layer coherence); every line
+    # self-absorbs through the WHOLE stack (layers=abs_layers). `layer_radiators`
+    # is a per-layer list aligned with the stack -- a dict of crystal params for a
+    # crystalline layer (film or crystalline substrate), None for an amorphous one
+    # (no coherent lines). layer_radiators absent -> single slab: the film radiates
+    # from ALL its segments via the case's scalar crystal keys (bit-for-bit the
+    # pre-multilayer path). See docs/multilayer-materials.md (per-layer radiation).
+    radiators = case.get("layer_radiators")
+    mosaic_kw = dict(
         mosaic_fwhm_rad=case.get("mosaic_mc_fwhm_rad"),  # None -> perfect crystal
         mosaic_nodes=case.get("mosaic_mc_nodes", 1),
     )
+    spec_chunk = case.get("spec_chunk") or 40000
+    if radiators is None:
+        spec = mc_spectrum(
+            segs,
+            E_grid,
+            crystal=case["crystal"],
+            hkl_list=case["hkl_list"],
+            n_hat=n_hat,
+            B_ang2=case["B_ang2"],
+            composition=case["composition"],
+            beam_uvw=case.get("beam_uvw"),
+            azimuth_rad=case.get("azimuth_rad", 0.0),
+            sinc_cutoff=case.get("sinc_cutoff"),
+            chunk=spec_chunk,
+            layers=abs_layers,
+            **mosaic_kw,
+        )
+    else:
+        spec = np.zeros(E_grid.shape, dtype=float)
+        for L, rad in enumerate(radiators):
+            if rad is None:  # amorphous layer -> no coherent lines
+                continue
+            sL = _segments_in_layer(segs, L)
+            if sL["L_ang"].size == 0:
+                continue
+            spec = spec + mc_spectrum(
+                sL,
+                E_grid,
+                crystal=rad["crystal"],
+                hkl_list=rad["hkl_list"],
+                n_hat=n_hat,
+                B_ang2=rad["B_ang2"],
+                composition=abs_layers[L][2],
+                beam_uvw=rad.get("beam_uvw"),
+                azimuth_rad=case.get("azimuth_rad", 0.0),
+                sinc_cutoff=case.get("sinc_cutoff"),
+                chunk=spec_chunk,
+                layers=abs_layers,
+                **mosaic_kw,
+            )
 
     # BREM: EVERY layer radiates with its OWN composition (each Z^2 cross
     # section); each layer's brem self-absorbs through the whole stack. Summed

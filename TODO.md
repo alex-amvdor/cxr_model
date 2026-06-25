@@ -29,13 +29,15 @@ publication's validation story) against effort and risk.
    modules feeding the notebook are fine). High value for the publication's
    validation story, and relatively self-contained.
 
-3. **Multilayer film-on-substrate — slice 3 + validation.** *(feature)* A vdW film
-   (MoSe₂/MoS₂/WS₂/MoTe₂) on its real substrate (SiO₂/Si or sapphire), with
-   per-crystalline-layer radiation and full-stack self-absorption. Slices 1–2 are
-   done (slice 1 on `main`; slice 2 on `feature/multilayer-materials`); remaining
-   is **slice 3** (coherent lines from a *crystalline* substrate) + quantitative
-   validation vs a measured dataset. **Rebase the branch onto current `main`
-   first** — it forks from a pre-restructure commit. Design:
+3. **Multilayer film-on-substrate — measured-data validation.** *(feature — slices 1–3
+   IMPLEMENTED; measured-data validation remains)* A vdW film (MoSe₂/MoS₂/WS₂/MoTe₂) on its
+   real substrate (SiO₂/Si or sapphire), with per-crystalline-layer radiation and full-stack
+   self-absorption. Slice 1 (cross-stack self-absorption), slice 2 (multilayer electron
+   transport — substrate backscatter + material-aware brem), and slice 3 (per-layer coherent
+   radiation — a *crystalline* substrate emits its own lines via `Sweep(substrate="silicon")`)
+   are done: bit-for-bit single-layer, cross-checked in `checks/multilayer_check.py` (slices
+   1–2) and `checks/multilayer_slice3_check.py` (slice 3). **Remaining:** quantitative
+   validation against a measured film-on-substrate dataset (data-dependent). Design:
    [`docs/multilayer-materials.md`](docs/multilayer-materials.md).
 
 ## P2 — medium (experiment match + usability)

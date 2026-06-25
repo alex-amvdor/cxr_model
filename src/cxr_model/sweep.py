@@ -126,6 +126,30 @@ def film_on_substrate_layers(
     ]
 
 
+def substrate_radiator(substrate, n_families=4):
+    """Coherent-radiation crystal params for a substrate, or None if it radiates
+    no lines. A CRYSTALLINE substrate (a CRYSTALS key, e.g. 'silicon') returns
+    {crystal, hkl_list, B_ang2, beam_uvw} (from crystal_params) so it emits its
+    own PXR/CBS; an AMORPHOUS preset ('sio2', 'al2o3') returns None (it only
+    absorbs + brems). This is the per-layer-radiation half of the multilayer
+    feature -- the absorber stack (film_on_substrate_layers) is the other half.
+    See docs/multilayer-materials.md."""
+    if substrate.lower() in _SUBSTRATE_COMP:
+        return None  # amorphous: no coherent lines
+    if substrate in CRYSTALS:
+        cp = crystal_params(substrate, n_families)
+        return dict(
+            crystal=cp["crystal"],
+            hkl_list=cp["hkl_list"],
+            B_ang2=cp["B_ang2"],
+            beam_uvw=cp["beam_uvw"],
+        )
+    raise ValueError(
+        f"unknown substrate {substrate!r}; use one of {list(_SUBSTRATE_COMP)} "
+        f"or a crystal key in {list(CRYSTALS)}"
+    )
+
+
 def crystal_params(material, n_families=4):
     """Fixed crystallography for a material: composition, the dominant
     reflections, the beam zone axis [uvw], the (isotropic) B-factor, and a
@@ -282,9 +306,10 @@ class Sweep:
     # substrate=None -> free-standing film (unchanged). Otherwise each case gets an
     # abs_layers stack that drives BOTH multilayer electron transport (substrate
     # backscatter into the film + substrate bremsstrahlung) AND cross-stack
-    # self-absorption of the film's lines/brem. The film (layer 0) radiates the
-    # coherent lines; an amorphous substrate adds only brem + absorption (coherent
-    # lines from a crystalline substrate remain deferred -- per-layer radiation).
+    # self-absorption of the film's lines/brem. Every CRYSTALLINE layer radiates its
+    # own coherent PXR/CBS lines (the film, and a crystalline substrate e.g.
+    # "silicon"), summed incoherently; an amorphous substrate ("sio2"/"al2o3") adds
+    # only brem + absorption.
     substrate: str | None = None  # "sio2" | "al2o3" | a crystal key e.g. "silicon"
     substrate_thickness_ang: float = 5e6  # 0.5 mm default
 
@@ -350,6 +375,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
     ):
         name = f"{label} {fmt_thickness(thickness)} pol={tilt:g} az={azim:g}"
         abs_layers = None
+        layer_radiators = None
         if sweep.substrate is not None:
             name = f"{name} on {sweep.substrate}"
             abs_layers = film_on_substrate_layers(
@@ -358,6 +384,19 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                 sweep.substrate,
                 sweep.substrate_thickness_ang,
             )
+            # per-layer coherent radiators, aligned with abs_layers: the film (its
+            # own crystal params) and the substrate (crystal params if crystalline,
+            # None if amorphous). This is what lets a crystalline substrate emit
+            # its own PXR/CBS lines (per-layer radiation, slice 3).
+            layer_radiators = [
+                dict(
+                    crystal=cp["crystal"],
+                    hkl_list=cp["hkl_list"],
+                    B_ang2=cp["B_ang2"],
+                    beam_uvw=beam_uvw,
+                ),
+                substrate_radiator(sweep.substrate, sweep.n_families),
+            ]
         for i_e, E0 in enumerate(energies):
             cases.append(
                 dict(
@@ -379,6 +418,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
                     mosaic_mc_fwhm_rad=mosaic_mc_rad,  # exact MC route (None if route="analytic")
                     mosaic_mc_nodes=sweep.mosaic_nodes,
                     abs_layers=abs_layers,  # None -> single slab; else film-on-substrate stack
+                    layer_radiators=layer_radiators,  # per-layer coherent radiators (None -> slab)
                     brem_file=None,
                     Ne=n_electrons,
                     Ne_brem=n_electrons_brem,

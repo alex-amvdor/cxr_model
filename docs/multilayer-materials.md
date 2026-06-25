@@ -10,12 +10,15 @@ every photon is attenuated by the **whole stack** on its way to the detector.
 Today the pipeline models exactly **one** single-crystal slab. This note specifies the
 upgrade to an ordered stack of layers.
 
-> **Implementation status.** **Slice 1 — cross-stack self-absorption (§1 below) — is
-> implemented and on `main`** (opt-in: `substrate=None` is bit-for-bit the old single-material
-> path, regression-anchored). **Slice 2** — multilayer electron transport (substrate
-> backscatter + material-aware bremsstrahlung) — lives on branch
-> `feature/multilayer-materials`. **Remaining:** slice 3 (coherent lines from a *crystalline*
-> substrate) and quantitative validation against a measured film-on-substrate dataset.
+> **Implementation status. Slices 1–3 are implemented.** Slice 1 (cross-stack
+> self-absorption, §1) is opt-in — `substrate=None` is bit-for-bit the old single-material
+> path. Slice 2 (multilayer electron transport — substrate backscatter + material-aware
+> bremsstrahlung, §3 option A) and slice 3 (per-layer coherent radiation — a *crystalline*
+> substrate emits its own lines, §2) live in `montecarlo.simulate_trajectories` /
+> `_spectrum_case` and `sweep.build_cases`. Validated in `checks/multilayer_check.py`
+> (slices 1–2) and `checks/multilayer_slice3_check.py` (slice 3); single-layer stays
+> bit-for-bit (Feranchuk/Zhai 29 nm A/B = 1.00). **Remaining:** quantitative validation
+> against a measured film-on-substrate dataset.
 
 ---
 
@@ -128,25 +131,47 @@ spectrum see the substrate, and is the highest-value, lowest-risk slice.
 
 ---
 
-## (2) Per-layer radiation
+## (2) Per-layer radiation — IMPLEMENTED
 
-Wrap the per-reflection body of `mc_spectrum` in an outer loop over **crystalline** layers:
+`_spectrum_case` loops over the stack's **crystalline** layers and sums their spectra
+**incoherently** (separate crystals ⇒ no cross-layer coherence). Each layer:
 
-- Assign each segment to a layer by its midpoint depth `z_mid` (consistent with the existing
-  midpoint approximation; segments are short vs layer thickness, so boundary-straddling is
-  negligible — note it as a caveat).
-- For layer *L*: take its segments, use **L's** `crystal`/`hkl_list`/`B_ang2`/`beam_uvw`,
-  and apply the **cross-stack** `T_abs` (through all layers on the escape path, not just L).
-- Sum the per-layer spectra incoherently (separate crystals ⇒ no cross-layer coherence).
-- Amorphous layers are skipped for lines; their segments still feed brem and they still
-  absorb. Brem (`mc_brem_spectrum`) is summed per layer with the same cross-stack `T_abs`.
+- is assigned its segments by midpoint depth `z_mid` via `montecarlo._segments_in_layer`
+  (consistent with the existing midpoint approximation; segments are short vs layer
+  thickness, so boundary-straddling is negligible — a caveat, not a correction);
+- radiates with **its own** `crystal`/`hkl_list`/`B_ang2`/`beam_uvw` through `mc_spectrum`,
+  applying the **cross-stack** `T_abs` (`layers=abs_layers` — the optical depth through every
+  layer on the escape path, not just L);
+- is described by `case["layer_radiators"]`, a per-layer list aligned with `abs_layers` and
+  built in `sweep.build_cases`: a `{crystal, hkl_list, B_ang2, beam_uvw}` dict for a
+  crystalline layer (the film, and a crystalline substrate via `sweep.substrate_radiator`),
+  or `None` for an amorphous one. `layer_radiators=None` (no substrate) is the single-slab
+  path, **bit-for-bit**.
+
+Amorphous layers (fused-silica SiO₂) are skipped for lines — their segments still feed brem
+and they still absorb. Brem (`mc_brem_spectrum`) is summed per layer with the same
+cross-stack `T_abs` (slice 2).
+
+A crystalline substrate is just another material key: `Sweep(substrate="silicon")` makes the
+substrate radiate its own (hkl) lines. **Caveats:** the substrate radiates on the *film's*
+line grid (set `E_grid_line` wide enough to bracket both materials' lines) with the substrate
+crystal's default `beam_uvw`; deep substrate emission is strongly self-absorbed in a thick
+substrate, so the visible substrate lines come from near the interface.
+
+**Validated** (`checks/multilayer_slice3_check.py`, MoSe₂-on-Si): the substrate radiates
+nonzero lines, the pipeline spectrum equals the per-layer incoherent sum *exactly*, an
+amorphous substrate adds no lines (film-only bit-for-bit), and a crystalline substrate
+raises the total coherent flux.
 
 ---
 
-## (3) Multilayer electron transport (phased)
+## (3) Multilayer electron transport — IMPLEMENTED (option A)
 
-`simulate_trajectories` currently uses one `composition` and truncates flights only at
-`z=0`/`z=thickness`. Three escalating options:
+Slice 2 shipped **option (A)** below: `simulate_trajectories(layers=…)` does full per-layer
+transport — free path / stopping / scattering switch by the electron's current layer, flights
+truncate at internal boundaries (no collision there, the electron continues into the
+neighbor), and each segment carries its emitting `layer`. A single layer is bit-for-bit the
+old single-material transport. The three escalating options it chose among were:
 
 - **(C) Single-material transport (first slice).** Transport in the **film** material
   throughout; only the *radiation/absorption* is stack-aware. Exact when the substrate

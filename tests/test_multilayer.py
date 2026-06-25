@@ -19,6 +19,7 @@ from cxr_model.sweep import (
     build_cases,
     film_on_substrate_layers,
     substrate_composition,
+    substrate_radiator,
 )
 
 
@@ -136,3 +137,42 @@ def test_build_cases_attaches_abs_layers_only_with_substrate():
         (z0, z1, _), (z2, _z3, _) = c["abs_layers"]
         assert z0 == 0.0 and z1 == c["thickness_ang"] and z2 == c["thickness_ang"]
         assert "on sio2" in c["name"]
+
+
+# ---- slice 3: per-layer coherent radiation -----------------------------------
+def test_substrate_radiator_crystalline_vs_amorphous():
+    # a crystalline substrate carries its own radiator (crystal params); an
+    # amorphous preset radiates no coherent lines (None)
+    assert substrate_radiator("sio2") is None
+    assert substrate_radiator("al2o3") is None
+    si = substrate_radiator("silicon")
+    assert si["crystal"] == "silicon"
+    assert set(si) == {"crystal", "hkl_list", "B_ang2", "beam_uvw"}
+    assert len(si["hkl_list"]) > 0
+    with pytest.raises(ValueError):
+        substrate_radiator("unobtainium")
+
+
+def test_build_cases_layer_radiators_match_stack():
+    # no substrate -> single slab, no per-layer radiators
+    plain = build_cases(Sweep(material="mose2", tilt_deg=-30.0, energy_keV=30.0))
+    assert all(c["layer_radiators"] is None for c in plain)
+
+    # amorphous substrate -> [film radiator, None] (substrate adds no lines)
+    amorph = build_cases(
+        Sweep(material="mose2", tilt_deg=-30.0, energy_keV=30.0, substrate="sio2")
+    )[0]
+    film, sub = amorph["layer_radiators"]
+    assert sub is None
+    # the film radiator must match the case's scalar crystal keys exactly
+    assert film["crystal"] == amorph["crystal"]
+    assert film["hkl_list"] == amorph["hkl_list"]
+    assert film["B_ang2"] == amorph["B_ang2"]
+    assert film["beam_uvw"] == amorph["beam_uvw"]
+
+    # crystalline substrate -> [film radiator, silicon radiator]
+    cryst = build_cases(
+        Sweep(material="mose2", tilt_deg=-30.0, energy_keV=30.0, substrate="silicon")
+    )[0]
+    assert cryst["layer_radiators"][1]["crystal"] == "silicon"
+    assert len(cryst["layer_radiators"]) == len(cryst["abs_layers"]) == 2
