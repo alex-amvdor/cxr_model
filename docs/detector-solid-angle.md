@@ -26,7 +26,31 @@ broadening. It is an excellent approximation for the **small** Timepix acceptanc
 
 ---
 
-## Improvement — integrate over the face (DESIGNED, NOT IMPLEMENTED)
+## Improvement — integrate over the face (IMPLEMENTED as an opt-in tool)
+
+### Status (TODO P2 #4)
+
+`montecarlo.detector_directions()` + `montecarlo.mc_spectrum_solid_angle()` implement the
+face integral as an **opt-in tool**, validated in `checks/detector_solid_angle_check.py`
+and `tests/test_detector_solid_angle.py`:
+
+- `detector_directions(theta_obs, tilt, …, n_side, chip_mm, dist_mm, domega_sr)` lays the
+  `n_side × n_side` grid on the flat chip facing the source and returns sample-frame `n̂_i`
+  plus weights `dΩ_i = dA_i cos ψ_i / r_i²`, rescaled so `Σ dΩ_i = domega_sr`.
+- `mc_spectrum_solid_angle(…, n_hats, weights)` accumulates `Σ_i w_i · mc_spectrum(n̂=n̂_i)`,
+  reusing the **validated single-angle** `mc_spectrum` per direction (no GPU-kernel surgery).
+- **Regression:** `n_side = 1` reproduces `spec · Ω` to machine precision (max rel ≈ 5e-15).
+- **Wide detector (Δθ ≈ 37°):** the integrated line shifts (≈ −50 eV) and broadens
+  (13 → 123 eV) into the true asymmetric shape, and the integrated width is *narrower* than
+  the symmetric `aperture_fwhm_eV` (196 eV), as anticipated below. **Timepix (Δθ ≈ 2°):**
+  centroid shift ≈ 0.02 eV (negligible).
+
+**Deliberately deferred** — the genuinely expensive, risky part (see Cons): the
+unit-convention refactor that bakes Ω into the checkpoint pipeline (`results.store_result`
+`scale`, dropping the `aperture_fwhm_eV` term, and the `integrated` flag every consumer must
+branch on). The tool above returns the Ω-integrated spectrum directly and does **not** mutate
+that single-`n̂` convention, so it is safe for the wide-detector study without destabilising
+the sweep/plot pipeline.
 
 ### Functionality
 

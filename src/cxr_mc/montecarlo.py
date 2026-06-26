@@ -361,6 +361,72 @@ def tilted_geometry(theta_obs_rad, tilt_polar_rad, tilt_azim_rad=0.0):
     return beam_dir, n_hat
 
 
+def detector_directions(
+    theta_obs_rad,
+    tilt_polar_rad=0.0,
+    tilt_azim_rad=0.0,
+    *,
+    n_side=1,
+    chip_mm=14.0,
+    dist_mm=30.0,
+    domega_sr,
+):
+    """
+    Grid of detector directions {n_hat_i} (SAMPLE frame) tiling a flat square
+    detector chip of side ``chip_mm`` at distance ``dist_mm`` facing the source,
+    with their solid-angle weights -- the geometry input to the solid-angle-
+    INTEGRATED spectrum (mc_spectrum_solid_angle). This replaces the single-n_hat
+    + flat-Omega + analytic aperture_fwhm_eV approximation
+    (docs/detector-solid-angle.md) with a first-principles tiling of the face.
+
+    The central cell sits at polar angle ``theta_obs_rad`` (azimuth 0) in the lab
+    and is mapped into the sample frame through the SAME tilt rotation as
+    tilted_geometry(), so n_side=1 returns exactly that single direction. The chip
+    in-plane axes are chosen so one grid axis spreads in the scattering plane (the
+    polar / Delta-theta direction) and the other out of plane (azimuth). The
+    per-cell weight is the inverse-square + obliquity solid angle
+    ``dOmega_i = dA_i cos(psi_i) / r_i^2`` (psi_i to the chip normal = central
+    line of sight), then the whole set is rescaled so ``sum_i dOmega_i ==
+    domega_sr``: the detector's known total solid angle is conserved and n_side=1
+    reproduces today's ``spec * Omega`` exactly.
+
+    Returns (n_hats, weights): n_hats is (N, 3) unit directions in the sample
+    frame (N = n_side**2); weights is (N,) and sums to ``domega_sr``.
+    """
+    if n_side < 1:
+        raise ValueError("n_side must be >= 1")
+    # tilt rotation (same convention as tilted_geometry): sample normal -> lab
+    st, ct = np.sin(tilt_polar_rad), np.cos(tilt_polar_rad)
+    normal_lab = np.array([st * np.cos(tilt_azim_rad), st * np.sin(tilt_azim_rad), ct])
+    R = _rotation_between(np.array([0.0, 0.0, 1.0]), normal_lab)
+
+    # central lab line of sight c, and chip in-plane axes (chip face _|_ c):
+    #   w lies in the scattering (x-z) plane -> polar (Delta-theta) spread
+    #   u is out of plane (+y)               -> azimuthal spread
+    c = np.array([np.sin(theta_obs_rad), 0.0, np.cos(theta_obs_rad)])
+    w = np.array([np.cos(theta_obs_rad), 0.0, -np.sin(theta_obs_rad)])
+    u = np.array([0.0, 1.0, 0.0])
+
+    step = chip_mm / n_side
+    offs = (np.arange(n_side) - (n_side - 1) / 2.0) * step  # cell centres
+    da = step**2  # cell area [mm^2]
+
+    n_hats = np.empty((n_side * n_side, 3))
+    weights = np.empty(n_side * n_side)
+    i = 0
+    for a in offs:  # out-of-plane (azimuth)
+        for b in offs:  # in-plane (polar)
+            P = dist_mm * c + a * u + b * w  # source -> cell vector [mm]
+            r = float(np.linalg.norm(P))
+            n_lab = P / r
+            cos_psi = float(n_lab @ c)  # obliquity to the chip normal (= c)
+            n_hats[i] = R.T @ n_lab
+            weights[i] = da * cos_psi / r**2
+            i += 1
+    weights *= domega_sr / weights.sum()  # conserve the detector's total Omega
+    return n_hats, weights
+
+
 def _orientation_R(lattice, beam_uvw, azimuth_rad):
     """Rotation applied to EVERY reciprocal vector: the minimal rotation taking the
     crystal direct-lattice direction `beam_uvw` onto +z (the slab normal), then a
@@ -994,6 +1060,52 @@ def mc_spectrum(
     if components:
         return _to_cpu(spec / Ne), _to_cpu(spec_pxr / Ne), _to_cpu(spec_cbs / Ne)
     return _to_cpu(spec / Ne)
+
+
+def mc_spectrum_solid_angle(
+    segments,
+    E_grid_eV,
+    crystal,
+    hkl_list,
+    *,
+    n_hats,
+    weights,
+    **kwargs,
+):
+    """
+    Solid-angle-INTEGRATED per-electron line spectrum dN/dE [photons / eV /
+    electron], already x Omega: ``sum_i weights_i * mc_spectrum(n_hat=n_hats_i)``.
+
+    The finite detector face is tiled by detector_directions() into directions
+    ``n_hats`` (sample frame) carrying solid-angle ``weights``. Because the
+    resonance energy AND the amplitudes depend on n_hat, summing per-direction
+    spectra yields the true, generally ASYMMETRIC integrated lineshape and the
+    across-face intensity gradient -- the first-principles replacement for the
+    flat-Omega + analytic aperture_fwhm_eV pair (docs/detector-solid-angle.md). It
+    reuses the validated single-angle mc_spectrum, so a 1-direction grid
+    reproduces ``spec * Omega`` exactly (the regression anchor).
+
+    Units: the result ALREADY includes the solid angle (the weights carry
+    dOmega). When consuming it do NOT multiply by domega_sr again, and drop the
+    aperture_fwhm_eV term from the detector convolution (keep the EDS-resolution
+    term). This is an opt-in tool; it does not change the checkpoint pipeline's
+    single-n_hat unit convention. ``**kwargs`` forward to mc_spectrum (B_ang2,
+    use_henke, layers, composition, beam_uvw, azimuth_rad, mosaic_*, ...).
+    """
+    n_hats = np.asarray(n_hats, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    if n_hats.ndim != 2 or n_hats.shape[1] != 3:
+        raise ValueError("n_hats must be (N, 3)")
+    if weights.shape != (n_hats.shape[0],):
+        raise ValueError("weights must be (N,) matching n_hats")
+    total = None
+    for n_i, w_i in zip(n_hats, weights, strict=True):
+        spec_i = np.asarray(
+            mc_spectrum(segments, E_grid_eV, crystal, hkl_list, n_hat=n_i, **kwargs)
+        )
+        contrib = float(w_i) * spec_i
+        total = contrib if total is None else total + contrib
+    return total
 
 
 # ---- bremsstrahlung background -------------------------------------------------
