@@ -26,9 +26,9 @@ Item generation:
 
 ## P2 — medium (experiment match + usability)
 
-1. **USER EDITED: pyelsepa / ELSEPA transport.** → `feature/elsepa-transport`.
+1. **USER EDIT: pyelsepa / ELSEPA transport.** → `feature/elsepa-transport`.
    Gated on installing eScatter/cslib/pint for validation.
-2. **USER ADDED: eScatter/cstool/Nebula investigation.** Evaluate merits of robustness,
+2. **USER ADD: eScatter/cstool/Nebula investigation.** Evaluate merits of robustness,
    accuracy improvement, repo simplification, and any other critical items for a potential
    move to use of one or more of the listed libraries/tools. In particular, evaluate if the
    added physics of the Penn dielectric fxn, tracking secondary electrons, etc., is worth
@@ -51,3 +51,9 @@ Item generation:
    useful-but-rough ones, remove the extraneous.
 3. **Notebook/repo reorg.** Move root analysis/scan/export notebooks + scripts into
    `src/cxr_mc/` or new subdirs; consider a `src/` restructure and re-triage if so.
+4. **USER ADD: Audit git commit process.** ruff, ruff-format, nbqa-ruff, nbstripout.
+   User manually added error/typechecking ignores to pyproject.toml to force commits
+   to pass. Edit pyproject.toml to ignore only truly trivial matters, analyze repo to
+   get commits to pass with correct ruleset. Also, investigate why user's VS Code
+   git GUI interface refuses to commit (can only commit via commandline) --
+   VS Code dialogue window opens to report "`pre-commit` not found.  Did you forget to activate your virtualenv?"

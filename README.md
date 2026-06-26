@@ -91,25 +91,26 @@ directory and the data travels with an installed wheel. `*.pkl` checkpoints and
 
 ### The `cxr_mc` package modules
 
-| Module | Responsibility |
-|---|---|
-| `crystallography.py` | Crystal DB loader (`CRYSTALS` from TOML), reciprocal vectors, structure factor / `chi_g` (PXR) / `U_g` (CBS), Debye–Waller, absorption length, `dominant_reflections()`. Physical constants. No GPU. |
-| `montecarlo.py` | The transport + radiation pipeline: `simulate_trajectories` (MC electron transport), `mc_spectrum` (coherent lines), `mc_brem_spectrum` (Born+Elwert brem), detector helpers, `tilted_geometry`, and the case drivers `run_case`/`run_cases`. **Optional CuPy GPU** with automatic CPU fallback. |
-| `sweep.py` | `Sweep` dataclass + `build_cases`. Every physical knob is a scalar (fixed) or a sequence (swept); cases = the Cartesian product. |
-| `config.py` | Shared run config imported by **both** notebooks so they can't drift: `default_settings()`, the per-material sweep grids, and the builders `material_sweep(mat)` / `trajectory_sweep(mat)`. **This is where you tune a material's grid.** |
-| `run.py` | `run_sweep(...)`: checkpointed, crash-safe, resumable driver around `run_cases`; `load_checkpoint`/`cases_from_results` for the viz side. |
-| `results.py` | `Settings` dataclass, per-record metrics (`peak_flux`, `coherent_flux`, `line_flux`, `line_quality`, …), and ranking helpers (`selection_score`, `top_geometries`). |
-| `plots.py` | All plotting: `browse`, `plot_heatmaps`, `plot_metric_vs`, `plot_best_spectra`, `plot_material_comparison`, and the electron-penetration figures. |
-| `timepix_response.py` | Per-photon forward model of the Timepix3 (Si sensor): photoabsorption, e–h pairs, charge sharing, and the **~1.9 keV counting threshold** (the headline effect — it eats sub-2 keV line flux). |
-| `eaglexo_response.py` | Raptor Eagle XO CCD: a clean `solid_angle × QE(E)` operator (windowless direct-detection CCD). |
-| `atomic_form_factors.py` | Complex atomic form factor `F(g,E) = f0(g) + f'(E) + i·f''(E)` via **xraydb** (Waasmaier–Kirfel `f0` + Chantler/FFAST `f', f''`); no hard-coded tables. |
+
+| Module                   | Responsibility                                                                                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crystallography.py`     | Crystal DB loader (`CRYSTALS` from TOML), reciprocal vectors, structure factor / `chi_g` (PXR) / `U_g` (CBS), Debye–Waller, absorption length, `dominant_reflections()`. Physical constants. No GPU.                                                                                           |
+| `montecarlo.py`          | The transport + radiation pipeline:`simulate_trajectories` (MC electron transport), `mc_spectrum` (coherent lines), `mc_brem_spectrum` (Born+Elwert brem), detector helpers, `tilted_geometry`, and the case drivers `run_case`/`run_cases`. **Optional CuPy GPU** with automatic CPU fallback. |
+| `sweep.py`               | `Sweep` dataclass + `build_cases`. Every physical knob is a scalar (fixed) or a sequence (swept); cases = the Cartesian product.                                                                                                                                                                |
+| `config.py`              | Shared run config imported by**both** notebooks so they can't drift: `default_settings()`, the per-material sweep grids, and the builders `material_sweep(mat)` / `trajectory_sweep(mat)`. **This is where you tune a material's grid.**                                                        |
+| `run.py`                 | `run_sweep(...)`: checkpointed, crash-safe, resumable driver around `run_cases`; `load_checkpoint`/`cases_from_results` for the viz side.                                                                                                                                                       |
+| `results.py`             | `Settings` dataclass, per-record metrics (`peak_flux`, `coherent_flux`, `line_flux`, `line_quality`, …), and ranking helpers (`selection_score`, `top_geometries`).                                                                                                                            |
+| `plots.py`               | All plotting:`browse`, `plot_heatmaps`, `plot_metric_vs`, `plot_best_spectra`, `plot_material_comparison`, and the electron-penetration figures.                                                                                                                                                |
+| `timepix_response.py`    | Per-photon forward model of the Timepix3 (Si sensor): photoabsorption, e–h pairs, charge sharing, and the**~1.9 keV counting threshold** (the headline effect — it eats sub-2 keV line flux).                                                                                                 |
+| `eaglexo_response.py`    | Raptor Eagle XO CCD: a clean`solid_angle × QE(E)` operator (windowless direct-detection CCD).                                                                                                                                                                                                  |
+| `atomic_form_factors.py` | Complex atomic form factor`F(g,E) = f0(g) + f'(E) + i·f''(E)` via **xraydb** (Waasmaier–Kirfel `f0` + Chantler/FFAST `f', f''`); no hard-coded tables.                                                                                                                                        |
 
 ---
 
 ## Installation
 
 The project is managed by [**uv**](https://docs.astral.sh/uv/) with a committed
-lockfile (`uv.lock`) and requires **Python ≥ 3.14**.
+lockfile (`uv.lock`) and requires **Python ≥ 3.13**.
 
 ```bash
 git clone https://github.com/Quantum-Light-Matter-Cooperative-QLMC/cxr-mc.git
@@ -198,15 +199,16 @@ checkpoints back and do all the matplotlib/PDF work locally.
 Crystals are defined in [`src/cxr_mc/data/crystal_structures.toml`](src/cxr_mc/data/crystal_structures.toml)
 (lattice + basis). Current catalog (TOML keys):
 
-| Key | Material | Structure |
-|---|---|---|
-| `diamond` | diamond | cubic |
-| `silicon` | silicon | cubic |
-| `lif` | LiF | cubic (rock salt) |
-| `hopg` | highly-oriented pyrolytic graphite | hexagonal (fiber-textured) |
-| `mose2`, `wse2`, `mote2` | 2H-MoSe₂, 2H-WSe₂, 2H-MoTe₂ | hexagonal (2H TMD) |
-| `mos2`, `ws2` | 2H-MoS₂, 2H-WS₂ | hexagonal (2H TMD) |
-| `ptse2`, `hfse2`, `zrse2` | PtSe₂, HfSe₂, ZrSe₂ | hexagonal (1T TMD) |
+
+| Key                       | Material                           | Structure                  |
+| --------------------------- | ------------------------------------ | ---------------------------- |
+| `diamond`                 | diamond                            | cubic                      |
+| `silicon`                 | silicon                            | cubic                      |
+| `lif`                     | LiF                                | cubic (rock salt)          |
+| `hopg`                    | highly-oriented pyrolytic graphite | hexagonal (fiber-textured) |
+| `mose2`, `wse2`, `mote2`  | 2H-MoSe₂, 2H-WSe₂, 2H-MoTe₂     | hexagonal (2H TMD)         |
+| `mos2`, `ws2`             | 2H-MoS₂, 2H-WS₂                  | hexagonal (2H TMD)         |
+| `ptse2`, `hfse2`, `zrse2` | PtSe₂, HfSe₂, ZrSe₂             | hexagonal (1T TMD)         |
 
 > **Note:** graphite is keyed `hopg` — there is no `graphite` key. HOPG is
 > fiber-textured, so **only (00l) reflections are coherent** (random in-plane
@@ -256,11 +258,12 @@ is **yet validated against measured line widths** (see *Validation*).
 
 Detector geometry is **per-instrument — never transfer numbers between setups.**
 
-| Setup | θ_obs | Δθ | Ω |
-|---|---|---|---|
-| Our **Timepix3** quad (28 mm at 0.4 m) | 90° | ≈1.76° | ≈9.5×10⁻⁴ sr |
-| Zhai SEM (JEOL 7800) | 119° | 16.6° | 0.066 sr |
-| Zhai TEM (JEOL 2010HR) | ≈112.5° | ≈12° | ≈0.034 sr |
+
+| Setup                                 | θ_obs    | Δθ     | Ω               |
+| --------------------------------------- | ----------- | ---------- | ------------------ |
+| Our**Timepix3** quad (28 mm at 0.4 m) | 90°      | ≈1.76° | ≈9.5×10⁻⁴ sr |
+| Zhai SEM (JEOL 7800)                  | 119°     | 16.6°   | 0.066 sr         |
+| Zhai TEM (JEOL 2010HR)                | ≈112.5° | ≈12°   | ≈0.034 sr       |
 
 The intrinsic spectra are detector-agnostic; the **Timepix3** and **Eagle XO**
 forward models apply their own quantum efficiency / response downstream. The
