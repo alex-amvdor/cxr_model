@@ -1,0 +1,17 @@
+# EXAMPLE / TEMPLATE ONLY -- synthetic placeholder points, NOT real data.
+# Not loaded by anchor_figures.py (which reads zhai_fig1c.csv). Copy this file to
+# zhai_fig1c.csv and replace the rows with digitized points to activate the overlay.
+# Provenance (fill in when using real data): <paper>, Fig 1c, <digitizer>, <date>.
+series,energy_eV,intensity
+17.5keV,650,0.10
+17.5keV,690,0.95
+17.5keV,730,0.20
+20keV,740,0.12
+20keV,780,0.97
+20keV,820,0.22
+22.5keV,820,0.13
+22.5keV,860,0.98
+22.5keV,900,0.24
+25keV,900,0.15
+25keV,940,1.00
+25keV,980,0.25

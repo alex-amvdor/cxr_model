@@ -295,6 +295,12 @@ soft lines.
 - `feranchuk_vs_zhai_check.py` — analytic vs. MC pipeline agreement.
 - `kinematic_validity_check.py` — DYN/recoil audit + van-der-Waals merit table.
 - `zhai_fig1c_check.ipynb`, `cxr_analysis_feranchuk.ipynb` — figure reproductions.
+- `anchor_figures.py` + `zhai_fig1c_validation.ipynb` — **model-vs-theory anchor
+  figures**: the MC spectra against the Eq.(10) dispersion-relation line energies,
+  the Eq.(12) closed-form flux (single-segment MC/closed ratio ≈ 1), and the
+  bulk-vs-film enhancement. Drop a digitized Fig 1c curve in
+  `checks/reference_data/zhai_fig1c.csv` (schema in that dir's README) and the
+  spectra figure overlays the measured data automatically.
 - `src/cxr_mc/_compile_nb.py` — compiles every notebook's code cells (syntax smoke test).
 
 ### What remains to be validated / approximated
