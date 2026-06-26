@@ -5,11 +5,12 @@ A single console script with subcommands, wired in pyproject.toml as
 
     cxr scan <material> [--quick] [--workers N]   # run a sweep -> checkpoint
     cxr export [stem]                             # analysis.ipynb -> results/<stem>.pdf
+    cxr slim <checkpoint> [--drop-wide-brem] [--downcast]   # shrink a pkl for transfer
 """
 
 import argparse
 
-from . import __version__, export, scan
+from . import __version__, export, scan, slim
 
 
 def main(argv=None):
@@ -21,6 +22,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="command", required=True)
     scan.add_subparser(sub)
     export.add_subparser(sub)
+    slim.add_subparser(sub)
 
     args = ap.parse_args(argv)
     return args.func(args)

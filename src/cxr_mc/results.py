@@ -209,6 +209,64 @@ def select_results(results, **constraints):
     return out
 
 
+# record array fields, by size; the wide-brem pair is the largest (full-range grid)
+_RECORD_ARRAY_FIELDS = ("E_grid", "spec", "brem", "E_grid_brem", "brem_wide")
+_WIDE_BREM_FIELDS = ("brem_wide", "E_grid_brem")
+
+
+def slim_results(results, *, drop_wide_brem=False, downcast=False, fields=None, **constraints):
+    """Return a NEW results store carrying only what a viz session needs, to cut a
+    checkpoint's on-disk / transfer size (TODO P2 #5). Does NOT mutate ``results``;
+    the output keeps the ``{name: {E0: record}}`` shape, so it loads and plots
+    exactly like a full checkpoint.
+
+    The single-pickle-per-material checkpoint stores the full union of every swept
+    config at full resolution, so transferring it from the GPU box is gigabyte-
+    scale and mostly stale for any one plot. This trims it three independent ways:
+
+    constraints : case-field filters, identical to :func:`select_results` (scalar /
+        list / callable), e.g. ``tilt_deg=0.0, E0_keV=[25, 30]`` -- keep only those
+        records. None given keeps every record.
+    drop_wide_brem : drop the full-range bremsstrahlung arrays (``brem_wide`` +
+        ``E_grid_brem``), the largest fields, when the line-grid ``brem`` is enough
+        for the plots you'll make remotely (``detected_background`` /
+        ``summary_table`` fall back to it; the wide-range log curve is what needs
+        them).
+    downcast : store the spectral arrays as float32 -- half the bytes, ample for
+        viz. Scalars and ``case`` are untouched.
+    fields : explicit allow-list of record keys to keep besides ``case`` (always
+        kept); overrides ``drop_wide_brem``. Unknown keys are ignored.
+
+    Round-trips through ``pickle`` and ``run.load_checkpoint`` unchanged. For the
+    on-disk wrapper that reports the size saved, see ``run.slim_checkpoint`` /
+    ``cxr slim``.
+    """
+    base = select_results(results, **constraints) if constraints else results
+    drop = set(_WIDE_BREM_FIELDS) if (fields is None and drop_wide_brem) else set()
+    keep_keys = (set(fields) | {"case"}) if fields is not None else None
+    out = {}
+    for name, by_E in base.items():
+        new_by_E = {}
+        for E0, r in by_E.items():
+            if keep_keys is not None:
+                nr = {k: v for k, v in r.items() if k in keep_keys}
+            else:
+                nr = {k: v for k, v in r.items() if k not in drop}
+            if downcast:
+                nr = {
+                    k: (
+                        np.asarray(v, dtype=np.float32)
+                        if (k in _RECORD_ARRAY_FIELDS and v is not None)
+                        else v
+                    )
+                    for k, v in nr.items()
+                }
+            new_by_E[E0] = nr
+        if new_by_E:
+            out[name] = new_by_E
+    return out
+
+
 def _peak(r):
     """The selection metric: the highest spectral flux value, max(spectrum)."""
     return float(np.max(r["spec"]))

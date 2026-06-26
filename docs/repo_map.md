@@ -30,9 +30,11 @@ Packaged data resolves via `cxr_mc.DATA_DIR`, so imports work from any cwd.
 ## Entry points
 
 - **`cxr` console script** → `cli:main` (`pyproject.toml [project.scripts]`),
-  dispatching the `scan` and `export` subcommands.
+  dispatching the `scan`, `export` and `slim` subcommands.
 - **`cxr scan <material>`** → `scan:main` → `run.run_sweep` → writes
   `checkpoints/<material>.pkl`. Root shim: `scan.py`.
+- **`cxr slim <checkpoint>`** → `slim:slim_checkpoint` → `results.slim_results`:
+  shrink a checkpoint pickle for transfer (drop wide-brem / float32 / filter configs).
 - **Notebooks**: `scan.ipynb` (sweep) → `analysis.ipynb` (viz); both read the
   per-material grids in `config.py`.
 - **Sweep worker**: `montecarlo.run_case` (module-level so it pickles into the
@@ -102,9 +104,9 @@ Headless sweep entry: parse args → build cases → `run_sweep` → checkpoint.
 ### `results.py`
 Result records, derived line metrics, and ranking/selection.
 - Public: `Settings` (dataclass), `store_result`, `records`, `filter_results`,
-  `select_results`, `sweep_values`, `line_metrics`, `line_index`, `line_quality`,
-  `selection_score`, `top_geometries`, `summary_table`, `show_summary`,
-  `show_top`, `best_azimuth`, `detected_background`.
+  `select_results`, `slim_results`, `sweep_values`, `line_metrics`, `line_index`,
+  `line_quality`, `selection_score`, `top_geometries`, `summary_table`,
+  `show_summary`, `show_top`, `best_azimuth`, `detected_background`.
 - Deps: `montecarlo`, `sweep`.
 
 ### `plots.py`
@@ -144,11 +146,17 @@ resolution, Poisson counts).
 ### `cli.py`
 The `cxr` console-script dispatcher.
 - Public: `main`.
-- Deps: `scan`, `export`, `__version__`.
+- Deps: `scan`, `export`, `slim`, `__version__`.
 
 ### `export.py`
 `cxr export` subcommand — render figures / PDFs from a checkpoint.
 - Public: `add_subparser`, `main`.
+
+### `slim.py`
+`cxr slim` subcommand — shrink a checkpoint pickle for transfer (drop the
+full-range brem arrays, downcast spectra to float32, filter configs).
+- Public: `slim_checkpoint`, `add_subparser`, `main`.
+- Deps: `results` (`slim_results`).
 
 ### `__init__.py`
 Package root: exposes `DATA_DIR` (packaged-data resolver) and `__version__`.
