@@ -5,9 +5,11 @@ Keep this file short.
 Read `docs/repo_map.md` before exploring source files.
 `README.md`has the science-facing overview
 `docs/`has the design notes
-`TODO.md` has the task backlog
 `docs/physics-validation-ledger.md` tracks which physics is verified; `docs/validation/README.md` is the method
+`TODO.md` contains the task backlog
 
+- `TODO.md` on `main` contains full triaged list of tasks + top-level summaries
+- `TODO.md` on branches contains details scoped to their specific task; see `TODO.md` for conventions.
 
 ## Canonical commands
 
