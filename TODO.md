@@ -38,3 +38,4 @@ against effort and risk.
 9. **Polars investigation.** Evaluate Polars for packaging large parameter-sweep metadata.
 10. **TODO formatting convention.** `main` carries minimal summaries; full detail lives
     on the item's branch, slimmed to only that branch's task. (This file follows it.)
+    Enforced by the `/docs:todo-sync` command.
