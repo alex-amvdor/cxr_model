@@ -172,6 +172,29 @@ def _(browse, res, settings):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Intrinsic spectra — Altair (interactive)
+
+    The same intrinsic per-energy spectra, rendered with **Altair / Vega-Lite**
+    instead of matplotlib: one line per beam energy at the lowest polar tilt
+    (brem dashed). Pan/zoom in the browser — far lighter than a matplotlib redraw.
+    This is the first slice of the matplotlib → altair migration; the matplotlib
+    `plots/` figures above are untouched.
+    """)
+    return
+
+
+@app.cell
+def _(res, settings):
+    from cxr_mc.plots.altair_spectra import spectrum_chart
+
+    # Pass tilt_deg=... to pick a different polar tilt (default: the lowest present).
+    spectrum_chart(res, settings)
+    return
+
+
 @app.cell
 def _(cases, plot_scan, res, settings):
     # Unified parametric scan: plot_scan auto-picks a HEATMAP (when both axes sweep

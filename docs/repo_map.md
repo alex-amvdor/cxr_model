@@ -150,6 +150,13 @@ freezes the export set). Submodule DAG (leaf → driver):
 - `interactive` — `browse`, `browse_plotly`, `stream_chunk`, `plot_chunk`
   (the slider/streaming drivers that dispatch to the `spectra`/`detectors`
   drawers). Top of the DAG. Deps: `_style`, `_common`, `spectra`, `detectors`.
+- `altair_spectra` — Altair/Vega-Lite renderer for the intrinsic spectra
+  (`spectrum_chart`, `spectrum_frame`): a fast, interactive alternative to the
+  matplotlib `spectra` figures, sharing `_common._line_brem` so the physics is
+  identical. Intentionally **NOT** re-exported from the package (would break the
+  frozen export guard) — import via `cxr_mc.plots.altair_spectra`. First slice of
+  the matplotlib → altair migration (`tests/test_altair_plots.py`). Deps:
+  `_common`, `results`, `altair`, `pandas`.
 - Deps: `montecarlo`, `results`, `timepix_response`, `eaglexo_response`.
 
 ## Detector forward models
