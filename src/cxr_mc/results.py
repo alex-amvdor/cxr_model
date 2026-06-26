@@ -267,6 +267,45 @@ def slim_results(results, *, drop_wide_brem=False, downcast=False, fields=None, 
     return out
 
 
+def results_dataframe(
+    results,
+    settings=None,
+    *,
+    metrics=True,
+    rel_prominence=0.03,
+    n_fwhm=3.0,
+    metric="sharpness",
+):
+    """Tidy long-format ``DataFrame``: one row per (config, beam energy), columns =
+    every swept ``case`` knob + the derived :func:`line_metrics`. This is the
+    first-class primitive for slicing/faceting many simultaneously-swept knobs
+    (TODO P3 #9) -- ``df.groupby`` / ``df.pivot_table`` / seaborn ``relplot`` /
+    plotly over ANY subset of knobs, instead of the heatmap/line auto-pick. See
+    :func:`plots.facet_metric` for a small-multiples view built on it.
+
+    metrics : include the line metrics (``peak_flux``, ``coherent_flux``,
+        ``line_eV``, ``fwhm_eV``, ``line_flux``, ``line_frac``, ``total_flux``,
+        ``coherent_brem_ratio``, ``line_quality``); needs a :class:`Settings`
+        (defaults to ``Settings()``). False -> just the case knobs + the cheap
+        stored scalars (``E_pk``, ``eta``), skipping the peak-finding.
+    """
+    import pandas as pd
+
+    if settings is None:
+        settings = Settings()
+    rows = []
+    for name, by_E in results.items():
+        for E0, r in by_E.items():
+            row = {"name": name, **r["case"]}
+            row.setdefault("E0_keV", E0)
+            row["E_pk"] = r.get("E_pk")
+            row["eta"] = r.get("eta")
+            if metrics:
+                row.update(line_metrics(r, settings, rel_prominence, n_fwhm, metric))
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def _peak(r):
     """The selection metric: the highest spectral flux value, max(spectrum)."""
     return float(np.max(r["spec"]))

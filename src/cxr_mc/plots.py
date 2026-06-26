@@ -2110,6 +2110,109 @@ def plot_heatmaps(
     return figs
 
 
+def facet_metric(
+    results,
+    settings,
+    *,
+    x="thickness_ang",
+    y="peak_flux",
+    row=None,
+    col=None,
+    hue="E0_keV",
+    reduce="max",
+    logx=False,
+    logy=False,
+    sharey=True,
+    rel_prominence=0.03,
+    line_metric="sharpness",
+    max_facets=36,
+):
+    """Small-multiples ("facet grid") view of a many-knob sweep (TODO P3 #9): a
+    grid of subplots faceted by the ``row`` and ``col`` knobs, each plotting ``y``
+    vs ``x`` with one line per ``hue`` value.
+
+    Unlike :func:`plot_metric_vs` (which reduces every OTHER swept dimension to its
+    best geometry), this EXPOSES the chosen knobs as the grid/line axes -- the
+    first-class way to eyeball several simultaneously-swept knobs at once::
+
+        facet_metric(res, s, x="thickness_ang", y="line_flux",
+                     row="crystal", col="tilt_deg", hue="E0_keV", logx=True)
+
+    ``x``/``y``/``hue`` and the facet knobs are any column of
+    :func:`results.results_dataframe` (every case knob + the line metrics). Any
+    remaining knobs are reduced per (facet, x, hue) cell by ``reduce``
+    (``"max"|"min"|"mean"|"median"``). Returns the Figure (None if empty)."""
+    from .results import results_dataframe
+
+    df = results_dataframe(results, settings, rel_prominence=rel_prominence, metric=line_metric)
+    if df.empty:
+        print("no results yet")
+        return None
+    for col_name in (x, y, hue, row, col):
+        if col_name is not None and col_name not in df.columns:
+            print(f"facet_metric: {col_name!r} is not a column; have {sorted(df.columns)}")
+            return None
+
+    row_vals = sorted(df[row].dropna().unique()) if row else [None]
+    col_vals = sorted(df[col].dropna().unique()) if col else [None]
+    if len(row_vals) * len(col_vals) > max_facets:
+        print(
+            f"facet_metric: {len(row_vals)}x{len(col_vals)} facets exceeds "
+            f"max_facets={max_facets}; truncating (raise max_facets to see all)."
+        )
+        row_vals = row_vals[: max(1, max_facets // len(col_vals))]
+
+    nrow, ncol = len(row_vals), len(col_vals)
+    fig, axes = plt.subplots(
+        nrow, ncol, figsize=(4.5 * ncol, 3.2 * nrow), squeeze=False, sharex=True, sharey=sharey
+    )
+    for i, rv in enumerate(row_vals):
+        for j, cv in enumerate(col_vals):
+            ax = axes[i][j]
+            sub = df
+            if row is not None:
+                sub = sub[sub[row] == rv]
+            if col is not None:
+                sub = sub[sub[col] == cv]
+            hue_groups = sub.groupby(hue) if hue is not None else [(None, sub)]
+            for hv, g in hue_groups:
+                agg = g.groupby(x)[y].agg(reduce).reset_index().sort_values(x)
+                label = None if hue is None else f"{hue}={hv:g}" if _isnum(hv) else f"{hue}={hv}"
+                ax.plot(agg[x], agg[y], marker="o", ms=3, lw=1.2, label=label)
+            if logx:
+                ax.set_xscale("log")
+            if logy:
+                ax.set_yscale("log")
+            ax.grid(alpha=0.3)
+            title = " | ".join(
+                t
+                for t in (
+                    None if row is None else f"{row}={rv}",
+                    None if col is None else f"{col}={cv}",
+                )
+                if t
+            )
+            if title:
+                ax.set_title(title, fontsize=9)
+            if i == nrow - 1:
+                ax.set_xlabel(x)
+            if j == 0:
+                ax.set_ylabel(y)
+    if hue is not None:
+        axes[0][0].legend(fontsize=8, title=hue)
+    fig.tight_layout()
+    return fig
+
+
+def _isnum(v):
+    """True for things f'{v:g}' accepts (numbers, not strings/None)."""
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def plot_metric_vs(
     results,
     settings,

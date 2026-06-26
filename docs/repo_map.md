@@ -104,7 +104,8 @@ Headless sweep entry: parse args → build cases → `run_sweep` → checkpoint.
 ### `results.py`
 Result records, derived line metrics, and ranking/selection.
 - Public: `Settings` (dataclass), `store_result`, `records`, `filter_results`,
-  `select_results`, `slim_results`, `sweep_values`, `line_metrics`, `line_index`,
+  `select_results`, `slim_results`, `sweep_values`, `results_dataframe`,
+  `line_metrics`, `line_index`,
   `line_quality`, `selection_score`, `top_geometries`, `summary_table`,
   `show_summary`, `show_top`, `best_azimuth`, `detected_background`.
 - Deps: `montecarlo`, `sweep`.
@@ -114,7 +115,7 @@ All plotting — Matplotlib/Plotly/Datashader. Large; grouped by figure type:
 - Spectra: `plot_by_energy`, `plot_full_spectrum`, `plot_best_spectra`,
   `plot_material_comparison`, `plot_mosaic_comparison`.
 - Sweeps/metrics: `plot_peak_vs_tilt`, `plot_tilt_panel`, `plot_scan`,
-  `plot_heatmaps`, `plot_metric_vs`.
+  `plot_heatmaps`, `plot_metric_vs`, `facet_metric` (small-multiples over many knobs).
 - Detectors: `plot_timepix_efficiency` / `_detected` / `_poisson`,
   `plot_eaglexo_efficiency` / `_detected` / `_charge` / `_charge_map`.
 - Trajectories: `plot_electron_trajectories`, `plot_trajectory_grid`,
