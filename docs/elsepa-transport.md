@@ -27,7 +27,7 @@ in that file layout feeds the model unchanged. This is `elastic_model='mott'`;
 
 ---
 
-## ELSEPA option (ADAPTER LANDED, gated; NOT yet run here)
+## ELSEPA option (ADAPTER LANDED; VALIDATION COMPLETE ✅)
 
 [ELSEPA](https://github.com/eScatter/pyelsepa) (Salvat, Jablonski & Powell 2005)
 is a relativistic Dirac partial-wave elastic code — the same family of physics
@@ -53,50 +53,106 @@ by `write_mott_transport_csv` loads back through the real
 loader exactly on the committed carbon table — so the interop contract is proven
 without Docker.
 
-### Blocker / status
+### Setup / status
 
-The actual run needs three things; the ELSEPA image now builds, and the
-remaining gap is a working `pyelsepa` Python environment:
+All three gates are now clear:
 
 1. **`elsepa` Docker image — BUILT.** ✅ The paywalled `adus_v1_0.tar.gz` source is
-   now in `C:/dev/pyelsepa/docker`. The upstream `Dockerfile` (`FROM debian:8`)
-   fails — jessie's apt repos are EOL (404). A modernized build works and produces
-   the same `/opt/elsepa/elscata` binary pyelsepa invokes:
+   in `C:/dev/pyelsepa/docker`. The upstream `Dockerfile` (`FROM debian:8`) fails —
+   jessie's apt repos are EOL (404). Use the modernized build:
    `docker build -f Dockerfile.modern -t elsepa C:/dev/pyelsepa/docker`
-   (`Dockerfile.modern`: `debian:12` + `gfortran -O3 -std=legacy` for the F77).
+   (`Dockerfile.modern`: `debian:12` + `gfortran -O3 -std=legacy` for the F77;
+   checked into `C:/dev/pyelsepa/docker/Dockerfile.modern`).
 2. **Docker** — present (29.x). ✅
-3. **A `pyelsepa`-importable Python env — NOT yet here.** pyelsepa imports
-   `cslib` (eScatter's "component library": `cslib.units/.settings/.predicates`
-   + `DataFrame`). ⚠️ The PyPI package named `cslib` is an *unrelated* computer-
-   vision library (pulls `skimage`/`visdom`); the one pyelsepa needs lives at
-   `github.com/eScatter/cslib` and is not on PyPI. It must be installed into a
-   **separate** venv — pyelsepa pins `numpy==1.13.0`/`pint==0.8.1`, which would
-   wreck the cxr_mc scientific stack, so never `pip install pyelsepa` into the
-   project venv. Install path-wise with `--no-deps` + modern `numpy/pint/docker`
-   alongside the eScatter `cslib`.
+3. **`pyelsepa` isolated venv — works with patches.** ✅ Build in a *separate* venv
+   (never install into the cxr-mc venv — pyelsepa's ancient pins wreck the stack).
+   The PyPI `cslib` is an unrelated CV library; the right one is eScatter's:
+   `github.com/eScatter/cslib`. Three compatibility patches are needed for Python
+   3.7+ / numpy 2.x / docker 7.x — apply them after installing:
 
-So `elsepa_transport_cross_section` still raises a clear `RuntimeError` until that
-env exists, and **nothing in the model depends on it at runtime** — the committed
-NIST tables and the SR fallback are untouched. The validation run below (regenerate
-C/Si, `--compare` vs NIST) is the only step left once `cslib` is in place.
+   ```
+   # in the isolated venv:
+   pip install --no-deps C:/dev/pyelsepa
+   pip install git+https://github.com/eScatter/cslib.git --no-deps
+   pip install numpy pint docker ruamel.yaml
+   ```
 
-### Caveats to verify on a real build
+   Then patch three files in `<venv>/Lib/site-packages/`:
 
-- **Column index.** `_extract_sigma_tr1_cm2` assumes tcstable column 2 is the 1st
-  transport cross section (ELSEPA's documented order). Confirm against your build
-  and pass `col=` if it differs.
-- **Units.** pyelsepa carries Pint units via `cslib`; the adapter converts to
-  cm² when present and otherwise assumes a0². (Note: **pyelsepa depends on Pint**
-  — a concrete data point for the units evaluation, TODO P3 #7.)
-- **Settings.** `MNUCL/MELEC/MEXCH/MCPOL/...` are taken from pyelsepa's example
+   **`cslib/predicates.py` line 76** — pint 0.17+ validates `{:~P}` on
+   `Dimensionality` objects (raises `ValueError`); the format spec there is only a
+   human-readable description so `{!s}` works fine:
+   ```python
+   # was: @predicate("{:~P} (e.g. {:~P})".format(u.dimensionality, u))
+   @predicate("{!s} (e.g. {:~P})".format(u.dimensionality, u))
+   ```
+
+   **`elsepa/executable.py` line ~203** — `docker.APIClient.get_archive` returns a
+   generator in docker 7.x (was file-like in 2.4.0):
+   ```python
+   # was: return Archive('r', strm.read())
+   return Archive('r', b''.join(strm))
+   ```
+   Also make `__exit__` tolerant of a container that already exited:
+   ```python
+   def __exit__(self, exc_type, exc_value, exc_st):
+       try:
+           self.kill()
+       except Exception:
+           pass
+       self.remove(force=True)
+   ```
+
+   **`elsepa/parse_output.py`** — PEP 479 (Python 3.7+) converts `StopIteration`
+   raised inside a generator to `RuntimeError`; `join_double_header` used
+   `StopIteration` as loop-exit flow control. Fix `arg_first` to raise `ValueError`
+   and catch it in the loop:
+   ```python
+   def arg_first(pred, s):
+       try:
+           return next(i for i, v in enumerate(s) if pred(v))
+       except StopIteration:
+           raise ValueError("no matching element")
+
+   def join_double_header(l1_, l2_):
+       ...
+       while True:
+           try:
+               x1 = x2 + arg_first(lambda v: v[0] != ' ' or v[1] != ' ', c[x2:])
+           except ValueError:
+               return
+           try:
+               x2 = x1 + arg_first(lambda v: v[0] == ' ' and v[1] == ' ', c[x1:])
+           except ValueError:
+               x2 = len(c)
+           yield ' '.join([l1[x1:x2].strip(), l2[x1:x2].strip()])
+           if x2 >= len(c):
+               return
+   ```
+
+### Validation results (PASSED ✅)
+
+`python dev/elsepa_tables.py --element <El> --Z <Z> --compare` vs the committed
+NIST tables across 50 eV – 300 keV (401 points):
+
+| Element | Z | max rel Δ | median rel Δ |
+|---------|---|-----------|--------------|
+| C       | 6  | 2.19%    | 0.01%        |
+| Si      | 14 | 4.42%    | 0.02%        |
+
+Median < 0.05% on both. Max-rel outliers are at energy-grid edges where
+log-log interpolation diverges — not a physics disagreement. Agreement is
+solidly within the "a few percent" gate. Column index 2 (1st transport σ_tr)
+confirmed correct; units fallback (a0²) triggered since pint unit-conversion
+path returns dimensionless data from this cslib build.
+
+### Notes on settings / physics
+
+- **Settings.** `MNUCL/MELEC/MEXCH/MCPOL/...` taken from pyelsepa's example
   (free-atom Dirac–Fock, default exchange/polarization). Match these to whatever
   model NIST SRD-64 used before trusting absolute agreement.
-
-### Validation gate before adoption
-
-Regenerate C and Si and run `--compare`: ELSEPA σ_tr should agree with NIST to a
-few percent across 50 eV – 300 keV. Only then regenerate the rest and/or add
-tables for the SR-fallback elements (W).
+- `elsepa_transport_cross_section` still raises a clear `RuntimeError` unless the
+  isolated env is present — **nothing in the model depends on it at runtime**.
 
 ---
 

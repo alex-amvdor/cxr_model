@@ -14,13 +14,16 @@ makes the output a drop-in replacement for the committed table.
 
 GATING / status: the actual ELSEPA run needs Docker + the ``elsepa`` image (built
 from the paywalled ``adus_v1_0.tar.gz`` Fortran source -- see
-``C:/dev/pyelsepa/docker``) + ``pyelsepa`` installed. As of this writing the image
-is NOT built on this box, so :func:`elsepa_transport_cross_section` raises a clear,
-actionable error and the committed NIST tables + the analytic screened-Rutherford
+``C:/dev/pyelsepa/docker``) + ``pyelsepa`` installed in an isolated venv (its
+ancient numpy/pint pins must stay out of the cxr-mc stack). See
+``docs/elsepa-transport.md`` for the full setup recipe (Dockerfile.modern,
+three compatibility patches for Python 3.7+/numpy 2.x/docker 7.x) and the
+validation results (C: 2.19% max rel, Si: 4.42% max rel vs NIST). Until the
+isolated env is present, :func:`elsepa_transport_cross_section` raises a clear,
+actionable error; the committed NIST tables + the analytic screened-Rutherford
 fallback remain in force -- nothing in the model depends on this tool at runtime.
 The CSV writer/reader and the comparison harness are pure and run without Docker;
-they are unit-tested in ``tests/test_elsepa_tables.py``. See
-``docs/elsepa-transport.md`` for the full evaluation.
+they are unit-tested in ``tests/test_elsepa_tables.py``.
 
 Usage (on a box where the ``elsepa`` image is built and ``pyelsepa`` is installed):
     python dev/elsepa_tables.py --element C --Z 6              # regenerate the CSV
