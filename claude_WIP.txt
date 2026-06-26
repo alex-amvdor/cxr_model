@@ -1,39 +1,360 @@
 Claude WIP summary before running out of tokens:
 
-    I'll handle this carefully — publishing to main is hard to reverse and it cuts against the "PI publishes, never merge to main yourself" convention, plus "ready-to-go" excludes at least one branch I know you flagged (the grating physics is unreviewed). So let me first establish the exact git state read-only, then confirm the set with you before any push.
+    Since you typed /sc:implement pyelsepa feature, here's the actionable plan. The adapter code already exists; the work is (A) port it cleanly onto current main and (B) actually run/validate it now that the paywall is lifted.
 
-    One clarification I can answer up front: the consolidation work this session was to your local memory store at C:\Users\alexa\.claude\projects\C--dev-cxr-model\memory\, which lives outside the git repo — so there's nothing repo-side from this session to push. Let me verify that and map the branches.
+        1. Port the 3 elsepa files onto main, not merge the branch. Cherry-pick just dev/elsepa_tables.py, docs/elsepa-transport.md, tests/test_elsepa_tables.py via the translate-patch mechanic (cxr_model→cxr_mc), and fix the one consumer reference (montecarlo._load_mott_transport now lives in montecarlo/transport.py). Avoid the stale montecarlo.py/plots.py/rename churn.
+        2. Build the gate: docker build -t elsepa C:/dev/pyelsepa/docker + uv pip install C:/dev/pyelsepa.
+        3. Validate (the doc's adoption gate): regenerate C and Si, run --compare vs NIST — expect agreement to a few %; verify the tcstable column index and a0²/cm² units on the real build.
+        4. Then optionally extend coverage to the SR-fallback element (W) and add a Validation: <id> row to the physics ledger.
+
+    Before I start: two decisions worth your call —
+
+        ● User answered Claude's questions:
+            · How far should this session take the pyelsepa feature? → Port + build + validate
+            · How should the elsepa code land relative to current main? → Translate-patch port (Recommended)
+
+    Plan set: port + build + validate, via translate-patch onto a fresh branch off main. Let me start by examining the full files to port and the current consumer API.
+
+        Searched for 1 pattern, ran 1 shell command
+
+    _load_mott_transport is re-exported by the montecarlo package — good. The test also uses MOTT_DIR; lehe package namespace.
+
+        Searched for 2 patterns
+
+    All interop targets (_load_mott_transport, MOTT_DIR, DATA_DIR) are exported on current main, so a purn ports cleanly. Let me create the branch and write the three translated files.
+
+        Ran 2 shell commands
+
+    Files translated cleanly (0 residual cxr_model). Now run the pure (Docker-free) tests to confirm the t current main.lean.
+
+    Build — the ELSEPA Docker image now builds (the paywall is lifted):
+    - Upstream Dockerfile (FROM debian:8) is dead — jessie's apt repos 404. I wrote C:/dev/pyelsepa/docker/Dockerfile.modern (debian:12 + gfortran -O3 -std=legacy), which compiles the F77 and produces the same /opt/elsepa/elscata pyelsepa invokes. elsepa:latest built successfully.
+
+    ⛔ Validate — blocked on one decision
+
+    Running ELSEPA needs a pyelsepa-importable Python env, which needs eScatter's cslib (cslib.units/.set). Two facts I confirmed the hard way:
+    /catchup /sc:implement pyelsepa feature
+
+    I'll run the catchup workflow. Let me start with the vault guard and locating session logs.
+
+    Searched for 3 patterns
+
+    Good — 7 session logs (read last 3), and pyelsepa/elsepa references found. Let me read the relevant material.
+
+    Searched for 2 patterns, ran 1 shell command
+
+    The elsepa work lives on a stale branch. Let me read the elsepa doc, the adapter, and the most recent session log.
+
+    Read 1 file, ran 1 shell command
+
+    The session log says the paywall was lifted. Let me read that key learning fully.
+
+    Read 1 file
+
+    The paywall is now lifted. Let me check current environment readiness before reporting.
+
+    Searched for 2 patterns, ran 1 shell command
+
+    ══════════════════════════════════════════════
+    RESUMING: cxr-mc — coherent X-ray radiation Monte-Carlo
+    ══════════════════════════════════════════════
+
+    PHASE: Active development. The pyelsepa / ELSEPA transport task is TODO P2 #6 (now item #3) — adapter landed, previously blocked, now unblocked.
+
+    CONTEXT (from CLAUDE.md + logs):
+    - Package was renamed cxr_model → cxr_mc (commit 48d8e1a), and since then montecarlo.py and plots.py were split into packages (montecarlo/, plots/). The elsepa branch predates all of this.
+    - The elsepa feature is a gated, author-only offline tool to regenerate/extend the NIST Mott transport CSVs from ELSEPA — not a runtime dependency. The model keeps NIST tables + screened-Rutherford fallback as default.
+    - 🔑 The original blocker is gone. Last session's log records: "ELSEPA paywall is lifted" — the Fortran source + adus_v1_0.tar.gz are now under the sibling C:\dev\pyelsepa\.
+
+    EXISTS (on feature/elsepa-transport, NOT yet on main):
+    - dev/elsepa_tables.py — the adapter (pure CSV I/O + Docker-gated ELSEPA run)
+    - docs/elsepa-transport.md — full evaluation + validation gate
+    - tests/test_elsepa_tables.py — pure pieces unit-tested (no Docker)
+    - On main today: montecarlo/transport.py::_load_mott_transport (the consumer) and the 5 committed NIST CSVs (C, Si, Ge, Mo, Se) — the interop targets are all present.
+
+    BLOCKERS — re-checked this box just now:
+
+    ┌─────────────────────────────────┬──────────────────────────────────────┐
+    │              Gate               │                Status                │
+    ├─────────────────────────────────┼──────────────────────────────────────┤
+    │ adus_v1_0.tar.gz Fortran source │ ✅ present (C:\dev\pyelsepa\docker\) │
+    ├─────────────────────────────────┼──────────────────────────────────────┤
+    │ Docker                          │ ✅ 29.5.3                            │
+    ├─────────────────────────────────┼──────────────────────────────────────┤
+    │ pyelsepa sibling + source       │ ✅ C:\dev\pyelsepa\ complete         │
+    ├─────────────────────────────────┼──────────────────────────────────────┤
+    │ elsepa Docker image built       │ ❌ not built                         │
+    ├─────────────────────────────────┼──────────────────────────────────────┤
+    │ pyelsepa installed in venv      │ ❌ ModuleNotFoundError               │
+    └─────────────────────────────────┴──────────────────────────────────────┘
+
+    ══════════════════════════════════════════════
+    MOST RECENT SESSION: 2026-06-26 01:29
+    Topic: port features onto renamed main
+    ══════════════════════════════════════════════
+    Outcome: Ported 5 "ready-to-go" branches onto renamed main (132 tests green, pushed). Held elsepa-transport (was blocked) and grazing-grating (physics unreviewed); deleted the 5 merged branches. Confirmed the ELSEPA paywall is now
+    lifted.
+
+    ══════════════════════════════════════════════
+    PREVIOUS SESSIONS
+    ══════════════════════════════════════════════
+    - 2026-06-26 10:54: merge/rebase altair slice1
+    - 2026-06-26 10:24: plots package refactor (plots.py → plots/)
+    - 2026-06-26 10:13: montecarlo package refactor (montecarlo.py → montecarlo/)
+
+    ⚠️ Note: these three refactors landed on main after the elsepa branch diverged, so feature/elsepa-transport is stale — it still has the monolithic montecarlo.py/plots.py and cxr_model naming. A straight merge would revert those
+    refactors.
+
+    ══════════════════════════════════════════════
+    READY TO IMPLEMENT — recommended path
+    ══════════════════════════════════════════════
+
+    Since you typed /sc:implement pyelsepa feature, here's the actionable plan. The adapter code already exists; the work is (A) port it cleanly onto current main and (B) actually run/validate it now that the paywall is lifted.
+
+    1. Port the 3 elsepa files onto main, not merge the branch. Cherry-pick just dev/elsepa_tables.py, docs/elsepa-transport.md, tests/test_elsepa_tables.py via the translate-patch mechanic (cxr_model→cxr_mc), and fix the one consumer reference (montecarlo._load_mott_transport now lives in montecarlo/transport.py). Avoid the stale montecarlo.py/plots.py/rename churn.
+    2. Build the gate: docker build -t elsepa C:/dev/pyelsepa/docker + uv pip install C:/dev/pyelsepa.
+    3. Validate (the doc's adoption gate): regenerate C and Si, run --compare vs NIST — expect agreement to a few %; verify the tcstable column index and a0²/cm² units on the real build.
+    4. Then optionally extend coverage to the SR-fallback element (W) and add a Validation: <id> row to t
+
+    Before I start: two decisions worth your call —
+
+    ● User answered Claude's questions:
+    · How far should this session take the pyelsepa feature? → Port + build + validate
+    · How should the elsepa code land relative to current main? → Translate-patch port (Recommended)
+
+    Plan set: port + build + validate, via translate-patch onto a fresh branch off main. Let me start by examining the full files to port and the current consumer API.
+
+    Searched for 1 pattern, ran 1 shell command
+
+    _load_mott_transport is re-exported by the montecarlo package — good. The test also uses MOTT_DIR; let me confirm that exists in the package namespace.
+
+    Searched for 2 patterns
+
+    All interop targets (_load_mott_transport, MOTT_DIR, DATA_DIR) are exported on current main, so a purn ports cleanly. Let me create the branch and write the three translated files.
+
+    Ran 2 shell commands
+
+    Files translated cleanly (0 residual cxr_model). Now run the pure (Docker-free) tests to confirm the interop contract holds against current main.
+
+    Ran 1 shell command
+
+    One test fails — and it's exactly the refactor seam. After montecarlo.py was split into a package, _load_mott_transport reads MOTT_DIR from the transport submodule, but the test monkeypatches the package-level re-export, so the patch
+    doesn't take. Let me fix the test to patch the real global.
+
+    Read 1 file
+
+    ● Update(tests\test_elsepa_tables.py)
+    Added 5 lines, removed 1 line
+        """A table written by write_mott_transport_csv loads back through the actual
+        montecarlo._load_mott_transport, values preserved to the written precision."""
+        import cxr_mc.montecarlo as mc
+        from cxr_mc.montecarlo import transport
+
+        E = et.default_energy_grid_eV(n=40)
+        sigma_cm2 = 1e-17 * (E / 50.0) ** -1.3  # a plausible falling sigma_tr(E)
+        monkeypatch.setattr(mc, "MOTT_DIR", str(tmp_path))
+        # _load_mott_transport reads MOTT_DIR from the transport submodule (montecarlo
+        # is a package now), and is @cache'd -- patch the real global and clear the cache.
+        monkeypatch.setattr(transport, "MOTT_DIR", str(tmp_path))
+        mc._load_mott_transport.cache_clear()
+        et.write_mott_transport_csv(str(tmp_path / "DisplayCalcTCSTableForXx.csv"), 6, E, sigma_c
+        E_back, sig_back = mc._load_mott_transport("Xx")
+        assert np.allclose(E_back, E, rtol=1e-5)
+
+        Ran 1 shell command
+
+    All 7 pure tests pass. Now the build + validate phase. Let me inspect the pyelsepa Docker setup before building.
+
+        Listed 1 directory
+
+    The Dockerfile uses FROM debian:8 (archived) and pyelsepa pins ancient deps (numpy==1.13.0, pint==0.8.1) — I must not install those into the cxr-mc venv or they'll wreck the scientific stack. Let me check what the elsepa Python wrapper actually imports, then kick off the Docker build (the long pole).
+
+        Searched for 1 pattern, ran 1 shell command
+
+    Docker CLI is present but the daemon (Docker Desktop) isn't running — and the wrapper also needs cslib + noodles. Let me confirm the daemon state and locate Docker Desktop.
+
+        Ran 1 shell command
+
+    Docker Desktop is installed but stopped. Let me start it and wait for the daemon to come up.
+
+        Ran 1 shell command
+
+    Docker Desktop is starting (takes ~30-60s for the engine). Let me poll for the daemon.
+
+        Ran 1 shell command
+
+    Daemon is up. Now build the elsepa image (compiles Fortran — may take a few minutes).
+
+        Ran 1 shell command
+
+    Expected: debian:8 (jessie) is EOL — its apt repos now 404. The Fortran itself is fine; the base image just needs fixing. Before I rewrite the Dockerfile, let me see exactly what pyelsepa expects inside the container (image name, binary path).
+
+        Read 1 file
+
+    pyelsepa needs image elsepa with /opt/elsepa/elscata compiled, and drives it via the docker Python SDK. The Fortran is fine; only the EOL base image broke. Let me check the tarball layout, then build with a modernized Dockerfile (non-destructively, as Dockerfile.modern).
+
+        Ran 2 shell commands
+
+    Tarball extracts to /opt/elsepa/ with the .dfs atomic data — matches the Dockerfile's assumptions. Let me write a modernized Dockerfile and build.
+
+    ● Write(C:\dev\pyelsepa\docker\Dockerfile.modern)
+    Wrote 19 lines to ..\pyelsepa\docker\Dockerfile.modern
+    # Modernized build of the ELSEPA image for pyelsepa.
+    # The upstream Dockerfile uses `FROM debian:8` (jessie), whose apt repos are now
+    # EOL and return 404, so `apt-get update` fails. Debian 12 + modern gfortran
+    # (with -std=legacy for the F77 source) produces the same /opt/elsepa/elscata
+    # binary that pyelsepa's run.py invokes (`./elscata < input.dat`).
+    FROM debian:12
+
+    RUN apt-get update \
+        && apt-get install --no-install-recommends -y gfortran \
+        && rm -rf /var/lib/apt/lists/*
+    … +9 lines
+
+        Ran 1 shell command
+
+    Image elsepa:latest built successfully. Now the Python side. Let me check whether cxr_mc's top-level import is lightweight (the adapter imports DATA_DIR from it) so I can decide how to run pyelsepa without dragging the heavy stack
+    into a throwaway env.
+
+        Read 1 file
+
+    cxr_mc is import-light (stdlib only), so the adapter's sys.path hack resolves DATA_DIR without installd a dedicated venv for pyelsepa (its ancient pins must stay isolated from cxr-mc). Let me create itand try installing the wrapper with modern deps.
+
+        Ran 1 shell command
+
+    cslib pulls in visdom, which won't build (a plotting dep elscata doesn't need). Let me try installing cslib and pyelsepa without deps, add only the minimal runtime libs, and test the import — one bounded attempt before I decide whether the env is a rabbit hole.
+
+        Ran 1 shell command
+
+    The PyPI cslib is the wrong package (a CV library, not eScatter's). The real cslib pyelsepa needs isn check for it locally before deciding whether to stop the env spiral.
+
+        Listed 1 directory
+
+    No local cslib. One bounded shot remains: install the real eScatter cslib from git (the PyPI name is ). Let me try it.
+
+        Ran 1 shell command
+
+    The classifier blocked installing the agent-chosen git repo — a reasonable guardrail, and I won't try to bypass it. That's the genuine stop point for the validate step: it needs the eScatter cslib, which isn't on PyPI (the PyPI cslib is an unrelated CV library) and can only come from its git repo, which needs your authorization.
+
+    Let me record the real, current status in the ported doc, then commit the solid work (port + green tests). First, the doc's status section:
+
+    Read 1 file
+
+    ● Update(docs\elsepa-transport.md)
+    Added 22 lines, removed 9 lines
+
+    ### Blocker / status
+
+    The actual run needs three things, and the third is missing here:
+    The actual run needs three things; the ELSEPA image now builds, and the
+    remaining gap is a working `pyelsepa` Python environment:
+
+    1. `pyelsepa` installed (`pip install C:/dev/pyelsepa`),
+    2. Docker (present — 29.x),
+    3. the **`elsepa` image built** — which requires the **paywalled
+    `adus_v1_0.tar.gz`** ELSEPA Fortran source placed in `C:/dev/pyelsepa/docker`
+    (`docker build -t elsepa .`). No such image exists on this box.
+    1. **`elsepa` Docker image — BUILT.** ✅ The paywalled `adus_v1_0.tar.gz` source is
+    now in `C:/dev/pyelsepa/docker`. The upstream `Dockerfile` (`FROM debian:8`)
+    fails — jessie's apt repos are EOL (404). A modernized build works and produces
+    the same `/opt/elsepa/elscata` binary pyelsepa invokes:
+    `docker build -f Dockerfile.modern -t elsepa C:/dev/pyelsepa/docker`
+    (`Dockerfile.modern`: `debian:12` + `gfortran -O3 -std=legacy` for the F77).
+    2. **Docker** — present (29.x). ✅
+    3. **A `pyelsepa`-importable Python env — NOT yet here.** pyelsepa imports
+    `cslib` (eScatter's "component library": `cslib.units/.settings/.predicates`
+    + `DataFrame`). ⚠️ The PyPI package named `cslib` is an *unrelated* computer-
+    vision library (pulls `skimage`/`visdom`); the one pyelsepa needs lives at
+    `github.com/eScatter/cslib` and is not on PyPI. It must be installed into a
+    **separate** venv — pyelsepa pins `numpy==1.13.0`/`pint==0.8.1`, which would
+    wreck the cxr_mc scientific stack, so never `pip install pyelsepa` into the
+    project venv. Install path-wise with `--no-deps` + modern `numpy/pint/docker`
+    alongside the eScatter `cslib`.
+
+    So `elsepa_transport_cross_section` raises a clear `RuntimeError` with these
+    instructions, and **nothing in the model depends on it at runtime** — the
+    committed NIST tables and the SR fallback are untouched.
+    So `elsepa_transport_cross_section` still raises a clear `RuntimeError` until that
+    env exists, and **nothing in the model depends on it at runtime** — the committed
+    NIST tables and the SR fallback are untouched. The validation run below (regenerate
+    C/Si, `--compare` vs NIST) is the only step left once `cslib` is in place.
+
+    ### Caveats to verify on a real build
 
 
-    Ran 2 commands
-    Good — that's a clean picture. Let me check one more thing before I bring you a recommendation: which files each branch touches, so I know whether they stack onto main cleanly or collide (a few touch shared files like results.py and repo_map.md).
+    Now let me lint the ported files and re-confirm the tests, then commit on the branch.
 
-    Found per-branch changed files and cross-branch file overlaps
-    Here's the full picture. main (and origin/main) sit at b2982ab. All seven overnight branches are exactly one clean commit on top of that base. The relevant overlaps if I stack them: TODO.md (all, different sections), docs/repo_map.md (3 branches), and src/cxr_model/results.py (2 branches) — all additive, so any conflicts will be trivial "keep both" resolutions, which I'll verify with uv run pytest before pushing.
+    Ran 1 shell command
 
-    My read on what's genuinely ready-to-go vs. not:
+    Lint clean, format clean, 7/7 tests pass. Let me commit the ported work on the branch.
 
-    Branch	Item	Ready?
-    anchor-figures	P1 #2 figures + tests	✅ ready
-    detector-solid-angle	P2 #4 opt-in tool + tests	✅ ready (opt-in, no behavior change)
-    checkpoint-transfer	P2 #5 cxr slim + tests	✅ ready
-    sweep-faceting	P3 #9 dataframe/faceting + tests	✅ ready
-    units-evaluation	P3 #7 Pint eval	✅ ready (docs-only decision record)
-    grazing-grating	P3 #8 grating model	⚠️ hold — physics UNREVIEWED (your flag)
-    elsepa-transport	P2 #6 ELSEPA adapter	⚠️ hold — gated PoC, BLOCKED on the paywalled docker image, unvalidated
-    multilayer-materials	old slice-2	❌ exclude — stale pre-restructure branch, already ported to main
-    Two notes: there's nothing repo-side from this session to push (the memory consolidation was outside the repo, confirmed). And the main repo worktree has two unrelated local edits (.claude/commands/physics/derive.md deleted, .claude/skills/scientific-library/SKILL.md modified) — not part of any branch and not mine, so I'll leave them alone.
+    Committed bf76c01, ran 1 shell command
 
-    Since publishing to main is hard to reverse and cuts against the "never merge to main yourself" convention, let me confirm the exact set:
+    Here's where the port + build + validate task landed.
 
-    Asked
-    Publish set
-    Answers
+    ✅ Done
 
-    Which branches should I publish to main as "ready-to-go"? (I'll merge the chosen set preserving each branch's reviewed commit, run the fast test suite, and only push if green.) The 5 ready ones (Recommended)
+    Port — feature/elsepa-port branched off main, commit bf76c01:
+    e ELSEPA Docker image now builds (the paywall is lifted):
+    - Upstream Dockerfile (FROM debian:8) is dead — jessie's apt repos 404. I wrote C:/dev/pyelsepa/docker/Dockerfile.modern (debian:12 + gfortran -O3 -std=legacy), which compiles the F77 and produces the same /opt/elsepa/elscata pyelsepa invokes. elsepa:latest built successfully.
 
-    You chose the 5 ready branches — holding grazing-grating and elsepa-transport, excluding stale multilayer-materials. Let me execute: I'll build main up to those five (preserving each branch's reviewed commit), run the fast test suite, and push only if green.
+    ⛔ Validate — blocked on one decision
 
-    First, verify this worktree is clean so I can safely use it to assemble main:
+    Running ELSEPA needs a pyelsepa-importable Python env, which needs eScatter's cslib (cslib.units/.settings/.predicates + DataFrame). Two facts I confirmed the hard way:
+    - The PyPI cslib is a different, unrelated computer-vision library (pulls skimage/visdom, won't build). The right one is only at github.com/eScatter/cslib.
+    - pyelsepa pins numpy==1.13.0/pint==0.8.1, so it must live in a separate venv (I already made an isolodern numpy/pint/docker + pyelsepa --no-deps).
 
-    Verified worktree clean and located main checkout
+    When I tried to pip install git+https://github.com/eScatter/cslib.git, the safety classifier blocked it — installing an agent-chosen external git repo runs its setup.py, which you didn't authorize. I won't work around that.
+
+    ● User answered Claude's questions:
+    · The validation run needs eScatter's cslib from github.com/eScatter/cslib (not on PyPI), installed into the isolated scratchpad venv. Installing it runs its setup.py. How do you want to proceed? → Authorize the git install
+
+    You authorized it. Installing eScatter cslib into the isolated venv, then testing the import chain.
+
+        Ran 1 shell command
+
+    Right cslib now installed from git; it needs ruamel.yaml. Let me add it and iterate on any remaining missing deps.
+
+        Ran 1 shell command
+
+    Modern pint needs flexcache/flexparser (I'd installed it --no-deps). Let me reinstall pint with its d
+
+        Ran 1 shell command
+
+    Now a genuine API break: modern pint 0.25 rejects cslib's {:~P} format on a dimensionality object. I need the pint version cslib was written against. Let me check cslib's own pin.
+
+    ✅ Done
+
+    Port — feature/elsepa-port branched off main, commit bf76c01:
+    - dev/elsepa_tables.py, tests/test_elsepa_tables.py, docs/elsepa-transport.md translated cxr_model→cxr_mc (0 residual refs). All interop targets (_load_mott_transport, MOTT_DIR, DATA_DIR) are re-exported on current main, so the
+    drop-in CSV contract holds unchanged.
+    - Fixed the one refactor seam the package split introduced: _load_mott_transport now reads MOTT_DIR from the montecarlo.transport submodule and is @cached, so the test patches the real global and clears the cache. 7/7 tests pass,
+    ruff clean.
+
+    Build — the ELSEPA Docker image now builds (the paywall is lifted):
+    - Upstream Dockerfile (FROM debian:8) is dead — jessie's apt repos 404. I wrote C:/dev/pyelsepa/docke2 + gfortran -O3 -std=legacy), which compiles the F77 and produces the same /opt/elsepa/elscatapyelsepa invokes. elsepa:latest built successfully.
+
+    ⛔ Validate — blocked on one decision
+
+    Running ELSEPA needs a pyelsepa-importable Python env, which needs eScatter's cslib (cslib.units/.settings/.predicates + DataFrame). Two facts I confirmed the hard way:
+    - The PyPI cslib is a different, unrelated computer-vision library (pulls skimage/visdom, won't build). The right one is only at github.com/eScatter/cslib.
+    - pyelsepa pins numpy==1.13.0/pint==0.8.1, so it must live in a separate venv (I already made an isolated one in scratchpad with modern numpy/pint/docker + pyelsepa --no-deps).
+
+    When I tried to pip install git+https://github.com/eScatter/cslib.git, the safety classifier blocked it — installing an agent-chosen external git repo runs its setup.py, which you didn't authorize. I won't work around that.
+
+    ● User answered Claude's questions:
+    · The validation run needs eScatter's cslib from github.com/eScatter/cslib (not on PyPI), installed venv. Installing it runs its setup.py. How do you want to proceed? → Authorize the git install
+
+    You authorized it. Installing eScatter cslib into the isolated venv, then testing the import chain.
+
+        Ran 1 shell command
+
+    Right cslib now installed from git; it needs ruamel.yaml. Let me add it and iterate on any remaining missing deps.
+
+        Ran 1 shell command
+
+    Modern pint needs flexcache/flexparser (I'd installed it --no-deps). Let me reinstall pint with its deps and retry.
+
+        Ran 1 shell command
+
+    Now a genuine API break: modern pint 0.25 rejects cslib's {:~P} format on a dimensionality object. I as written against. Let me check cslib's own pin.
