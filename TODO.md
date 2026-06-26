@@ -17,13 +17,8 @@ publication's validation story) against effort and risk.
    multiple-scattering Doppler width even in bulk. **Remaining:** validate the broadened line
    widths against a measured HOPG rocking-curve / EDS dataset (the headline reason it exists;
    data-dependent). Still shares the orientation-average pattern with the detector solid-angle
-   integration (P2 #4). Design: [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
-2. **Physics-anchor comparison plots.** *in progress: see feature/anchor-figures.* Make the `checks/`
-   Feranchuk/Zhai anchors emit figures versus the literature (especially **Zhai
-   Fig 1C**), ideally a minimal pre-configured viz notebook (backend source
-   modules feeding the notebook are fine). High value for the publication's
-   validation story, and relatively self-contained.
-3. **Multilayer film-on-substrate — measured-data validation.** *IMPLEMENTED,
+   integration (now on `main`). Design: [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
+2. **Multilayer film-on-substrate — measured-data validation.** *IMPLEMENTED,
    only measured-data validation remains.* Models the vdW film (MoSe₂/MoS₂/WS₂/MoTe₂)
    on their real substrate (SiO₂/Si or sapphire). **Remaining:** quantitative validation
    against a *measured film-on-substrate dataset (data-dependent —
@@ -31,32 +26,37 @@ publication's validation story) against effort and risk.
 
 ## P2 — medium (experiment match + usability)
 
-4. **Detector solid-angle integration.** *in progress: see feature/detector-solid-angle*
-5. **Checkpointing GB-transfer.** *in progress: see feature/checkpoint-transfer*
-6. **pyelsepa / ELSEPA transport.** *in progress: see feature/elsepa-transport*
+3. **pyelsepa / ELSEPA transport.** *in progress: see feature/elsepa-transport.*
+   Paywalled ELSEPA source now added under the sibling `pyelsepa/elsepa/`
+   (+ `adus_v1_0.tar.gz` in `pyelsepa/docker/`); no longer blocked on the data —
+   next is building the docker image / wiring the adapter.
 
 ## P3 — lower / exploratory
 
-7. **jupyter to marimo.** *in progress: see feature/marimo-transfer* Explore moving
-   from jupyter notebooks to marimo, primarily to improve data visualization.
-8. **Pint units.** *see feature/units-evaluation*
-9. **Grazing-incidence soft X-ray diffraction grating.** *in progress: see feature/grazing-grating*
-10. **First-class custom large-parameter-space sweeps.** *in progress: see feature/sweep-faceting*
+4. **jupyter to marimo.** *in progress: see feature/marimo-transfer*
+   Explore moving from jupyter notebooks to marimo, primarily to improve data visualization.
+   In concert, look at move from matplotlib to altair
+5. **Grazing-incidence soft X-ray diffraction grating.** *in progress: see feature/grazing-grating*
 
 ## PA — meta / agent-related / cleanup
 
-10. **Repo Ownership and Name Change.** *cxr_model -> cxr-mc — DONE*
+6. **Repo Ownership and Name Change.** *cxr_model -> cxr-mc — DONE*
     1. **NOTE:** User still awaiting GitHub admin permissions on the repo;
        no code action needed — kept as a standing reminder.
-11. **Agent Skill and Command Review.** Review project-specific skills and commands
+7. **Agent Skill and Command Review.** Review project-specific skills and commands
     for usefulness, structure. Revise any which are likely useful but not perfected,
     remove any which are extraneous/irrelevant/not useful.
-12. **Large Module Refactoring.** Refactor `montecarlo.py` and `plot.py` into submodules,
+8. **Large Module Refactoring.** Refactor `montecarlo.py` and `plot.py` into submodules,
     they are extremely bloated. `montecarlo.py` especially has multiple discrete
     logical blocks which can be easily discretized.
-13. **Notebook/Repo Reorg.** User does not like having analysis/scan/export notebooks
+9. **Notebook/Repo Reorg.** User does not like having analysis/scan/export notebooks
     and scripts cluttering the root. Move them either somewhere into /src/cxr_mc
     (post-rename), or create new subdirs. Consider a restructuring of /src/*;
     if that is decided to be worthwhile, triage into main priorities in TODO.md
-14. **Polars investigation.** Investigate use of Polars dataframes to do
+10. **Polars investigation.** Investigate use of Polars dataframes to do
     packaging of large parameter sweep metadata.
+11. **TODO Cleanup**. No reason to have in depth descriptions of exactly all TODOs here in user's opinion.
+    Unless agent is strongly opposed, in order to save tokens, in-depth TODO details should be moved
+    onto their relevant branches once created, with only minimal summaries described here.
+    On those feature branches, TODO should be edited to reflect only the task(s) to be handled on that branch.
+    If necessary, turn this into a skill/command.
