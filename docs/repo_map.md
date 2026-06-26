@@ -59,17 +59,31 @@ hand-maintained table.
   `load_henke`.
 - Deps: none (leaf; external xraydb).
 
-### `montecarlo.py`
+### `montecarlo/` (package)
 The simulation core: electron transport, the segment-sum PXR+CBS line spectrum,
 bremsstrahlung, the parallel case runner, and detector-convolution helpers.
-- Transport / geometry: `simulate_trajectories` (multilayer-stack aware via
-  `layers=`), `tilted_geometry`, `beta_from_keV`; the `TRANSPORT_ELEMENTS`
-  registry.
-- Spectra: `mc_spectrum` (PXR+CBS, cross-stack self-absorption, exact mosaic
-  average), `mc_brem_spectrum`, `load_external_brem`.
-- Drivers: `run_case`, `run_cases` (GPU-serial / CPU-pooled).
-- Detector model: `detector_efficiency`, `eds_fwhm_eV`, `aperture_fwhm_eV`,
-  `mosaic_fwhm_eV`, `mosaic_psi_rad`, `convolve_detector`.
+Split from a single module into submodules; **every public and internal name is
+re-exported from the package**, so `from cxr_mc.montecarlo import X` is unchanged
+(`tests/test_montecarlo_exports.py` freezes the export set).
+- `_backend` — GPU/CPU array backend probe + banner: `xp`, `cp`, `REAL`,
+  `_to_cpu`, `_GPU`.
+- `materials` — `_normalize_composition`, `_mu_total_inv_ang`, `_layer_dz`,
+  `_stack_tau` (composition + cross-stack self-absorption). Deps: `_backend`,
+  `crystallography`.
+- `transport` — `simulate_trajectories` (multilayer-stack aware via `layers=`),
+  `beta_from_keV`, scattering/stopping helpers; the `TRANSPORT_ELEMENTS`
+  registry. Pure NumPy. Deps: `materials`, `DATA_DIR`.
+- `geometry` — `tilted_geometry`, `detector_directions`, `_orientation_R`,
+  `_small_tilt_R`, `_mosaic_quadrature`. Deps: `crystallography`.
+- `spectrum` — `mc_spectrum` (PXR+CBS, cross-stack self-absorption, exact mosaic
+  average), `mc_spectrum_solid_angle`, `mc_brem_spectrum`, `load_external_brem`.
+  Deps: `_backend`, `materials`, `transport`, `geometry`, `crystallography`.
+- `detector` — `detector_efficiency`, `eds_fwhm_eV`, `aperture_fwhm_eV`,
+  `mosaic_fwhm_eV`, `mosaic_psi_rad`, `convolve_detector`. Deps: `materials`,
+  `geometry`, `transport`, `crystallography`.
+- `runner` — `run_case`, `run_cases` (GPU-serial / CPU-pooled), `_transport_case`,
+  `_spectrum_case`, `_worker_init`. Deps: `_backend`, `transport`, `geometry`,
+  `spectrum`.
 - Deps: `crystallography`, `DATA_DIR`.
 
 ## Sweep, config & drivers
