@@ -6,6 +6,7 @@ Read `docs/repo_map.md` before exploring source files.
 `README.md`has the science-facing overview
 `docs/`has the design notes
 `TODO.md` has the task backlog
+`docs/physics-validation-ledger.md` tracks which physics is verified; `docs/validation/README.md` is the method
 
 
 ## Canonical commands
@@ -55,3 +56,4 @@ Claude should always prefer these commands.
 - Do not duplicate README or TODO content here.
 - When asked to locate something, use `scripts/dev.py repo-map` first.
 - Keep changes surgical and verify with the smallest useful command.
+- New/edited physics needs a derivation docstring (source eq, assumptions, a limiting case) + a `Validation: <id>` marker + a row in the validation ledger. Verify physics with a fresh context, never the one that wrote it; only a human marks a claim `signed-off`.
