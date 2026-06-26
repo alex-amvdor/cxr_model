@@ -58,3 +58,5 @@ publication's validation story) against effort and risk.
     and scripts cluttering the root. Move them either somewhere into /src/cxr_mc
     (post-rename), or create new subdirs. Consider a restructuring of /src/*;
     if that is decided to be worthwhile, triage into main priorities in TODO.md
+14. **Polars investigation.** Investigate use of Polars dataframes to do
+    packaging of large parameter sweep metadata.
