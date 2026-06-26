@@ -124,18 +124,32 @@ Result records, derived line metrics, and ranking/selection.
   `show_summary`, `show_top`, `best_azimuth`, `detected_background`.
 - Deps: `montecarlo`, `sweep`.
 
-### `plots.py`
-All plotting — Matplotlib/Plotly/Datashader. Large; grouped by figure type:
-- Spectra: `plot_by_energy`, `plot_full_spectrum`, `plot_best_spectra`,
-  `plot_material_comparison`, `plot_mosaic_comparison`.
-- Sweeps/metrics: `plot_peak_vs_tilt`, `plot_tilt_panel`, `plot_scan`,
-  `plot_heatmaps`, `plot_metric_vs`, `facet_metric` (small-multiples over many knobs).
-- Detectors: `plot_timepix_efficiency` / `_detected` / `_poisson`,
-  `plot_eaglexo_efficiency` / `_detected` / `_charge` / `_charge_map`.
-- Trajectories: `plot_electron_trajectories`, `plot_trajectory_grid`,
-  `plot_penetration_survival`.
-- Interactive / streaming: `browse`, `browse_plotly`, `stream_chunk`,
-  `plot_chunk`, `energy_color`.
+### `plots/` (package)
+All plotting — Matplotlib/Plotly. Split from a single module into submodules by
+figure type; **every public and internal name is re-exported from the package**,
+so `from cxr_mc.plots import X` is unchanged (`tests/test_plots_exports.py`
+freezes the export set). Submodule DAG (leaf → driver):
+`_style → _common → sweeps → {spectra, detectors, trajectories} → interactive`.
+- `_style` — `COLORS`, `_ENERGY_PALETTE`, `energy_color` (per-energy colour map
+  consistent across every figure). Leaf; no sibling deps.
+- `_common` — shared figure plumbing: `_line_brem` (per-record line/brem split),
+  `_per_tilt_figs` (one-figure-per-tilt loop), `_mode`, `_EFF_CACHE`. Deps:
+  `montecarlo`, `results`.
+- `spectra` — `plot_by_energy`, `plot_full_spectrum`, `plot_peak_vs_tilt`,
+  `plot_mosaic_comparison`, `plot_best_spectra`, `plot_material_comparison`,
+  `plot_tilt_panel`, the `_draw_*` spectral drawers. Deps: `_style`, `_common`,
+  `montecarlo`, `results`.
+- `sweeps` — `plot_heatmaps`, `facet_metric` (small-multiples over many knobs),
+  `plot_metric_vs`, `plot_scan`; the `_HEATMAP_QUANTITIES` / `_METRIC_LABELS`
+  tables + axis helpers. Deps: `_style`, `results`.
+- `detectors` — `plot_timepix_efficiency` / `_detected` / `_poisson`,
+  `plot_eaglexo_efficiency` / `_detected` / `_charge` / `_charge_map`. Deps:
+  `_style`, `_common`, `sweeps`, `results`, `timepix_response`, `eaglexo_response`.
+- `trajectories` — `plot_electron_trajectories`, `plot_trajectory_grid`,
+  `plot_penetration_survival`. Deps: `_style`, `montecarlo`, `results`.
+- `interactive` — `browse`, `browse_plotly`, `stream_chunk`, `plot_chunk`
+  (the slider/streaming drivers that dispatch to the `spectra`/`detectors`
+  drawers). Top of the DAG. Deps: `_style`, `_common`, `spectra`, `detectors`.
 - Deps: `montecarlo`, `results`, `timepix_response`, `eaglexo_response`.
 
 ## Detector forward models
