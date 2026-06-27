@@ -9,6 +9,7 @@ workers.
 """
 
 import os
+from typing import Any
 
 import numpy as np
 
@@ -220,7 +221,8 @@ def _worker_init():
         k32.SetPriorityClass(k32.GetCurrentProcess(), 0x00004000)  # BELOW_NORMAL
     except Exception:
         try:
-            os.nice(10)  # POSIX fallback
+            if hasattr(os, "nice"):
+                os.nice(10)  # type: ignore[reportAttributeAccessIssue]  # POSIX fallback
         except Exception:
             pass
 
@@ -270,7 +272,7 @@ def run_cases(cases, max_workers=None, progress=True, callback=None):
                 return iterable
 
     n = len(cases)
-    results = [None] * n
+    results: list[Any] = [None] * n
     if n == 0:
         return results
 

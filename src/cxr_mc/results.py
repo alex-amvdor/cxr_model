@@ -389,7 +389,7 @@ def summary_table(recs, settings):
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    df = df.round(_ROUND)
+    df = df.round(_ROUND)  # type: ignore[reportArgumentType]
     df.columns = pd.MultiIndex.from_tuples(
         [("config" if c in _CONFIG_COLS else "", c) for c in df.columns]
     )

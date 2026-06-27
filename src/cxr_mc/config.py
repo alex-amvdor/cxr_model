@@ -18,6 +18,8 @@ notebooks pick it up.
   * :data:`COLLAPSE_AZIMUTH` -- keep only the best azimuth per (tilt, energy).
 """
 
+from typing import Any
+
 import numpy as np
 
 from .results import Settings
@@ -159,7 +161,7 @@ def material_sweep(material, *, theta_obs_deg=90.0, **overrides):
     """The full parametric :class:`sweep.Sweep` for ``material`` (the geometry
     the runner scans and the viz notebook reduces). ``overrides`` replace any grid
     field, e.g. ``material_sweep("ptse2", thickness_ang=2e4)``."""
-    p = dict(material_grid(material))
+    p: dict[str, Any] = dict(material_grid(material))
     p.update(overrides)
     return Sweep(material=material, theta_obs_deg=theta_obs_deg, **p)
 
@@ -169,7 +171,7 @@ def trajectory_sweep(material, *, n_tilts=9, energies=(30, 60), tilt_span=80.0):
     handful of polar tilts at normal azimuth, two beam energies (transport only,
     so the energy grids are irrelevant -- kept for build_cases). ``n_tilts`` panels
     span +-``tilt_span`` degrees."""
-    p = material_grid(material)
+    p: dict[str, Any] = dict(material_grid(material))
     return Sweep(
         material=material,
         thickness_ang=p["thickness_ang"],

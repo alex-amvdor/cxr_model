@@ -319,7 +319,7 @@ def plot_eaglexo_efficiency(sensor="4240", distance_m=None, coating="BN"):
         f"Eagle XO {geo['sensor']} @ {geo['distance_m']:g} m  —  "
         rf"$\Omega$ = {geo['domega_sr']:.3e} sr "
         rf"($\Delta\theta$ = {geo['dtheta_obs_deg']:.2f}$\degree$, "
-        f"{geo['active_mm'][0]:g}$\\times${geo['active_mm'][1]:g} mm)",
+        f"{geo['active_mm'][0]:g}$\\times${geo['active_mm'][1]:g} mm)",  # type: ignore[reportIndexIssue]
         fontsize=13,
     )
     return fig
@@ -671,6 +671,7 @@ def plot_eaglexo_charge_map(
         ax.set_title(f"{_AXIS_SPECS.get(panel, (panel,))[0]} = {_value_label(panel, pv)}")
         ax.set_xlabel(_axis_label(x))
         ax.set_ylabel(_axis_label(y))
+    assert im is not None
     fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85)
     fig.suptitle(f"Eagle XO recorded signal: {label}  ({coating}, best per cell)", fontsize=13)
     return fig

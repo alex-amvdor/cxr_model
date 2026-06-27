@@ -502,8 +502,8 @@ def plot_penetration_survival(
         # deepest point each electron reaches (max over its segment depths), then
         # clip the tiny negative excursions of backscattered electrons that exit
         # just above the entrance face.
-        max_depth = np.full(d["Ne"], -np.inf)
-        np.maximum.at(max_depth, d["elec_id"], d["z_u"])
+        max_depth = np.full(d["Ne"], -np.inf)  # type: ignore[reportCallIssue]
+        np.maximum.at(max_depth, d["elec_id"], d["z_u"])  # type: ignore[reportArgumentType]
         max_depth = np.clip(max_depth[np.isfinite(max_depth)], 0.0, None)
         thick = d["thick"]
         x = max_depth / thick if depth_frac else max_depth

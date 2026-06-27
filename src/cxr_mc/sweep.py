@@ -334,7 +334,7 @@ def build_cases(sweep: Sweep, n_electrons=450, n_electrons_brem=100):
     if sweep.E_grid_brem is not None:
         brem_grid = np.asarray(sweep.E_grid_brem, float)
     else:
-        brem_grid = np.arange(float(line_grid[0]), float(energies.max()) * 1e3 + 50.0, 50.0)
+        brem_grid = np.arange(float(line_grid[0]), float(energies.max()) * 1e3 + 50.0, 50.0)  # type: ignore[reportIndexIssue,reportArgumentType]
 
     dtheta = TIMEPIX3_DTHETA_OBS_DEG if sweep.dtheta_obs_deg is None else sweep.dtheta_obs_deg
     domega = TIMEPIX3_DOMEGA_SR if sweep.domega_sr is None else sweep.domega_sr

@@ -333,10 +333,10 @@ def mc_spectrum(
         # and reuse across the orientation quadrature; push real/imag to the device.
         chi_tab = np.asarray(chi_g(crystal, hkl, E_tab, B_ang2, use_henke))
         u_tab = np.asarray(U_g(crystal, hkl, E_tab, B_ang2, use_henke))
-        chi_re = xp.asarray(chi_tab.real, dtype=REAL)
-        chi_im = xp.asarray(chi_tab.imag, dtype=REAL)
-        u_re = xp.asarray(u_tab.real, dtype=REAL)
-        u_im = xp.asarray(u_tab.imag, dtype=REAL)
+        chi_re = xp.asarray(chi_tab.real, dtype=REAL)  # type: ignore[reportAttributeAccessIssue]
+        chi_im = xp.asarray(chi_tab.imag, dtype=REAL)  # type: ignore[reportAttributeAccessIssue]
+        u_re = xp.asarray(u_tab.real, dtype=REAL)  # type: ignore[reportAttributeAccessIssue]
+        u_im = xp.asarray(u_tab.imag, dtype=REAL)  # type: ignore[reportAttributeAccessIssue]
 
         if mosaic_quad is None:  # perfect crystal: one orientation, weight 1
             _accumulate(g_vec, chi_re, chi_im, u_re, u_im, 1.0)

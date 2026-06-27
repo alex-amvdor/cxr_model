@@ -49,6 +49,6 @@ REAL = xp.float32 if (_GPU and os.environ.get("CXR_FP64") != "1") else xp.float6
 
 def _to_cpu(a):
     """Move array to CPU (numpy). No-op if already numpy."""
-    if _GPU and isinstance(a, cp.ndarray):
+    if cp is not None and isinstance(a, cp.ndarray):
         return a.get()
     return np.asarray(a)

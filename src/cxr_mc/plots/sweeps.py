@@ -203,6 +203,7 @@ def plot_heatmaps(
             ax.set_title(f"{_AXIS_SPECS.get(panel, (panel,))[0]} = {_value_label(panel, pv)}")
             ax.set_xlabel(_axis_label(x))
             ax.set_ylabel(_axis_label(y))
+        assert im is not None
         fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85)  # one shared scale
         fig.suptitle(f"{label}    (best per cell: {select})", fontsize=13)
         figs.append(fig)
@@ -273,9 +274,9 @@ def facet_metric(
                 sub = sub[sub[row] == rv]
             if col is not None:
                 sub = sub[sub[col] == cv]
-            hue_groups = sub.groupby(hue) if hue is not None else [(None, sub)]
+            hue_groups = sub.groupby(hue) if hue is not None else [(None, sub)]  # type: ignore[reportAttributeAccessIssue]
             for hv, g in hue_groups:
-                agg = g.groupby(x)[y].agg(reduce).reset_index().sort_values(x)
+                agg = g.groupby(x)[y].agg(reduce).reset_index().sort_values(x)  # type: ignore[reportAttributeAccessIssue]
                 label = None if hue is None else f"{hue}={hv:g}" if _isnum(hv) else f"{hue}={hv}"
                 ax.plot(agg[x], agg[y], marker="o", ms=3, lw=1.2, label=label)
             if logx:
