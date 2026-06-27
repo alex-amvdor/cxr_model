@@ -1,64 +1,32 @@
-# TODO / Backlog
+# TODO — feature/cstool-nebula-eval
 
-Items live on `feature/…` / `bugfix/…` / `docs/…` branches, not `main`, until finished.
-Full detail for an in-progress item lives on its branch (or its design doc);
-`main` keeps only a one-line summary + pointer, enforced by /docs:todo-sync.
-Priorities weigh value-to-goal (line-flux / enhancement predictions + the publication's validation story)
-against effort and risk.
+This branch carries one backlog item; the full triaged backlog lives on `main`.
 
-Item generation:
-----------------
+## eScatter cstool / Nebula investigation (P2)
 
-1. Create and move to branch of relevant type
-2. Overwrite branch TODO.md with concise, 2-3 sentence problem summary + implementation path, scoped only to the relevant item, then publish to `origin`
-3. Move to `main`, create 1 sentence summary of new item, then triage into existing TODO.md items and push tightly scoped `docs(todo)` commit to main
+*EVALUATED — recommendation: do not adopt. Decision record in
+[`docs/cstool-nebula-evaluation.md`](docs/cstool-nebula-evaluation.md).*
 
-**NOTE:** If the user has written a detailed item summary directly into `TODO.md` on
-main, fold it into a branch (steps 1–2 above), then slim it back to a one-line summary
-on `main` once the branch exists.
+Question: move electron transport onto Nebula (GPU MC) + cstool (cross-section
+compiler) to gain the full Penn-dielectric inelastic model + secondary-electron
+cascades, vs. keeping the current Mott-calibrated elastic + Joy–Luo CSDA?
 
-## P1 — high value (physics accuracy + publication validation)
+**Finding:** not worth it for coherent X-ray line-flux prediction —
+- Nebula/cstool's new physics (Penn inelastic, SE cascade, acoustic phonon) serves
+  SE-yield / SEM imaging, an observable orthogonal to ours, and lives mostly below
+  the `E_cut = 5 keV` this model already discards.
+- The one in-band gap, energy-loss straggling, is bounded to ≲10 eV of line
+  broadening at the shallow high-flux depths vs. ~130 eV detector resolution
+  (order-of-magnitude estimate in the doc).
+- The elastic-accuracy win actually worth having is already delivered by the
+  ELSEPA adapter (P2 #1); cstool's elastic route is redundant with it.
+- Adopting Nebula raises dependencies + compute and does not emit the per-segment
+  radiating trajectories the PXR+CBS layer needs — a complexity increase, not a
+  simplification.
 
-1. **Crystal mosaicity — measured-data validation.** MC route implemented; validate
-   broadened line widths vs. a measured HOPG rocking-curve / EDS dataset
-   (data-dependent). Design: [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
-2. **Multilayer film-on-substrate — measured-data validation.** Model implemented;
-   validate vs. a measured film-on-substrate dataset (data-dependent). Design:
-   [`docs/multilayer-materials.md`](docs/multilayer-materials.md).
+**Cheap fallback if ever needed:** a Bohr/Landau straggling term on the existing
+CSDA step in `transport.py` (a few lines, no dependency) — see the doc.
 
-## P2 — medium (experiment match + usability)
-
-1. **pyelsepa / ELSEPA transport.** → `feature/elsepa-port` (supersedes the now-stale
-   `feature/elsepa-transport`, safe to delete). Adapter landed + **validated** (C 2.19%,
-   Si 4.42% max rel vs NIST); image now builds tarball-free from
-   `github.com/eScatter/elsepa`. Remaining gate: the image/venv live outside the repo
-   (`C:/dev/pyelsepa`), so the driver stays gated in CI. Tied to P2 #2.
-2. **USER ADD: eScatter/cstool/Nebula investigation.** Evaluate merits of robustness,
-   accuracy improvement, repo simplification, and any other critical items for a potential
-   move to use of one or more of the listed libraries/tools. In particular, evaluate if the
-   added physics of the Penn dielectric fxn, tracking secondary electrons, etc., is worth
-   the added compute, or if the Mott/partial dirac/CSDA is enough. This item is tied
-   intimately related to TODO #P2-1, above.
-3. **Polars investigation.** Evaluate Polars for packaging large parameter-sweep metadata.
-
-## P3 — lower / exploratory
-
-1. **jupyter → marimo (+ matplotlib → altair).** → `feature/marimo-transfer`.
-   Improve data viz/interactivity; Altair spectrum renderer is the first slice.
-2. **Grazing-incidence soft X-ray diffraction grating.** → `feature/grazing-grating`.
-   Dispersion scaffold implemented; next is grating reflectivity + detected-image model.
-
-## PA — meta / cleanup
-
-1. **Repo ownership & name change.** `cxr_model` → `cxr-mc` DONE; awaiting GitHub
-   admin permissions (standing reminder, no code action).
-2. **Agent skill & command review.** Triage project-specific skills/commands; fix the
-   useful-but-rough ones, remove the extraneous.
-3. **Notebook/repo reorg.** Move root analysis/scan/export notebooks + scripts into
-   `src/cxr_mc/` or new subdirs; consider a `src/` restructure and re-triage if so.
-4. **USER ADD: Audit git commit process.** ruff, ruff-format, nbqa-ruff, nbstripout.
-   User manually added error/typechecking ignores to pyproject.toml to force commits
-   to pass. Edit pyproject.toml to ignore only truly trivial matters, analyze repo to
-   get commits to pass with correct ruleset. Also, investigate why user's VS Code
-   git GUI interface refuses to commit (can only commit via commandline) --
-   VS Code dialogue window opens to report "`pre-commit` not found.  Did you forget to activate your virtualenv?"
+**Next:** branch is complete (doc only, no code/physics change). Fold the
+recommendation into `main`'s P2 #2 one-liner; this branch can be deleted once the
+doc lands on `main`, or kept as the decision record's home.
