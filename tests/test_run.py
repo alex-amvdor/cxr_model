@@ -5,6 +5,7 @@ layer (resume/skip, checkpoint writes, on_chunk dispatch), not the physics.
 """
 
 import pickle
+from typing import Any
 
 import numpy as np
 
@@ -22,7 +23,9 @@ from cxr_mc.run import (
 # ---------------------------------------------------------------------------
 
 
-def _fake_case(name, E0_keV, tilt_deg=0.0, crystal="hopg"):
+def _fake_case(
+    name: str, E0_keV: float, tilt_deg: float = 0.0, crystal: str = "hopg"
+) -> dict[str, Any]:
     """Minimal case dict that satisfies store_result and run_sweep internals."""
     E_grid = (100.0, 200.0, 10.0)
     E_brem = (0.0, 500.0, 50.0)

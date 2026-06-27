@@ -23,6 +23,7 @@ this module is cheap to import and test.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import product
+from typing import Any
 
 import numpy as np
 
@@ -149,7 +150,7 @@ def substrate_radiator(substrate, n_families=4):
     )
 
 
-def crystal_params(material, n_families=4):
+def crystal_params(material: str, n_families: int = 4) -> dict[str, Any]:
     """Fixed crystallography for a material: composition, the dominant
     reflections, the beam zone axis [uvw], the (isotropic) B-factor, and a
     sensible default photon-energy grid. Override the grid via Sweep.e_grid_eV."""

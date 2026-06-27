@@ -23,7 +23,7 @@ ALL = [
 
 def test_sweep_requires_material():
     with pytest.raises(TypeError):
-        Sweep(thickness_ang=1e4)  # material has no default
+        Sweep(thickness_ang=1e4)  # type: ignore[call-arg]  # material has no default
 
 
 @pytest.mark.parametrize("material", ALL)

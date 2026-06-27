@@ -5,6 +5,8 @@ Pure-CPU/numpy tests only -- the project keeps tests/ off the GPU; the full
 mc_spectrum / mc_brem_spectrum bit-for-bit + absorption checks live in
 checks/multilayer_check.py. These pin the escape-path math and the wiring."""
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -109,7 +111,7 @@ def test_transport_single_layer_explicit_equals_none():
     # an explicit one-layer stack reproduces the None (single-material) transport
     # bit-for-bit (same RNG stream -> identical segments)
     comp = [("Mo", 0.019), ("Se", 0.038)]
-    kw = dict(E_cut_keV=5.0, seed=7)
+    kw: dict[str, Any] = dict(E_cut_keV=5.0, seed=7)
     a = simulate_trajectories(30.0, 150, 1e4, composition=comp, **kw)
     b = simulate_trajectories(30.0, 150, 1e4, layers=[(0.0, 1e4, comp)], **kw)
     assert a["n_backscattered"] == b["n_backscattered"]
@@ -126,7 +128,7 @@ def test_transport_backscatter_increases_with_substrate_Z():
     t_f = 100.0  # 10 nm film
     stack_lo = [(0.0, t_f, film), (t_f, 1e5, [("C", 0.176)])]
     stack_hi = [(0.0, t_f, film), (t_f, 1e5, [("W", 0.0632)])]
-    kw = dict(E_cut_keV=5.0, seed=3, elastic_model="sr")  # SR: no Mott table needed
+    kw: dict[str, Any] = dict(E_cut_keV=5.0, seed=3, elastic_model="sr")  # SR: no Mott table needed
     lo = simulate_trajectories(30.0, 500, 1e5, layers=stack_lo, **kw)
     hi = simulate_trajectories(30.0, 500, 1e5, layers=stack_hi, **kw)
     film_path_lo = lo["L_ang"][lo["layer"] == 0].sum()
@@ -163,6 +165,7 @@ def test_substrate_radiator_crystalline_vs_amorphous():
     assert substrate_radiator("sio2") is None
     assert substrate_radiator("al2o3") is None
     si = substrate_radiator("silicon")
+    assert si is not None
     assert si["crystal"] == "silicon"
     assert set(si) == {"crystal", "hkl_list", "B_ang2", "beam_uvw"}
     assert len(si["hkl_list"]) > 0

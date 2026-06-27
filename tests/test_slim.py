@@ -2,6 +2,7 @@
 slim.slim_checkpoint. All synthetic + pure-numpy, so CPU-only and fast."""
 
 import pickle
+from typing import Any
 
 import numpy as np
 
@@ -9,7 +10,7 @@ from cxr_mc.results import slim_results
 from cxr_mc.slim import slim_checkpoint
 
 
-def _record(tilt_deg, E0):
+def _record(tilt_deg: float, E0: float) -> dict[str, Any]:
     E = np.linspace(500.0, 1200.0, 200)
     Eb = np.linspace(0.0, 30000.0, 400)  # the wide-brem grid: the largest field
     return dict(

@@ -10,6 +10,7 @@
     "**/node_modules",
     "**/.*",
   ],
+  "extraPaths": ["dev"],
   "venvPath": ".",
   "venv": ".venv",
   "typeCheckingMode": "basic",
