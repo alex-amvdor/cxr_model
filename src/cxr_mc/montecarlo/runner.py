@@ -213,7 +213,7 @@ def _worker_init():
     try:
         import ctypes
 
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[reportAttributeAccessIssue]
         # typed signatures matter: the untyped pseudo-handle (-1) gets
         # truncated on 64-bit and the call silently fails
         k32.GetCurrentProcess.restype = ctypes.c_void_p

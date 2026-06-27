@@ -9,6 +9,7 @@ import pickle
 import numpy as np
 
 from cxr_mc.run import (
+    _checkpoint_save,
     cases_from_results,
     checkpoint_path_for,
     load_checkpoint,
@@ -85,6 +86,29 @@ def test_checkpoint_path_for_includes_material_and_dir():
     p = checkpoint_path_for("hopg", checkpoint_dir="ckpts")
     assert "hopg" in p
     assert "ckpts" in p
+
+
+# ---------------------------------------------------------------------------
+# _checkpoint_save
+# ---------------------------------------------------------------------------
+
+
+def test_checkpoint_save_roundtrips(tmp_path):
+    rec = {"cfg_a": {30.0: {"case": {"crystal": "hopg"}, "spec": np.array([1.0])}}}
+    ckpt = tmp_path / "hopg.pkl"
+    _checkpoint_save(str(ckpt), rec)
+    with open(ckpt, "rb") as f:
+        assert set(pickle.load(f)) == {"cfg_a"}
+
+
+def test_checkpoint_save_is_atomic(tmp_path):
+    """A successful save leaves no stray .tmp and replaces the prior file."""
+    ckpt = tmp_path / "hopg.pkl"
+    _checkpoint_save(str(ckpt), {"old": 1})
+    _checkpoint_save(str(ckpt), {"new": 2})
+    assert not (tmp_path / "hopg.pkl.tmp").exists()
+    with open(ckpt, "rb") as f:
+        assert pickle.load(f) == {"new": 2}
 
 
 # ---------------------------------------------------------------------------

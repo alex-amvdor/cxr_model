@@ -18,12 +18,28 @@ notebooks pick it up.
   * :data:`COLLAPSE_AZIMUTH` -- keep only the best azimuth per (tilt, energy).
 """
 
-from typing import Any
+from dataclasses import replace
+from typing import TypedDict
 
 import numpy as np
 
 from .results import Settings
-from .sweep import Sweep
+from .sweep import ScalarOrSeq, Sweep
+
+
+class MaterialGrid(TypedDict):
+    """The per-material scan grid: the geometry + energy fields that vary per
+    material and are spread into :class:`sweep.Sweep`. Typing the grids with this
+    (rather than ``dict[str, Any]``) lets pyright validate the literals in
+    :data:`_MATERIAL_GRIDS` and the ``**grid`` spread in :func:`material_sweep`."""
+
+    thickness_ang: ScalarOrSeq
+    energy_keV: ScalarOrSeq
+    tilt_deg: ScalarOrSeq
+    tilt_azim_deg: ScalarOrSeq
+    E_grid_line: np.ndarray
+    E_grid_brem: np.ndarray
+
 
 # When the azimuth is swept, collapse it: for each (polar tilt, energy) keep only
 # the azimuth with the highest spectral peak. False -> show every azimuth.
@@ -51,106 +67,108 @@ def default_settings():
 # Each entry is the geometry + energy grids for one material's full sweep. Keep
 # the line grid fine + narrow (the expensive coherent lines top out at a few keV)
 # and the brem grid coarse + WIDE (out to the beam energy) -- see sweep.
-_MATERIAL_GRIDS = {
+_MATERIAL_GRIDS: dict[str, MaterialGrid] = {
     # Thickness study: total flux + CXR/brem ratio vs thickness at a few key
     # tilts (negative = entrance-toward-detector = high flux). Single azimuth
     # (pitch plane) and single energy so plot_metric_vs(x="thickness_ang",
     # hue="tilt_deg") has nothing to silently collapse -- one clean curve per tilt.
     # For an energy comparison instead, add 40 to energy_keV and use hue="E0_keV".
-    "hopg": dict(
-        thickness_ang=np.logspace(np.log10(0.1e4), np.log10(30e4), 40, endpoint=True),  # 0.1-30 um
-        energy_keV=[30],
-        tilt_deg=np.linspace(-89.9, -5, 10, endpoint=True),
-        tilt_azim_deg=0.0,
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 30.0),
-    ),
-    "diamond": dict(
-        thickness_ang=10e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89.9, 89.9, 60, endpoint=True),
-        tilt_azim_deg=np.linspace(-89.9, -0.1, 30, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 30.0),
-    ),
-    "silicon": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 40, endpoint=True),
-        tilt_azim_deg=np.linspace(-89, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),  # (was a stray 1-tuple in the nb)
-        E_grid_brem=np.arange(0.0, 60000.0, 30.0),
-    ),
-    "mose2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 40, endpoint=True),
-        tilt_azim_deg=np.linspace(-89, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 30.0),
-    ),
-    "wse2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 30, endpoint=True),
-        tilt_azim_deg=np.linspace(-85, -0.1, 15),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 25.0),
-    ),
-    "mote2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 40, endpoint=True),
-        tilt_azim_deg=np.linspace(-89, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 25.0),
-    ),
-    "ptse2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 40, endpoint=True),
-        tilt_azim_deg=np.linspace(-89, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 25.0),
-    ),
-    "hfse2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 40, endpoint=True),
-        tilt_azim_deg=np.linspace(-89, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 30.0),
-    ),
-    "zrse2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 50, endpoint=True),
-        tilt_azim_deg=np.linspace(-89, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 25.0),
-    ),
-    "ws2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 30, endpoint=True),
-        tilt_azim_deg=np.linspace(-85, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 3500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 25.0),
-    ),
-    "mos2": dict(
-        thickness_ang=1e4,
-        energy_keV=[30, 45, 60],
-        tilt_deg=np.linspace(-89, 89, 60, endpoint=True),
-        tilt_azim_deg=np.linspace(-85, -0.1, 15, endpoint=True),
-        E_grid_line=np.arange(50.0, 4500.0, 1.0),
-        E_grid_brem=np.arange(0.0, 60000.0, 25.0),
-    ),
+    "hopg": {
+        "thickness_ang": np.logspace(
+            np.log10(0.1e4), np.log10(30e4), 40, endpoint=True
+        ),  # 0.1-30 um
+        "energy_keV": [30],
+        "tilt_deg": np.linspace(-89.9, -5, 10, endpoint=True),
+        "tilt_azim_deg": 0.0,
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 30.0),
+    },
+    "diamond": {
+        "thickness_ang": 10e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89.9, 89.9, 60, endpoint=True),
+        "tilt_azim_deg": np.linspace(-89.9, -0.1, 30, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 30.0),
+    },
+    "silicon": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 40, endpoint=True),
+        "tilt_azim_deg": np.linspace(-89, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),  # (was a stray 1-tuple in the nb)
+        "E_grid_brem": np.arange(0.0, 60000.0, 30.0),
+    },
+    "mose2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 40, endpoint=True),
+        "tilt_azim_deg": np.linspace(-89, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 30.0),
+    },
+    "wse2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 30, endpoint=True),
+        "tilt_azim_deg": np.linspace(-85, -0.1, 15),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 25.0),
+    },
+    "mote2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 40, endpoint=True),
+        "tilt_azim_deg": np.linspace(-89, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 25.0),
+    },
+    "ptse2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 40, endpoint=True),
+        "tilt_azim_deg": np.linspace(-89, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 25.0),
+    },
+    "hfse2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 40, endpoint=True),
+        "tilt_azim_deg": np.linspace(-89, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 30.0),
+    },
+    "zrse2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 50, endpoint=True),
+        "tilt_azim_deg": np.linspace(-89, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 25.0),
+    },
+    "ws2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 30, endpoint=True),
+        "tilt_azim_deg": np.linspace(-85, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 3500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 25.0),
+    },
+    "mos2": {
+        "thickness_ang": 1e4,
+        "energy_keV": [30, 45, 60],
+        "tilt_deg": np.linspace(-89, 89, 60, endpoint=True),
+        "tilt_azim_deg": np.linspace(-85, -0.1, 15, endpoint=True),
+        "E_grid_line": np.arange(50.0, 4500.0, 1.0),
+        "E_grid_brem": np.arange(0.0, 60000.0, 25.0),
+    },
 }
 
 MATERIALS = tuple(_MATERIAL_GRIDS)
 
 
-def material_grid(material):
+def material_grid(material) -> MaterialGrid:
     """The raw per-material grid dict (thickness, energies, tilt sweeps, grids)."""
     if material not in _MATERIAL_GRIDS:
         raise ValueError(f"unknown material {material!r} (have {list(_MATERIAL_GRIDS)})")
@@ -161,9 +179,8 @@ def material_sweep(material, *, theta_obs_deg=90.0, **overrides):
     """The full parametric :class:`sweep.Sweep` for ``material`` (the geometry
     the runner scans and the viz notebook reduces). ``overrides`` replace any grid
     field, e.g. ``material_sweep("ptse2", thickness_ang=2e4)``."""
-    p: dict[str, Any] = dict(material_grid(material))
-    p.update(overrides)
-    return Sweep(material=material, theta_obs_deg=theta_obs_deg, **p)
+    sweep = Sweep(material=material, theta_obs_deg=theta_obs_deg, **material_grid(material))
+    return replace(sweep, **overrides) if overrides else sweep
 
 
 def trajectory_sweep(material, *, n_tilts=9, energies=(30, 60), tilt_span=80.0):
@@ -171,7 +188,7 @@ def trajectory_sweep(material, *, n_tilts=9, energies=(30, 60), tilt_span=80.0):
     handful of polar tilts at normal azimuth, two beam energies (transport only,
     so the energy grids are irrelevant -- kept for build_cases). ``n_tilts`` panels
     span +-``tilt_span`` degrees."""
-    p: dict[str, Any] = dict(material_grid(material))
+    p = material_grid(material)
     return Sweep(
         material=material,
         thickness_ang=p["thickness_ang"],

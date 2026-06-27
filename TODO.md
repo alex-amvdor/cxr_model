@@ -49,9 +49,3 @@ on `main` once the branch exists.
    useful-but-rough ones, remove the extraneous.
 3. **Notebook/repo reorg.** Move root analysis/scan/export notebooks + scripts into
    `src/cxr_mc/` or new subdirs; consider a `src/` restructure and re-triage if so.
-4. **USER ADD: Audit git commit process.** ruff, ruff-format, nbqa-ruff, nbstripout.
-   User manually added error/typechecking ignores to pyproject.toml to force commits
-   to pass. Edit pyproject.toml to ignore only truly trivial matters, analyze repo to
-   get commits to pass with correct ruleset. Also, investigate why user's VS Code
-   git GUI interface refuses to commit (can only commit via commandline) --
-   VS Code dialogue window opens to report "`pre-commit` not found.  Did you forget to activate your virtualenv?"

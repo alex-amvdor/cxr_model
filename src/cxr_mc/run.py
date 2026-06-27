@@ -26,6 +26,7 @@ import os
 import pickle
 import time
 from collections import defaultdict
+from functools import partial
 
 from .montecarlo import run_cases
 from .results import store_result
@@ -34,6 +35,18 @@ from .results import store_result
 def checkpoint_path_for(material, checkpoint_dir="checkpoints"):
     """Path to the per-material results checkpoint run_sweep writes."""
     return os.path.join(checkpoint_dir, f"{material}.pkl")
+
+
+def _checkpoint_save(checkpoint_path, results):
+    """Atomically pickle ``results`` to ``checkpoint_path``: write a sibling
+    ``.tmp`` then ``os.replace`` it into place. The replace is atomic on a single
+    filesystem, so a crash/OOM mid-write never leaves a half-written ``.pkl`` --
+    the old checkpoint survives intact and the run stays resumable. Shared by
+    :func:`run_sweep` (per-config crash-safe saves) and :func:`repair_checkpoint`."""
+    tmp = checkpoint_path + ".tmp"
+    with open(tmp, "wb") as f:
+        pickle.dump(results, f)
+    os.replace(tmp, checkpoint_path)
 
 
 def load_checkpoint(material, checkpoint_dir="checkpoints"):
@@ -121,8 +134,7 @@ def run_sweep(
         """Pickle just THIS material's configs -- ``results`` may also hold other
         materials run earlier in the same kernel, which belong in their own pkl."""
         subset = {n: results[n] for n in results if _crystal_of(results[n]) == material}
-        with open(checkpoint_path, "wb") as f:
-            pickle.dump(subset, f)
+        _checkpoint_save(checkpoint_path, subset)
 
     if resume and os.path.exists(checkpoint_path):
         with open(checkpoint_path, "rb") as f:
@@ -284,12 +296,7 @@ def repair_checkpoint(checkpoint_path, save_every=100, **kw):
     with open(checkpoint_path, "rb") as f:
         results = pickle.load(f)
 
-    def _save(res):
-        tmp = checkpoint_path + ".tmp"
-        with open(tmp, "wb") as f:
-            pickle.dump(res, f)
-        os.replace(tmp, checkpoint_path)  # atomic: never leaves a half-written pkl
-
-    n = repair_brem_wide(results, save_every=save_every, save_cb=_save, **kw)
+    save_cb = partial(_checkpoint_save, checkpoint_path)  # atomic; resumable on crash
+    n = repair_brem_wide(results, save_every=save_every, save_cb=save_cb, **kw)
     print(f"re-saved {checkpoint_path}" if n else "checkpoint unchanged")
     return results
