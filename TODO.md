@@ -28,19 +28,11 @@ on `main` once the branch exists.
 
 ## P2 — medium (experiment match + usability)
 
-1. **pyelsepa / ELSEPA transport.** → `feature/elsepa-port` (supersedes the now-stale
-   `feature/elsepa-transport`, safe to delete). Adapter landed + **validated** (C 2.19%,
+1. **pyelsepa / ELSEPA transport.** → `feature/elsepa-port` Adapter landed + **validated** (C 2.19%,
    Si 4.42% max rel vs NIST); image now builds tarball-free from
    `github.com/eScatter/elsepa`. Remaining gate: the image/venv live outside the repo
    (`C:/dev/pyelsepa`), so the driver stays gated in CI. Tied to P2 #2.
-2. **eScatter/cstool/Nebula investigation.** → `feature/cstool-nebula-eval`.
-   **EVALUATED — do not adopt** ([`docs/cstool-nebula-evaluation.md`](docs/cstool-nebula-evaluation.md)).
-   Nebula/cstool's Penn-dielectric inelastic + secondary-electron cascade serve
-   SE-yield/SEM imaging (orthogonal observable) and sit mostly below the 5 keV radiating
-   cutoff; the one in-band gap (energy-loss straggling) is ≲10 eV vs ~130 eV detector
-   resolution; the elastic-accuracy win is already delivered by P2 #1. Mott/CSDA is enough.
-   Cheap Bohr/Landau straggling term is the fallback if a measured line width ever demands it.
-3. **Polars investigation.** Evaluate Polars for packaging large parameter-sweep metadata.
+2. **Polars investigation.** Evaluate Polars for packaging large parameter-sweep metadata.
 
 ## P3 — lower / exploratory
 

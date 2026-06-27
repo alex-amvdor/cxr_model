@@ -23,7 +23,6 @@ this module is cheap to import and test.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import product
-from typing import Union
 
 import numpy as np
 
@@ -53,7 +52,7 @@ MATERIAL_LABELS = {
     "silicon": "silicon",
 }
 
-ScalarOrSeq = Union[float, Sequence[float], np.ndarray]
+ScalarOrSeq = float | Sequence[float] | np.ndarray
 
 
 def fmt_thickness(t_ang):

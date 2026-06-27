@@ -88,15 +88,10 @@ select = [
     "B",   # bugbear (real bugs, not stylistic nitpicks)
 ]
 
-# suppress high-noise / low-value rules from your current output
 ignore = [
-    "E501",
-    "E402",   # <-- THIS is the one causing your notebook + module failures
-    "B008",
-    "SIM108",
-    "SIM115",
-    "UP007",  # optional if you don't want typing churn
-    "UP038",  # optional (numpy isinstance suggestions)
+    "E501",  # long lines in physics formulas/comments
+    "E402",  # import-not-at-top — notebook cells have docstrings before imports
+    "B008",  # np.deg2rad() in default args — pure math call, not a real bug
 ]
 
 [tool.ruff.format]
