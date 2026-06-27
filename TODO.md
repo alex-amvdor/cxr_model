@@ -33,12 +33,13 @@ on `main` once the branch exists.
    Si 4.42% max rel vs NIST); image now builds tarball-free from
    `github.com/eScatter/elsepa`. Remaining gate: the image/venv live outside the repo
    (`C:/dev/pyelsepa`), so the driver stays gated in CI. Tied to P2 #2.
-2. **USER ADD: eScatter/cstool/Nebula investigation.** Evaluate merits of robustness,
-   accuracy improvement, repo simplification, and any other critical items for a potential
-   move to use of one or more of the listed libraries/tools. In particular, evaluate if the
-   added physics of the Penn dielectric fxn, tracking secondary electrons, etc., is worth
-   the added compute, or if the Mott/partial dirac/CSDA is enough. This item is tied
-   intimately related to TODO #P2-1, above.
+2. **eScatter/cstool/Nebula investigation.** → `feature/cstool-nebula-eval`.
+   **EVALUATED — do not adopt** ([`docs/cstool-nebula-evaluation.md`](docs/cstool-nebula-evaluation.md)).
+   Nebula/cstool's Penn-dielectric inelastic + secondary-electron cascade serve
+   SE-yield/SEM imaging (orthogonal observable) and sit mostly below the 5 keV radiating
+   cutoff; the one in-band gap (energy-loss straggling) is ≲10 eV vs ~130 eV detector
+   resolution; the elastic-accuracy win is already delivered by P2 #1. Mott/CSDA is enough.
+   Cheap Bohr/Landau straggling term is the fallback if a measured line width ever demands it.
 3. **Polars investigation.** Evaluate Polars for packaging large parameter-sweep metadata.
 
 ## P3 — lower / exploratory
