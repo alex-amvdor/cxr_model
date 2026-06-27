@@ -2,7 +2,7 @@
 
 Items live on `feature/…` / `bugfix/…` / `docs/…` branches, not `main`, until finished.
 Full detail for an in-progress item lives on its branch (or its design doc);
-`main` keeps only a one-line summary + pointer, enforced by /docs:todo-slim.
+`main` keeps only a one-line summary + pointer, enforced by /docs:todo-sync.
 Priorities weigh value-to-goal (line-flux / enhancement predictions + the publication's validation story)
 against effort and risk.
 
@@ -13,7 +13,9 @@ Item generation:
 2. Overwrite branch TODO.md with concise, 2-3 sentence problem summary + implementation path, scoped only to the relevant item, then publish to `origin`
 3. Move to `main`, create 1 sentence summary of new item, then triage into existing TODO.md items and push tightly scoped `docs(todo)` commit to main
 
-**NOTE:** If user has directly written a detailed item summary into `TODO.md` on main, , removing detailed item info from `main` once branch has been created
+**NOTE:** If the user has written a detailed item summary directly into `TODO.md` on
+main, fold it into a branch (steps 1–2 above), then slim it back to a one-line summary
+on `main` once the branch exists.
 
 ## P1 — high value (physics accuracy + publication validation)
 
@@ -26,8 +28,11 @@ Item generation:
 
 ## P2 — medium (experiment match + usability)
 
-1. **USER EDIT: pyelsepa / ELSEPA transport.** → `feature/elsepa-transport`.
-   Gated on installing eScatter/cslib/pint for validation.
+1. **pyelsepa / ELSEPA transport.** → `feature/elsepa-port` (supersedes the now-stale
+   `feature/elsepa-transport`, safe to delete). Adapter landed + **validated** (C 2.19%,
+   Si 4.42% max rel vs NIST); image now builds tarball-free from
+   `github.com/eScatter/elsepa`. Remaining gate: the image/venv live outside the repo
+   (`C:/dev/pyelsepa`), so the driver stays gated in CI. Tied to P2 #2.
 2. **USER ADD: eScatter/cstool/Nebula investigation.** Evaluate merits of robustness,
    accuracy improvement, repo simplification, and any other critical items for a potential
    move to use of one or more of the listed libraries/tools. In particular, evaluate if the
