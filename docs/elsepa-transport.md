@@ -57,12 +57,12 @@ without Docker.
 
 All three gates are now clear:
 
-1. **`elsepa` Docker image — BUILT.** ✅ The paywalled `adus_v1_0.tar.gz` source is
-   in `C:/dev/pyelsepa/docker`. The upstream `Dockerfile` (`FROM debian:8`) fails —
-   jessie's apt repos are EOL (404). Use the modernized build:
-   `docker build -f Dockerfile.modern -t elsepa C:/dev/pyelsepa/docker`
-   (`Dockerfile.modern`: `debian:12` + `gfortran -O3 -std=legacy` for the F77;
-   checked into `C:/dev/pyelsepa/docker/Dockerfile.modern`).
+1. **`elsepa` Docker image — BUILT.** ✅ Source is now pulled directly from
+   `github.com/eScatter/elsepa` (Apache-2.0) — no tarball needed. Build:
+   `docker build -f C:/dev/pyelsepa/docker/Dockerfile.modern -t elsepa C:/dev/pyelsepa/docker`
+   (`Dockerfile.modern`: `debian:12` + `ca-certificates` + `gfortran -O3 -std=legacy`;
+   sets `ENV ELSEPA_DATA=/opt/elsepa` so the binary resolves its atomic data files).
+   Checked into `C:/dev/pyelsepa/docker/Dockerfile.modern`.
 2. **Docker** — present (29.x). ✅
 3. **`pyelsepa` isolated venv — works with patches.** ✅ Build in a *separate* venv
    (never install into the cxr-mc venv — pyelsepa's ancient pins wreck the stack).
