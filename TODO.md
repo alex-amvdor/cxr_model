@@ -1,41 +1,37 @@
-# TODO / Backlog
+# TODO — feature/elsepa-port
 
-Items live on `feature/…` / `patch/…` branches, not `main`, until finished.
-Full detail for an in-progress item lives on its branch (or its design doc);
-`main` keeps only a one-line summary + pointer. Priorities weigh value-to-goal
-(line-flux / enhancement predictions + the publication's validation story)
-against effort and risk.
+This branch carries one backlog item; the full triaged backlog lives on `main`.
+(Supersedes the older `feature/elsepa-transport`, which predates the
+`cxr_model`→`cxr_mc` rename + the `montecarlo` package split.)
 
-## P1 — high value (physics accuracy + publication validation)
+## pyelsepa / ELSEPA transport (P2)
 
-1. **Crystal mosaicity — measured-data validation.** MC route implemented; validate
-   broadened line widths vs. a measured HOPG rocking-curve / EDS dataset
-   (data-dependent). Design: [`docs/crystal-mosaicity.md`](docs/crystal-mosaicity.md).
-2. **Multilayer film-on-substrate — measured-data validation.** Model implemented;
-   validate vs. a measured film-on-substrate dataset (data-dependent). Design:
-   [`docs/multilayer-materials.md`](docs/multilayer-materials.md).
+*EVALUATED; adapter landed, image now buildable, validation reproduced.*
 
-## P2 — medium (experiment match + usability)
+Evaluate replacing the hardcoded NIST Mott transport tables in
+`src/cxr_mc/data/mott_transport_cross_sections/` with on-demand ELSEPA
+([github.com/eScatter/pyelsepa](https://github.com/eScatter/pyelsepa), checked out at
+`C:\dev\pyelsepa`). NB: *electron*-scattering data — separate from the xraydb (photon)
+migration; xraydb cannot supply it.
 
-3. **pyelsepa / ELSEPA transport.** → `feature/elsepa-transport`. Adapter landed;
-   gated on building the `elsepa` docker image (paywalled Fortran source acquired).
+**Done:**
+- `dev/elsepa_tables.py` — drop-in adapter (writer/reader/compare are pure +
+  unit-tested against the real `_load_mott_transport`; a gated
+  `elsepa_transport_cross_section` driver runs ELSEPA via pyelsepa).
+- Build is now **tarball-free**: `pyelsepa/docker/Dockerfile.modern` clones
+  `github.com/eScatter/elsepa` (Apache-2.0) instead of the paywalled
+  `adus_v1_0.tar.gz`; isolated venv at `C:/dev/pyelsepa/elsepa-venv` built + patched.
+- **Validation reproduced** vs NIST: C (Z=6) 2.19% max rel, Si (Z=14) 4.42% max rel.
+  Full recipe + results in [`docs/elsepa-transport.md`](docs/elsepa-transport.md).
 
-## P3 — lower / exploratory
+**Remaining (why this branch stays open):**
+- The `elsepa` image/venv live outside the repo (`C:/dev/pyelsepa`) and can't be
+  reproduced in CI — the driver stays gated behind an actionable error; the NIST
+  tables + analytic screened-Rutherford fallback remain in force at runtime.
+- Extend table regeneration to elements with no NIST table (e.g. W, currently on the
+  SR fallback).
+- Decide whether to wire the adapter in at all, vs. keep it as offline tooling.
+- `claude_WIP.txt` is a working scratchpad — strip before any merge to `main`.
 
-4. **jupyter → marimo (+ matplotlib → altair).** → `feature/marimo-transfer`.
-   Improve data viz/interactivity; Altair spectrum renderer is the first slice.
-5. **Grazing-incidence soft X-ray diffraction grating.** → `feature/grazing-grating`.
-   Dispersion scaffold implemented; next is grating reflectivity + detected-image model.
-
-## PA — meta / cleanup
-
-6. **Repo ownership & name change.** `cxr_model` → `cxr-mc` DONE; awaiting GitHub
-   admin permissions (standing reminder, no code action).
-7. **Agent skill & command review.** Triage project-specific skills/commands; fix the
-   useful-but-rough ones, remove the extraneous.
-8. **Notebook/repo reorg.** Move root analysis/scan/export notebooks + scripts into
-   `src/cxr_mc/` or new subdirs; consider a `src/` restructure and re-triage if so.
-9. **Polars investigation.** Evaluate Polars for packaging large parameter-sweep metadata.
-10. **TODO formatting convention.** `main` carries minimal summaries; full detail lives
-    on the item's branch, slimmed to only that branch's task. (This file follows it.)
-    Enforced by the `/docs:todo-sync` command.
+NB: pyelsepa depends on **Pint** — a data point for the units-evaluation backlog item
+on `main`, and tied to P2 #2 (eScatter/cstool/Nebula investigation).
